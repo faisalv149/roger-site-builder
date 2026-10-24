@@ -79,7 +79,7 @@ export interface PublishRecord {
   publishedAt: string;
 }
 
-type Collection = 'builds' | 'conversations' | 'publishes';
+type Collection = 'builds' | 'conversations' | 'publishes' | 'leads';
 
 // One tiny document store, two backends: JSON files (local) or Redis keys "<collection>:<id>" (Vercel).
 const docs = {
@@ -175,4 +175,15 @@ export async function savePublish(p: PublishRecord) {
 
 export async function getPublish(slug: string): Promise<PublishRecord | undefined> {
   return /^[a-z0-9-]{1,100}$/.test(slug) ? docs.get<PublishRecord>('publishes', slug) : undefined;
+}
+
+/** A quote-form submission from a generated site */
+export interface Lead { slug: string; at: string; name: string; phone: string; email?: string; zip?: string; service?: string; message?: string; page?: unknown }
+
+export async function saveLead(lead: Lead) {
+  await docs.put('leads', `${lead.slug}--${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, lead);
+}
+
+export async function listLeads(slug: string): Promise<Lead[]> {
+  return (await docs.list<Lead>('leads')).filter((l) => l.slug === slug).sort((a, b) => b.at.localeCompare(a.at));
 }

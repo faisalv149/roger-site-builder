@@ -10,7 +10,7 @@ import { searchCandidates } from './sources/places.js';
 import { confirmBusinessCard } from './imessage/cards.js';
 import { runAudit, type BuildInput } from './pipeline.js';
 import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
-import { getBuild, getConversation, listBuilds, listConversations } from './store.js';
+import { getBuild, getConversation, listBuilds, listConversations, listLeads, saveLead } from './store.js';
 import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { publishEnabled, publishSite } from './publish.js';
@@ -34,10 +34,12 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 // ── password (STUDIO_PASSWORD) on the Studio, the API and the iMessage page. Generated sites, cards, reports and
 // stock images stay public (owners, site visitors and iMessage link previews fetch them), as do the lead form
 // endpoint the sites post to and the health check the host pings.
-const OPEN = /^\/(sites|cards|reports|stock|demo-sites)\/|^\/api\/(leads\/|health$)/;
+const OPEN = /^\/(sites|cards|reports|stock|demo-sites)\/|^\/api\/health$/;
+// sites post their quote form here from any origin; reading leads (GET) still needs the password
+const isLeadPost = (req: Request) => /^\/api\/leads\/[^/]+$/.test(req.path) && (req.method === 'POST' || req.method === 'OPTIONS');
 const sha = (s: string) => createHash('sha256').update(s).digest();
 app.use((req, res, next) => {
-  if (!config.studioPassword || OPEN.test(req.path)) return next();
+  if (!config.studioPassword || OPEN.test(req.path) || isLeadPost(req)) return next();
   const [scheme, b64] = (req.headers.authorization || '').split(' ');
   const given = scheme === 'Basic' && b64 ? Buffer.from(b64, 'base64').toString('utf8') : '';
   if (given && timingSafeEqual(sha(given), sha(`${config.studioUser}:${config.studioPassword}`))) return next();
@@ -177,18 +179,16 @@ app.post('/api/leads/:slug', wrap(async (req, res) => {
   if (b.company_website) return res.json({ ok: true }); // honeypot
   if (!b.name || !b.phone) return res.status(400).json({ error: 'name and phone are required' });
   const lead = { slug, at: new Date().toISOString(), name: String(b.name).slice(0, 120), phone: String(b.phone).slice(0, 40), email: b.email ? String(b.email).slice(0, 160) : undefined, zip: b.zip ? String(b.zip).slice(0, 10) : undefined, service: b.service ? String(b.service).slice(0, 120) : undefined, message: b.message ? String(b.message).slice(0, 2000) : undefined, page: b.page };
-  const dir = path.join(config.dirs.data, 'leads');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.appendFileSync(path.join(dir, `${slug}.jsonl`), `${JSON.stringify(lead)}\n`);
-  if (config.leadWebhook) fetch(config.leadWebhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead) }).catch((e) => console.warn('[lead webhook]', e.message));
+  await saveLead(lead); // data/leads locally, Supabase/Redis on Vercel
+  // awaited (with a timeout): on Vercel the function may stop right after the response
+  if (config.leadWebhook) await fetch(config.leadWebhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead), signal: AbortSignal.timeout(8000) }).catch((e) => console.warn('[lead webhook]', e.message));
   if (req.is('application/json')) return res.json({ ok: true });
   res.redirect(303, `${String(req.get('referer') || `/sites/${slug}/`).split('#')[0]}#quote`);
 }));
-app.get('/api/leads/:slug', (req, res) => {
-  const f = path.join(config.dirs.data, 'leads', `${req.params.slug.replace(/[^a-z0-9-]/g, '')}.jsonl`);
-  const leads = fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
-  res.json({ leads });
-});
+// reading leads (names, phone numbers) needs the Studio password; only sending one is open
+app.get('/api/leads/:slug', wrap(async (req, res) => {
+  res.json({ leads: await listLeads(String(req.params.slug).replace(/[^a-z0-9-]/g, '')) });
+}));
 
 // ── iMessage reference flow (your gateway posts inbound texts here) ──
 app.post('/api/imessage/inbound', wrap(async (req, res) => {
