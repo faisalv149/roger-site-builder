@@ -18,7 +18,7 @@ import { estimateBuild } from './estimate.js';
 import { publishEnabled, publishSite } from './publish.js';
 import { readOut } from './files.js';
 import { remote } from './remote.js';
-import { claudeEnabled, claudeVia } from './content/claude.js';
+import { claudeEnabled, claudeKeyStatus, claudeVia } from './content/claude.js';
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
@@ -70,7 +70,7 @@ app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
 
 // ── meta ──
 app.get('/api/health', wrap(async (_req, res) => {
-  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', fonts: await textRendering() });
+  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', fonts: await textRendering(), claudeKey: claudeVia() === 'api' ? await claudeKeyStatus() : undefined });
 }));
 // how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
 app.get('/api/estimate', (req, res, next) => {

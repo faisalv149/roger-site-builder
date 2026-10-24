@@ -21,6 +21,18 @@ function cliAvailable() {
 export const claudeVia = (): 'api' | 'cli' | null => (config.anthropicKey ? 'api' : config.claudeCli && cliAvailable() ? 'cli' : null);
 export const claudeEnabled = () => claudeVia() !== null;
 
+let keyCheck: Promise<'ok' | 'invalid key' | 'unknown model' | 'unreachable'> | null = null;
+/** API key works and the model exists? One free model-info call per server instance (no tokens). For /api/health. */
+export function claudeKeyStatus() {
+  keyCheck ||= fetch(`https://api.anthropic.com/v1/models/${encodeURIComponent(config.anthropicModel)}`, {
+    headers: { 'x-api-key': config.anthropicKey, 'anthropic-version': '2023-06-01' },
+    signal: AbortSignal.timeout(10_000),
+  }).then((r) => (r.ok ? 'ok' as const : r.status === 401 || r.status === 403 ? 'invalid key' as const : r.status === 404 ? 'unknown model' as const : 'unreachable' as const))
+    .catch(() => 'unreachable' as const)
+    .then((s) => { if (s === 'unreachable') keyCheck = null; return s; }); // retry next time if it was the network
+  return keyCheck;
+}
+
 function getClient() {
   if (!client) client = new Anthropic({ apiKey: config.anthropicKey, timeout: 60_000, maxRetries: 1 });
   return client;
