@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9CC3E6"/><stop offset="1" stop-color="#E7F0F7"/></linearGradient>
+  <linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient></defs>
+  <rect width="1920" height="1080" fill="url(#s)"/><circle cx="1497.6000000000001" cy="216" r="75.60000000000001" fill="#FFFFFF" opacity=".55"/><path d="M0 777.6 Q 480 691.2 960 756 T 1920 723.6 V 1080 H 0 Z" fill="#6B8F5A"/>
+    <rect x="537.6" y="453.6" width="806.4" height="324" fill="#E9D8C4"/>
+    <rect x="634.368" y="576.72" width="129.024" height="84.24000000000001" fill="#3A2A24" opacity=".55"/>
+    <rect x="1118.208" y="576.72" width="129.024" height="84.24000000000001" fill="#3A2A24" opacity=".55"/>
+    <rect x="884.3520000000001" y="615.6" width="112.896" height="162" fill="#3A2A24" opacity=".75"/><polygon points="473.088,453.6 940.8,194.40000000000003 1408.5120000000002,453.6" fill="#8C3B2A"/><line x1="873.9839999999999" y1="231.42857142857144" x2="1007.616" y2="231.42857142857144" stroke="#3A2A24" stroke-opacity=".25" stroke-width="4.8"/><line x1="807.168" y1="268.4571428571429" x2="1074.432" y2="268.4571428571429" stroke="#3A2A24" stroke-opacity=".25" stroke-width="4.8"/><line x1="740.352" y1="305.4857142857143" x2="1141.2479999999998" y2="305.4857142857143" stroke="#3A2A24" stroke-opacity=".25" stroke-width="4.8"/><line x1="673.5360000000001" y1="342.51428571428573" x2="1208.0639999999999" y2="342.51428571428573" stroke="#3A2A24" stroke-opacity=".25" stroke-width="4.8"/><line x1="606.72" y1="379.5428571428572" x2="1274.8799999999999" y2="379.5428571428572" stroke="#3A2A24" stroke-opacity=".25" stroke-width="4.8"/><line x1="539.904" y1="416.5714285714286" x2="1341.696" y2="416.5714285714286" stroke="#3A2A24" stroke-opacity=".25" stroke-width="4.8"/>
+  <rect width="1920" height="1080" fill="url(#v)"/>
+  <text x="1896" y="1058" text-anchor="end" font-family="Arial, sans-serif" font-size="27" fill="#fff" opacity=".7">Placeholder image</text>
+</svg>

@@ -1,0 +1,469 @@
+{
+  "meta": {
+    "name": "HVAC \u00b7 Work Showcase",
+    "vertical": "hvac",
+    "variant": "showcase",
+    "description": "Proof of work first: wide asymmetric grid, split hero, mixed-size gallery, no rounded corners.",
+    "schemaVersion": 2,
+    "previewImage": "/themes/hvac-showcase.png"
+  },
+  "match": {
+    "googleTypes": [
+      "hvac_contractor",
+      "heating_contractor",
+      "air_conditioning_contractor"
+    ]
+  },
+  "fontPairs": [
+    {
+      "id": "sturdy",
+      "label": "Classic serif",
+      "heading": "Georgia, 'Times New Roman', serif",
+      "body": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    },
+    {
+      "id": "modern",
+      "label": "Editorial serif",
+      "heading": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+      "body": "'Helvetica Neue', Helvetica, Arial, sans-serif"
+    },
+    {
+      "id": "friendly",
+      "label": "Rounded friendly",
+      "heading": "ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'Trebuchet MS', sans-serif",
+      "body": "'Trebuchet MS', 'Segoe UI', Tahoma, sans-serif"
+    }
+  ],
+  "defaultPair": "modern",
+  "fontFaces": [],
+  "type": {
+    "scale": {
+      "xs": 13,
+      "sm": 15,
+      "md": 17,
+      "lg": 20,
+      "xl": 26,
+      "2xl": 34,
+      "3xl": 44,
+      "4xl": {
+        "phone": 40,
+        "desktop": 60
+      }
+    },
+    "measure": 65,
+    "bodyWeight": 400,
+    "headingWeight": 500,
+    "headingCase": "none",
+    "headingTracking": "-0.01em",
+    "lineHeight": {
+      "heading": 1.15,
+      "body": 1.6
+    }
+  },
+  "palette": {
+    "brand": "#1D4ED8",
+    "ink": "#14202B",
+    "inkMuted": "#4A5968",
+    "surface": "#FFFFFF",
+    "surfaceAlt": "#EEF2FA"
+  },
+  "derive": {
+    "space": "oklch",
+    "tints": [
+      97,
+      94,
+      90
+    ],
+    "shades": [
+      45,
+      35,
+      25
+    ],
+    "brandInkAuto": true,
+    "minButtonContrast": 4.5
+  },
+  "overlayAlpha": 0.45,
+  "overlayStyle": "gradient-left",
+  "brandColor": {
+    "source": [
+      "logo",
+      "website",
+      "default"
+    ],
+    "rejectNearGray": true,
+    "rejectNeon": true,
+    "minChroma": 0.04,
+    "maxChroma": 0.3,
+    "darkenUntilContrast": true
+  },
+  "logo": {
+    "placement": "header-left",
+    "maxHeight": {
+      "phone": 36,
+      "desktop": 48
+    },
+    "band": "surface",
+    "padding": 8,
+    "fallback": "wordmark",
+    "wordmark": {
+      "font": "heading",
+      "case": "title",
+      "maxLines": 2,
+      "color": "brand"
+    }
+  },
+  "grid": {
+    "system": "asymmetric-12",
+    "columns": 12,
+    "maxWidth": 1440,
+    "gutter": 32,
+    "margin": {
+      "phone": 16,
+      "desktop": 64
+    }
+  },
+  "spacing": {
+    "scale": [
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64
+    ],
+    "sectionY": {
+      "phone": 56,
+      "desktop": 120
+    },
+    "density": "spacious"
+  },
+  "radius": {
+    "sm": 0,
+    "md": 0,
+    "lg": 0
+  },
+  "shadow": {
+    "card": "none"
+  },
+  "buttons": {
+    "primary": {
+      "fill": "brand",
+      "ink": "brand-ink",
+      "border": "none",
+      "radius": "sm",
+      "height": 48,
+      "case": "none",
+      "weight": 500
+    },
+    "secondary": {
+      "fill": "transparent",
+      "ink": "brand",
+      "border": "brand",
+      "radius": "sm",
+      "height": 48,
+      "case": "none",
+      "weight": 500
+    },
+    "minTapTarget": 44,
+    "focusRing": "2px solid shade-1"
+  },
+  "icons": {
+    "set": "lucide",
+    "stroke": 1.75,
+    "size": 24,
+    "color": "brand",
+    "style": "outline"
+  },
+  "images": {
+    "hero": {
+      "ratio": {
+        "phone": "4:5",
+        "desktop": "16:9"
+      },
+      "fit": "cover"
+    },
+    "gallery": {
+      "ratio": "4:3",
+      "fit": "cover"
+    },
+    "minWidth": 800,
+    "minHeight": 600,
+    "maxGallery": 9,
+    "rejectTextHeavy": true,
+    "maxFileKb": 250
+  },
+  "motion": "subtle",
+  "colorScheme": "light",
+  "sections": [
+    "hero",
+    "gallery",
+    "proof",
+    "services",
+    "quote",
+    "area",
+    "footer"
+  ],
+  "sectionLayout": {
+    "hero": {
+      "variant": "split",
+      "split": {
+        "desktop": [
+          5,
+          7
+        ]
+      },
+      "mediaSide": "right",
+      "mediaBleed": true
+    },
+    "gallery": {
+      "variant": "bento",
+      "columns": {
+        "phone": 2,
+        "desktop": 4
+      },
+      "pattern": [
+        "2x2",
+        "1x1",
+        "1x1",
+        "2x1",
+        "1x1",
+        "1x1"
+      ]
+    },
+    "proof": {
+      "variant": "pull-quote-band",
+      "span": {
+        "desktop": 8,
+        "offset": 2
+      }
+    },
+    "services": {
+      "variant": "zigzag",
+      "split": {
+        "desktop": [
+          6,
+          6
+        ]
+      },
+      "alternate": true
+    },
+    "quote": {
+      "variant": "split",
+      "split": {
+        "desktop": [
+          5,
+          7
+        ]
+      },
+      "formSide": "right"
+    },
+    "area": {
+      "variant": "split-list",
+      "split": {
+        "desktop": [
+          4,
+          8
+        ]
+      }
+    },
+    "footer": {
+      "variant": "minimal-two-col",
+      "columns": {
+        "phone": 1,
+        "desktop": 2
+      }
+    }
+  },
+  "sectionRules": {
+    "services": {
+      "min": 3,
+      "max": 6,
+      "overflowLink": "Ask about other services"
+    },
+    "proof": {
+      "minRating": 4.0,
+      "minReviews": 5,
+      "showQuotes": true,
+      "maxQuotes": 2,
+      "maxQuoteChars": 160
+    },
+    "gallery": {
+      "minPhotos": 3
+    },
+    "area": {
+      "showMap": true,
+      "maxPlaces": 8
+    },
+    "hours": {
+      "showOpenNow": true,
+      "format": "week"
+    }
+  },
+  "copy": {
+    "hero": "Heating and air conditioning in {city}",
+    "subline": "Heating, cooling and air quality service for homes in {city}. Tell us what you need.",
+    "urgent": "No heat or no AC? Call us now.",
+    "action": "Book a service call",
+    "actionKind": "form",
+    "quoteTitle": "Book a service call",
+    "sublineNoServices": "Heating, cooling and air quality service for homes in {city}.",
+    "heroNoCity": "Heating and air conditioning"
+  },
+  "placeholders": [
+    "{business}",
+    "{city}",
+    "{state}",
+    "{zip}",
+    "{rating}",
+    "{reviewCount}",
+    "{years}"
+  ],
+  "services": {
+    "defaults": [
+      {
+        "id": "ac-repair",
+        "label": "AC repair",
+        "icon": "snowflake",
+        "keywords": [
+          "ac",
+          "air conditioning",
+          "cooling"
+        ]
+      },
+      {
+        "id": "heating",
+        "label": "Heating repair",
+        "icon": "flame",
+        "keywords": [
+          "furnace",
+          "heating",
+          "heat pump"
+        ]
+      },
+      {
+        "id": "install",
+        "label": "New system installation",
+        "icon": "package",
+        "keywords": [
+          "install",
+          "replacement"
+        ]
+      },
+      {
+        "id": "maintenance",
+        "label": "Tune-ups and maintenance",
+        "icon": "wrench",
+        "keywords": [
+          "tune-up",
+          "maintenance",
+          "plan"
+        ]
+      },
+      {
+        "id": "ducts",
+        "label": "Duct cleaning and sealing",
+        "icon": "wind",
+        "keywords": [
+          "duct"
+        ]
+      },
+      {
+        "id": "iaq",
+        "label": "Indoor air quality",
+        "icon": "feather",
+        "keywords": [
+          "air quality",
+          "filter",
+          "purifier"
+        ]
+      },
+      {
+        "id": "thermostat",
+        "label": "Smart thermostats",
+        "icon": "thermometer",
+        "keywords": [
+          "thermostat"
+        ]
+      },
+      {
+        "id": "minisplit",
+        "label": "Ductless mini-splits",
+        "icon": "layout",
+        "keywords": [
+          "mini-split",
+          "ductless"
+        ]
+      },
+      {
+        "id": "emergency",
+        "label": "24/7 emergency service",
+        "icon": "phone",
+        "keywords": [
+          "emergency",
+          "24"
+        ]
+      }
+    ]
+  },
+  "trust": {
+    "max": 4,
+    "templates": {
+      "licensed": "Licensed in {state}",
+      "insured": "Fully insured",
+      "years": "{years} years serving {city}",
+      "warranty": "Workmanship warranty"
+    }
+  },
+  "roger": {
+    "stickyBar": true,
+    "headerCallButton": true,
+    "chatBubble": true,
+    "textPrefill": "Hi, I need help with my heating or AC.",
+    "consentCopy": "By submitting, you agree to receive calls and texts about your request.",
+    "previewBanner": true,
+    "footerCredit": true
+  },
+  "seo": {
+    "titlePattern": "{business} | HVAC in {city}, {state}",
+    "descriptionPattern": "{business} provides heating and air conditioning repair, installation and maintenance in {city}. Call or book a service call.",
+    "schemaType": "HVACBusiness",
+    "ogImage": "hero"
+  },
+  "locale": "en-US",
+  "stock": {
+    "hero": [
+      {
+        "url": "/stock/hvac-hero.svg",
+        "width": 1920,
+        "height": 1080,
+        "alt": "Placeholder stock photo: hvac crew",
+        "source": "stock"
+      }
+    ],
+    "gallery": [
+      {
+        "url": "/stock/hvac-1.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: hvac work 1",
+        "source": "stock"
+      },
+      {
+        "url": "/stock/hvac-2.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: hvac work 2",
+        "source": "stock"
+      },
+      {
+        "url": "/stock/hvac-3.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: hvac work 3",
+        "source": "stock"
+      }
+    ]
+  }
+}

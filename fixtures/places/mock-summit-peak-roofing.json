@@ -1,0 +1,272 @@
+{
+  "placeId": "mock-summit-peak-roofing",
+  "name": "Summit Peak Roofing",
+  "primaryType": "roofing_contractor",
+  "primaryTypeLabel": "Roofing contractor",
+  "types": [
+    "roofing_contractor",
+    "general_contractor",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "2417 S Lamar Blvd, Austin, TX 78704, USA",
+  "shortAddress": "2417 S Lamar Blvd, Austin",
+  "street": "2417 S Lamar Blvd",
+  "city": "Austin",
+  "state": "TX",
+  "zip": "78704",
+  "country": "US",
+  "lat": 30.2457,
+  "lng": -97.7801,
+  "phone": "(512) 555-0142",
+  "phoneE164": "+15125550142",
+  "website": "{{BASE}}/demo-sites/summit-peak-roofing/",
+  "mapsUrl": "https://maps.google.com/?cid=1234567890",
+  "rating": 4.8,
+  "reviewCount": 126,
+  "reviews": [
+    {
+      "author": "Maria Gonzalez",
+      "rating": 5,
+      "relativeTime": "2 weeks ago",
+      "text": "After the hail storm in March we had three leaks. Summit Peak came out the next morning, tarped the roof and handled the whole insurance claim. The new roof looks fantastic and the crew cleaned up every nail."
+    },
+    {
+      "author": "James Whitfield",
+      "rating": 5,
+      "relativeTime": "a month ago",
+      "text": "Honest inspection, no upsell. They found a flashing problem around our chimney that two other companies missed and fixed it for a fair price."
+    },
+    {
+      "author": "Priya Natarajan",
+      "rating": 5,
+      "relativeTime": "2 months ago",
+      "text": "Full roof replacement with architectural shingles. On time, on budget, and they explained the warranty clearly. Highly recommend for anyone in South Austin."
+    },
+    {
+      "author": "Tom Becker",
+      "rating": 4,
+      "relativeTime": "3 months ago",
+      "text": "Good work replacing our gutters and repairing storm damage. Scheduling took a few days longer than hoped but the quality is great."
+    },
+    {
+      "author": "Leah Kim",
+      "rating": 5,
+      "relativeTime": "5 months ago",
+      "text": "Quick leak repair before a big rain. Friendly, licensed and insured, and they sent photos of everything they fixed."
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/summit-0.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Summit Peak Roofing"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/summit-1.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Summit Peak Roofing"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/summit-2.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Summit Peak Roofing"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/summit-3.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Summit Peak Roofing"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/summit-4.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Summit Peak Roofing"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/summit-5.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Summit Peak Roofing"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/summit-6.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Summit Peak Roofing"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/summit-cust.jpg",
+      "width": 1400,
+      "height": 1050,
+      "authors": [
+        {
+          "name": "Dana R."
+        }
+      ],
+      "isOwner": false
+    },
+    {
+      "ref": "file:fixtures/places/photos/summit-flyer.jpg",
+      "width": 1200,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Summit Peak Roofing"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/summit-small.jpg",
+      "width": 480,
+      "height": 320,
+      "authors": [
+        {
+          "name": "Summit Peak Roofing"
+        }
+      ],
+      "isOwner": true
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 13,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 7:00 AM – 6:00 PM",
+      "Tuesday: 7:00 AM – 6:00 PM",
+      "Wednesday: 7:00 AM – 6:00 PM",
+      "Thursday: 7:00 AM – 6:00 PM",
+      "Friday: 7:00 AM – 6:00 PM",
+      "Saturday: 8:00 AM – 1:00 PM",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "editorialSummary": "Family-owned roofer offering repairs, replacements and storm damage restoration.",
+  "nearbyTowns": [
+    "Austin",
+    "Sunset Valley",
+    "Rollingwood",
+    "West Lake Hills",
+    "Round Rock",
+    "Pflugerville",
+    "Buda",
+    "Kyle",
+    "Cedar Park",
+    "Lakeway"
+  ],
+  "source": "mock"
+}

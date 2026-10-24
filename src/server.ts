@@ -1,0 +1,199 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import express, { type Request, type Response, type NextFunction } from 'express';
+import multer from 'multer';
+import { config } from './config.js';
+import { loadThemes, saveCustomTheme, validateTheme, getTheme } from './theme/load.js';
+import { SUPPORTED_VARIANTS } from './theme/schema.js';
+import { searchCandidates } from './sources/places.js';
+import { confirmBusinessCard } from './imessage/cards.js';
+import { runAudit, type BuildInput } from './pipeline.js';
+import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
+import { getBuild, getConversation, listBuilds, listConversations } from './store.js';
+import { handleInbound, isPending, resetSession } from './imessage/flow.js';
+import { estimateBuild } from './estimate.js';
+import { claudeEnabled, claudeVia } from './content/claude.js';
+
+const app = express();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
+// With memory storage multer only fails on bad client input (oversized file, malformed multipart): answer 4xx, not 500.
+const themeUpload = (req: Request, res: Response, next: NextFunction) => upload.single('theme')(req, res, (err?: unknown) => {
+  if (!err) return next();
+  res.status(err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: (err as Error).message });
+});
+app.disable('x-powered-by');
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: false }));
+
+const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
+
+// ── static ──
+app.use('/app', express.static(path.join(config.dirs.public, 'app')));
+app.use('/imessage', express.static(path.join(config.dirs.public, 'imessage'))); // stand-in iMessage UI for local demos (no gateway)
+app.use('/stock', express.static(path.join(config.dirs.public, 'stock'), { maxAge: '7d' }));
+app.use('/sites', express.static(config.dirs.sites));
+app.use('/reports', express.static(config.dirs.reports));
+app.use('/cards', express.static(config.dirs.cards));
+app.use('/demo-sites', express.static(path.join(config.dirs.fixtures, 'sites'))); // the deliberately outdated demo site
+app.get('/', (_req, res) => res.sendFile(path.join(config.dirs.public, 'app', 'index.html')));
+
+// ── meta ──
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl });
+});
+// how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
+app.get('/api/estimate', (req, res) => {
+  const on = (v: unknown) => v === '1' || v === 'true';
+  res.json(estimateBuild({ website: on(req.query.website), audit: on(req.query.audit), queue: queueDepth() }));
+});
+
+// ── themes ──
+app.get('/api/themes', (_req, res) => {
+  const list = [...loadThemes().values()].map((e) => ({
+    id: e.id, name: e.name, vertical: e.vertical, variant: e.variant, origin: e.origin,
+    brand: e.theme.palette.brand, grid: e.theme.grid.system, sections: e.theme.sections, description: e.theme.meta.description, warnings: e.warnings,
+  }));
+  list.sort((a, b) => a.vertical.localeCompare(b.vertical) || a.variant.localeCompare(b.variant));
+  res.json({ themes: list, supportedVariants: SUPPORTED_VARIANTS });
+});
+app.get('/api/themes/:id', (req, res) => {
+  const e = getTheme(req.params.id);
+  if (!e) return res.status(404).json({ error: 'not found' });
+  res.json(e.theme);
+});
+function readThemeBody(req: Request): unknown {
+  const f = (req as any).file as Express.Multer.File | undefined;
+  if (f) return JSON.parse(f.buffer.toString('utf8'));
+  return req.body?.theme ?? req.body;
+}
+app.post('/api/themes/validate', themeUpload, (req, res) => {
+  try { const { theme: _t, ...v } = validateTheme(readThemeBody(req)); res.json(v); } catch (e) { res.status(400).json({ ok: false, errors: [`Not valid JSON: ${(e as Error).message}`], warnings: [] }); }
+});
+app.post('/api/themes', themeUpload, (req, res) => {
+  try {
+    const r = saveCustomTheme(readThemeBody(req));
+    res.status(r.ok ? 201 : 400).json(r);
+  } catch (e) { res.status(400).json({ ok: false, errors: [`Not valid JSON: ${(e as Error).message}`], warnings: [] }); }
+});
+
+// ── Roger step 1: find the business + "Is this you?" card ──
+app.post('/api/lookup', wrap(async (req, res) => {
+  const input = String(req.body.input || req.body.query || '').trim();
+  if (!input) return res.status(400).json({ error: 'input is required (business name + ZIP, Google Maps link, or place ID)' });
+  const { intent, candidates } = await searchCandidates(input, { zip: req.body.zip, limit: Number(req.body.limit) || 5 });
+  const card = candidates[0] ? await confirmBusinessCard(candidates[0]) : null;
+  res.json({ intent, candidates, card });
+}));
+
+// ── Roger step 2a: audit an existing website ──
+app.post('/api/audit', wrap(async (req, res) => {
+  const website = String(req.body.website || '').trim();
+  if (!website) return res.status(400).json({ error: 'website is required' });
+  res.json(await runAudit({ website, google: req.body.google, placeId: req.body.placeId }));
+}));
+
+// ── Roger step 3: build a site (JSON or multipart with a theme file) ──
+app.post('/api/build', themeUpload, wrap(async (req, res) => {
+  const body = req.body || {};
+  const input: BuildInput = {
+    google: body.google || undefined,
+    placeId: body.placeId || undefined,
+    website: body.website || undefined,
+    themeId: body.themeId || undefined,
+    vertical: body.vertical || undefined,
+    variant: body.variant || undefined,
+    fonts: body.fonts === 'business' ? 'business' : 'theme',
+    brandColor: body.brandColor || undefined,
+    preview: body.preview !== 'false' && body.preview !== false,
+    audit: body.audit !== 'false' && body.audit !== false,
+    slug: body.slug || undefined,
+  };
+  const file = (req as any).file as Express.Multer.File | undefined;
+  if (file) {
+    try { input.theme = JSON.parse(file.buffer.toString('utf8')); } catch (e) { return res.status(400).json({ error: `theme.json is not valid JSON: ${(e as Error).message}` }); }
+  } else if (body.theme && typeof body.theme === 'object') input.theme = body.theme;
+  if (!input.google && !input.placeId) return res.status(400).json({ error: 'google (link, place ID, or name + ZIP) or placeId is required' });
+  const job = startBuild(input, { source: body.source === 'studio' ? 'studio' : 'api' });
+  if (req.query.wait === '1' || body.wait === true) {
+    await waitForJob(job);
+    if (job.status === 'error') return res.status(500).json({ jobId: job.id, error: job.error, events: job.events });
+    return res.json({ jobId: job.id, ...job.result });
+  }
+  res.status(202).json({ jobId: job.id, status: job.status, events: `/api/jobs/${job.id}/events` });
+}));
+
+app.get('/api/jobs/:id', (req, res) => {
+  const j = getJob(req.params.id);
+  if (!j) return res.status(404).json({ error: 'not found' });
+  res.json({ id: j.id, status: j.status, events: j.events, result: j.result, error: j.error });
+});
+app.get('/api/jobs/:id/events', (req, res) => {
+  const j = getJob(req.params.id);
+  if (!j) return res.status(404).end();
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  const send = (type: string, data: unknown) => res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
+  for (const e of j.events) send('step', e);
+  if (j.status === 'done' || j.status === 'error') { send('end', { status: j.status, result: j.result, error: j.error }); return res.end(); }
+  const onEv = (e: unknown) => send('step', e);
+  const onEnd = () => { send('end', { status: j.status, result: j.result, error: j.error }); res.end(); };
+  j.bus.on('event', onEv);
+  j.bus.once('end', onEnd);
+  req.on('close', () => { j.bus.off('event', onEv); j.bus.off('end', onEnd); });
+});
+
+// ── leads from generated sites ──
+app.options('/api/leads/:slug', (_req, res) => { res.set({ 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type' }).sendStatus(204); });
+app.post('/api/leads/:slug', wrap(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const slug = req.params.slug.replace(/[^a-z0-9-]/g, '');
+  const b = req.body || {};
+  if (b.company_website) return res.json({ ok: true }); // honeypot
+  if (!b.name || !b.phone) return res.status(400).json({ error: 'name and phone are required' });
+  const lead = { slug, at: new Date().toISOString(), name: String(b.name).slice(0, 120), phone: String(b.phone).slice(0, 40), email: b.email ? String(b.email).slice(0, 160) : undefined, zip: b.zip ? String(b.zip).slice(0, 10) : undefined, service: b.service ? String(b.service).slice(0, 120) : undefined, message: b.message ? String(b.message).slice(0, 2000) : undefined, page: b.page };
+  const dir = path.join(config.dirs.data, 'leads');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(path.join(dir, `${slug}.jsonl`), `${JSON.stringify(lead)}\n`);
+  if (config.leadWebhook) fetch(config.leadWebhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead) }).catch((e) => console.warn('[lead webhook]', e.message));
+  if (req.is('application/json')) return res.json({ ok: true });
+  res.redirect(303, `${String(req.get('referer') || `/sites/${slug}/`).split('#')[0]}#quote`);
+}));
+app.get('/api/leads/:slug', (req, res) => {
+  const f = path.join(config.dirs.data, 'leads', `${req.params.slug.replace(/[^a-z0-9-]/g, '')}.jsonl`);
+  const leads = fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+  res.json({ leads });
+});
+
+// ── iMessage reference flow (your gateway posts inbound texts here) ──
+app.post('/api/imessage/inbound', wrap(async (req, res) => {
+  const from = String(req.body.from || 'demo');
+  const text = String(req.body.text || '');
+  // async: true → "On it, about 20 seconds" now, the preview later (see handleInbound)
+  res.json(await handleInbound(from, text, { async: req.body.async === true || req.body.async === 'true' }));
+}));
+app.post('/api/imessage/reset', (req, res) => { resetSession(String(req.body.from || 'demo')); res.json({ ok: true }); });
+
+// ── saved history (data/builds, data/conversations). No auth: fine locally, add it before this is public. ──
+app.get('/api/builds', (_req, res) => res.json({ builds: listBuilds() }));
+app.get('/api/builds/:id', (req, res) => {
+  const b = getBuild(req.params.id);
+  if (!b) return res.status(404).json({ error: 'not found' });
+  res.json(b);
+});
+app.get('/api/conversations', (_req, res) => res.json({ conversations: listConversations() }));
+app.get('/api/conversations/:from', (req, res) => {
+  const c = getConversation(req.params.from);
+  if (!c) return res.status(404).json({ error: 'not found' });
+  const { session: _s, ...rest } = c; // flow internals stay server-side
+  res.json({ ...rest, pending: isPending(c.from) });
+});
+
+app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
+  // body-parser marks client errors (bad JSON, body too large) with a 4xx status
+  if (err.status && err.status >= 400 && err.status < 500) return res.status(err.status).json({ error: err.message });
+  console.error(err);
+  res.status(500).json({ error: err.message });
+});
+
+app.listen(config.port, () => {
+  console.log(`Roger Site Builder on ${config.publicBaseUrl}  (mock=${config.mock}, claude=${claudeVia() ?? 'off'}, screenshots=${!!config.chromiumPath}, themes=${loadThemes().size})`);
+});

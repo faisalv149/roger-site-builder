@@ -1,0 +1,268 @@
+{
+  "placeId": "mock-greenway-landscape",
+  "name": "Greenway Lawn & Landscape",
+  "primaryType": "landscaper",
+  "primaryTypeLabel": "Landscaper",
+  "types": [
+    "landscaper",
+    "lawn_care_service",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "4120 Monroe Rd, Charlotte, NC 28205, USA",
+  "shortAddress": "4120 Monroe Rd, Charlotte",
+  "street": "4120 Monroe Rd",
+  "city": "Charlotte",
+  "state": "NC",
+  "zip": "28205",
+  "country": "US",
+  "lat": 35.1942,
+  "lng": -80.7889,
+  "phone": "(704) 555-0119",
+  "phoneE164": "+17045550119",
+  "mapsUrl": "https://maps.google.com/?cid=3234567890",
+  "rating": 4.9,
+  "reviewCount": 212,
+  "reviews": [
+    {
+      "author": "Rachel Moore",
+      "rating": 5,
+      "relativeTime": "1 week ago",
+      "text": "They redesigned our backyard with a paver patio, new planting beds and landscape lighting. Neighbors keep stopping to ask who did it."
+    },
+    {
+      "author": "Kevin Brooks",
+      "rating": 5,
+      "relativeTime": "2 weeks ago",
+      "text": "Weekly lawn mowing has been perfect all season. Always on schedule and the edges are crisp."
+    },
+    {
+      "author": "Angela Torres",
+      "rating": 5,
+      "relativeTime": "a month ago",
+      "text": "Fall cleanup and mulch install done in one day. The seasonal care plan is a great value."
+    },
+    {
+      "author": "Ben Carter",
+      "rating": 5,
+      "relativeTime": "2 months ago",
+      "text": "Fixed our irrigation system and re-sodded the front yard. Grass has never looked better."
+    },
+    {
+      "author": "Mei Chen",
+      "rating": 5,
+      "relativeTime": "3 months ago",
+      "text": "Tree pruning and shrub care for our whole property, very careful crew and great communication."
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/greenway-0.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Greenway Lawn & Landscape"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/greenway-1.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Greenway Lawn & Landscape"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/greenway-2.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Greenway Lawn & Landscape"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/greenway-3.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Greenway Lawn & Landscape"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/greenway-4.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Greenway Lawn & Landscape"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/greenway-5.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Greenway Lawn & Landscape"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/greenway-6.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Greenway Lawn & Landscape"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/greenway-7.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Greenway Lawn & Landscape"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/greenway-8.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Greenway Lawn & Landscape"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/greenway-cust.jpg",
+      "width": 1400,
+      "height": 1050,
+      "authors": [
+        {
+          "name": "Dana R."
+        }
+      ],
+      "isOwner": false
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 12,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 7:00 AM – 5:00 PM",
+      "Tuesday: 7:00 AM – 5:00 PM",
+      "Wednesday: 7:00 AM – 5:00 PM",
+      "Thursday: 7:00 AM – 5:00 PM",
+      "Friday: 7:00 AM – 5:00 PM",
+      "Saturday: 8:00 AM – 12:00 PM",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -240,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Charlotte",
+    "Matthews",
+    "Mint Hill",
+    "Pineville",
+    "Huntersville",
+    "Concord",
+    "Cornelius",
+    "Indian Trail"
+  ],
+  "source": "mock"
+}

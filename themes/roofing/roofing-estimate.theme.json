@@ -1,0 +1,487 @@
+{
+  "meta": {
+    "name": "Roofing \u00b7 Fast Estimate",
+    "vertical": "roofing",
+    "variant": "estimate",
+    "description": "Lead capture first: form inside the hero, sticky quote sidebar on desktop.",
+    "schemaVersion": 2,
+    "previewImage": "/themes/roofing-estimate.png"
+  },
+  "match": {
+    "googleTypes": [
+      "roofing_contractor"
+    ]
+  },
+  "fontPairs": [
+    {
+      "id": "sturdy",
+      "label": "Classic serif",
+      "heading": "Georgia, 'Times New Roman', serif",
+      "body": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    },
+    {
+      "id": "modern",
+      "label": "Clean modern",
+      "heading": "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+      "body": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    },
+    {
+      "id": "friendly",
+      "label": "Rounded friendly",
+      "heading": "ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'Trebuchet MS', sans-serif",
+      "body": "'Trebuchet MS', 'Segoe UI', Tahoma, sans-serif"
+    }
+  ],
+  "defaultPair": "modern",
+  "fontFaces": [],
+  "type": {
+    "scale": {
+      "xs": 13,
+      "sm": 15,
+      "md": 17,
+      "lg": 20,
+      "xl": 26,
+      "2xl": 34,
+      "3xl": 44,
+      "4xl": {
+        "phone": 40,
+        "desktop": 60
+      }
+    },
+    "measure": 65,
+    "bodyWeight": 400,
+    "headingWeight": 600,
+    "headingCase": "none",
+    "headingTracking": "-0.01em",
+    "lineHeight": {
+      "heading": 1.1,
+      "body": 1.55
+    }
+  },
+  "palette": {
+    "brand": "#0F766E",
+    "ink": "#14202B",
+    "inkMuted": "#4A5968",
+    "surface": "#FFFFFF",
+    "surfaceAlt": "#EEF7F5"
+  },
+  "derive": {
+    "space": "oklch",
+    "tints": [
+      97,
+      94,
+      90
+    ],
+    "shades": [
+      45,
+      35,
+      25
+    ],
+    "brandInkAuto": true,
+    "minButtonContrast": 4.5
+  },
+  "overlayAlpha": 0.58,
+  "overlayStyle": "gradient-left",
+  "brandColor": {
+    "source": [
+      "logo",
+      "website",
+      "default"
+    ],
+    "rejectNearGray": true,
+    "rejectNeon": true,
+    "minChroma": 0.04,
+    "maxChroma": 0.3,
+    "darkenUntilContrast": true
+  },
+  "logo": {
+    "placement": "header-left",
+    "maxHeight": {
+      "phone": 36,
+      "desktop": 48
+    },
+    "band": "surface",
+    "padding": 8,
+    "fallback": "wordmark",
+    "wordmark": {
+      "font": "heading",
+      "case": "title",
+      "maxLines": 2,
+      "color": "brand"
+    }
+  },
+  "grid": {
+    "system": "sidebar-12",
+    "columns": 12,
+    "maxWidth": 1280,
+    "gutter": 24,
+    "margin": {
+      "phone": 16,
+      "desktop": 40
+    },
+    "sidebar": {
+      "desktop": 4,
+      "side": "right",
+      "sticky": true,
+      "holds": "quote"
+    }
+  },
+  "spacing": {
+    "scale": [
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64
+    ],
+    "sectionY": {
+      "phone": 40,
+      "desktop": 72
+    },
+    "density": "comfortable"
+  },
+  "radius": {
+    "sm": 4,
+    "md": 8,
+    "lg": 12
+  },
+  "shadow": {
+    "card": "0 2px 8px rgba(0,0,0,0.08)"
+  },
+  "buttons": {
+    "primary": {
+      "fill": "brand",
+      "ink": "brand-ink",
+      "border": "none",
+      "radius": "md",
+      "height": 48,
+      "case": "none",
+      "weight": 600
+    },
+    "secondary": {
+      "fill": "transparent",
+      "ink": "brand",
+      "border": "brand",
+      "radius": "md",
+      "height": 48,
+      "case": "none",
+      "weight": 600
+    },
+    "minTapTarget": 44,
+    "focusRing": "2px solid shade-1"
+  },
+  "icons": {
+    "set": "lucide",
+    "stroke": 1.75,
+    "size": 24,
+    "color": "brand",
+    "style": "outline"
+  },
+  "images": {
+    "hero": {
+      "ratio": {
+        "phone": "4:5",
+        "desktop": "16:9"
+      },
+      "fit": "cover"
+    },
+    "gallery": {
+      "ratio": "4:3",
+      "fit": "cover"
+    },
+    "minWidth": 800,
+    "minHeight": 600,
+    "maxGallery": 9,
+    "rejectTextHeavy": true,
+    "maxFileKb": 250
+  },
+  "motion": "subtle",
+  "colorScheme": "light",
+  "sections": [
+    "hero",
+    "quote",
+    "services",
+    "proof",
+    "urgent",
+    "gallery",
+    "area",
+    "footer"
+  ],
+  "sectionLayout": {
+    "hero": {
+      "variant": "split-form",
+      "split": {
+        "desktop": [
+          7,
+          5
+        ]
+      },
+      "formSide": "right",
+      "background": "photo"
+    },
+    "quote": {
+      "variant": "sticky-sidebar",
+      "fallbackPhone": "inline"
+    },
+    "services": {
+      "variant": "checklist",
+      "columns": {
+        "phone": 1,
+        "desktop": 2
+      },
+      "span": {
+        "desktop": 8
+      }
+    },
+    "proof": {
+      "variant": "inline-badges",
+      "columns": {
+        "phone": 2,
+        "desktop": 4
+      },
+      "span": {
+        "desktop": 8
+      }
+    },
+    "urgent": {
+      "variant": "callout-box",
+      "span": {
+        "desktop": 8
+      }
+    },
+    "gallery": {
+      "variant": "filmstrip",
+      "columns": {
+        "phone": 2,
+        "desktop": 4
+      },
+      "span": {
+        "desktop": 8
+      }
+    },
+    "area": {
+      "variant": "two-col-list",
+      "columns": {
+        "phone": 1,
+        "desktop": 2
+      },
+      "span": {
+        "desktop": 8
+      }
+    },
+    "footer": {
+      "variant": "three-col",
+      "columns": {
+        "phone": 1,
+        "desktop": 3
+      }
+    }
+  },
+  "sectionRules": {
+    "urgent": {
+      "showWhen": [
+        "open24h",
+        "emergencyKeyword"
+      ]
+    },
+    "services": {
+      "min": 3,
+      "max": 6,
+      "overflowLink": "Ask about other services"
+    },
+    "proof": {
+      "minRating": 4.0,
+      "minReviews": 5,
+      "showQuotes": true,
+      "maxQuotes": 2,
+      "maxQuoteChars": 160
+    },
+    "gallery": {
+      "minPhotos": 3
+    },
+    "area": {
+      "showMap": true,
+      "maxPlaces": 8
+    },
+    "hours": {
+      "showOpenNow": true,
+      "format": "week"
+    }
+  },
+  "copy": {
+    "hero": "Roof repair and replacement in {city}",
+    "subline": "Roofing repairs, replacements and inspections for homes in {city}. Tell us what you need.",
+    "urgent": "Storm damage or an active leak? Call us.",
+    "action": "Request an inspection",
+    "actionKind": "form",
+    "quoteTitle": "Request a free inspection",
+    "sublineNoServices": "Roofing repairs, replacements and inspections for homes in {city}.",
+    "heroNoCity": "Roof repair and replacement"
+  },
+  "placeholders": [
+    "{business}",
+    "{city}",
+    "{state}",
+    "{zip}",
+    "{rating}",
+    "{reviewCount}",
+    "{years}"
+  ],
+  "services": {
+    "defaults": [
+      {
+        "id": "repair",
+        "label": "Roof repair",
+        "icon": "hammer",
+        "keywords": [
+          "repair",
+          "fix",
+          "patch"
+        ]
+      },
+      {
+        "id": "replacement",
+        "label": "Roof replacement",
+        "icon": "home",
+        "keywords": [
+          "replacement",
+          "re-roof",
+          "new roof"
+        ]
+      },
+      {
+        "id": "leak",
+        "label": "Leak repair",
+        "icon": "droplet",
+        "keywords": [
+          "leak"
+        ]
+      },
+      {
+        "id": "storm",
+        "label": "Storm damage",
+        "icon": "cloud-lightning",
+        "keywords": [
+          "storm",
+          "hail",
+          "wind"
+        ]
+      },
+      {
+        "id": "inspection",
+        "label": "Roof inspection",
+        "icon": "search",
+        "keywords": [
+          "inspection",
+          "estimate"
+        ]
+      },
+      {
+        "id": "gutters",
+        "label": "Gutters",
+        "icon": "layers",
+        "keywords": [
+          "gutter"
+        ]
+      },
+      {
+        "id": "shingle",
+        "label": "Shingle roofing",
+        "icon": "grid",
+        "keywords": [
+          "shingle",
+          "asphalt"
+        ]
+      },
+      {
+        "id": "metal",
+        "label": "Metal roofing",
+        "icon": "square",
+        "keywords": [
+          "metal",
+          "standing seam"
+        ]
+      },
+      {
+        "id": "flat",
+        "label": "Flat roofing",
+        "icon": "minus",
+        "keywords": [
+          "flat",
+          "tpo",
+          "epdm"
+        ]
+      },
+      {
+        "id": "skylight",
+        "label": "Skylights",
+        "icon": "sun",
+        "keywords": [
+          "skylight"
+        ]
+      }
+    ]
+  },
+  "trust": {
+    "max": 4,
+    "templates": {
+      "licensed": "Licensed in {state}",
+      "insured": "Fully insured",
+      "years": "{years} years serving {city}",
+      "warranty": "Workmanship warranty"
+    }
+  },
+  "roger": {
+    "stickyBar": true,
+    "headerCallButton": true,
+    "chatBubble": true,
+    "textPrefill": "Hi, I need help with my roof.",
+    "consentCopy": "By submitting, you agree to receive calls and texts about your request.",
+    "previewBanner": true,
+    "footerCredit": true
+  },
+  "seo": {
+    "titlePattern": "{business} | Roofing in {city}, {state}",
+    "descriptionPattern": "{business} offers roof repair, replacement and inspections in {city}. Call or request a free estimate.",
+    "schemaType": "RoofingContractor",
+    "ogImage": "hero"
+  },
+  "locale": "en-US",
+  "stock": {
+    "hero": [
+      {
+        "url": "/stock/roofing-hero.svg",
+        "width": 1920,
+        "height": 1080,
+        "alt": "Placeholder stock photo: roofing crew",
+        "source": "stock"
+      }
+    ],
+    "gallery": [
+      {
+        "url": "/stock/roofing-1.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: roofing work 1",
+        "source": "stock"
+      },
+      {
+        "url": "/stock/roofing-2.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: roofing work 2",
+        "source": "stock"
+      },
+      {
+        "url": "/stock/roofing-3.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: roofing work 3",
+        "source": "stock"
+      }
+    ]
+  }
+}

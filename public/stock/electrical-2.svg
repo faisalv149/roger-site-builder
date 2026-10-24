@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1F2A3D"/><stop offset="1" stop-color="#3E4F6B"/></linearGradient>
+  <linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient></defs>
+  <rect width="1200" height="900" fill="url(#s)"/><circle cx="456" cy="180" r="63.00000000000001" fill="#FFFFFF" opacity=".55"/><path d="M0 648 Q 300 576 600 630 T 1200 603 V 900 H 0 Z" fill="#2C374A"/>
+        <path d="M0 180 Q 600 306 1200 162" stroke="#141B27" stroke-width="4" fill="none" opacity=".7"/>
+        <circle cx="600" cy="342.9" r="108.9" fill="#FFE3A1" opacity=".9"/>
+        <circle cx="600" cy="342.9" r="277.2" fill="#E8A93A" opacity=".18"/>
+        <rect x="556.44" y="435.96000000000004" width="87.12" height="71.28" fill="#141B27" opacity=".8"/>
+        <polygon points="580.2,273.6 635.64,273.6 603.96,342.9 639.6,342.9 572.28,428.03999999999996 596.04,356.76 560.4,356.76" fill="#E8A93A"/>
+  <rect width="1200" height="900" fill="url(#v)"/>
+  <text x="1176" y="878" text-anchor="end" font-family="Arial, sans-serif" font-size="23" fill="#fff" opacity=".7">Placeholder image</text>
+</svg>

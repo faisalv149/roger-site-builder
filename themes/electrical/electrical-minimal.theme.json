@@ -1,0 +1,444 @@
+{
+  "meta": {
+    "name": "Electrical \u00b7 Minimal Editorial",
+    "vertical": "electrical",
+    "variant": "minimal",
+    "description": "One narrow column, large type, generous space, gallery at the end; good for sparse Google data.",
+    "schemaVersion": 2,
+    "previewImage": "/themes/electrical-minimal.png"
+  },
+  "match": {
+    "googleTypes": [
+      "electrician"
+    ]
+  },
+  "fontPairs": [
+    {
+      "id": "sturdy",
+      "label": "Editorial serif",
+      "heading": "'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif",
+      "body": "'Helvetica Neue', Helvetica, Arial, sans-serif"
+    },
+    {
+      "id": "modern",
+      "label": "Geometric",
+      "heading": "Futura, 'Century Gothic', 'Avenir Next', 'Segoe UI', sans-serif",
+      "body": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    },
+    {
+      "id": "friendly",
+      "label": "Clean modern",
+      "heading": "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+      "body": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    }
+  ],
+  "defaultPair": "modern",
+  "fontFaces": [],
+  "type": {
+    "scale": {
+      "xs": 13,
+      "sm": 15,
+      "md": 17,
+      "lg": 20,
+      "xl": 26,
+      "2xl": 34,
+      "3xl": 44,
+      "4xl": {
+        "phone": 40,
+        "desktop": 60
+      }
+    },
+    "measure": 65,
+    "bodyWeight": 400,
+    "headingWeight": 500,
+    "headingCase": "none",
+    "headingTracking": "-0.02em",
+    "lineHeight": {
+      "heading": 1.1,
+      "body": 1.65
+    }
+  },
+  "palette": {
+    "brand": "#4338CA",
+    "ink": "#14202B",
+    "inkMuted": "#4A5968",
+    "surface": "#FFFFFF",
+    "surfaceAlt": "#F1F1FA"
+  },
+  "derive": {
+    "space": "oklch",
+    "tints": [
+      97,
+      94,
+      90
+    ],
+    "shades": [
+      45,
+      35,
+      25
+    ],
+    "brandInkAuto": true,
+    "minButtonContrast": 4.5
+  },
+  "overlayAlpha": 0.4,
+  "overlayStyle": "gradient-bottom",
+  "brandColor": {
+    "source": [
+      "logo",
+      "website",
+      "default"
+    ],
+    "rejectNearGray": true,
+    "rejectNeon": true,
+    "minChroma": 0.04,
+    "maxChroma": 0.3,
+    "darkenUntilContrast": true
+  },
+  "logo": {
+    "placement": "header-left",
+    "maxHeight": {
+      "phone": 36,
+      "desktop": 48
+    },
+    "band": "surface",
+    "padding": 8,
+    "fallback": "wordmark",
+    "wordmark": {
+      "font": "heading",
+      "case": "title",
+      "maxLines": 2,
+      "color": "brand"
+    }
+  },
+  "grid": {
+    "system": "single-col",
+    "columns": 6,
+    "maxWidth": 760,
+    "gutter": 24,
+    "margin": {
+      "phone": 20,
+      "desktop": 48
+    }
+  },
+  "spacing": {
+    "scale": [
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64
+    ],
+    "sectionY": {
+      "phone": 56,
+      "desktop": 104
+    },
+    "density": "spacious"
+  },
+  "radius": {
+    "sm": 2,
+    "md": 4,
+    "lg": 8
+  },
+  "shadow": {
+    "card": "none"
+  },
+  "buttons": {
+    "primary": {
+      "fill": "brand",
+      "ink": "brand-ink",
+      "border": "none",
+      "radius": "sm",
+      "height": 48,
+      "case": "none",
+      "weight": 500
+    },
+    "secondary": {
+      "fill": "transparent",
+      "ink": "brand",
+      "border": "brand",
+      "radius": "sm",
+      "height": 48,
+      "case": "none",
+      "weight": 500
+    },
+    "minTapTarget": 44,
+    "focusRing": "2px solid shade-1"
+  },
+  "icons": {
+    "set": "lucide",
+    "stroke": 1.75,
+    "size": 24,
+    "color": "brand",
+    "style": "outline"
+  },
+  "images": {
+    "hero": {
+      "ratio": {
+        "phone": "4:5",
+        "desktop": "16:9"
+      },
+      "fit": "cover"
+    },
+    "gallery": {
+      "ratio": "4:3",
+      "fit": "cover"
+    },
+    "minWidth": 800,
+    "minHeight": 600,
+    "maxGallery": 9,
+    "rejectTextHeavy": true,
+    "maxFileKb": 250
+  },
+  "motion": "subtle",
+  "colorScheme": "light",
+  "sections": [
+    "hero",
+    "services",
+    "proof",
+    "quote",
+    "area",
+    "gallery",
+    "footer"
+  ],
+  "sectionLayout": {
+    "hero": {
+      "variant": "text-only",
+      "align": "left",
+      "imagePosition": "below",
+      "imageInset": true
+    },
+    "services": {
+      "variant": "numbered-list",
+      "columns": {
+        "phone": 1,
+        "desktop": 1
+      }
+    },
+    "proof": {
+      "variant": "inline-badges",
+      "columns": {
+        "phone": 2,
+        "desktop": 4
+      }
+    },
+    "quote": {
+      "variant": "inline-form"
+    },
+    "area": {
+      "variant": "chips",
+      "columns": {
+        "phone": 1,
+        "desktop": 1
+      }
+    },
+    "gallery": {
+      "variant": "uniform-grid",
+      "columns": {
+        "phone": 2,
+        "desktop": 3
+      }
+    },
+    "footer": {
+      "variant": "centered-stack",
+      "columns": {
+        "phone": 1,
+        "desktop": 1
+      }
+    }
+  },
+  "sectionRules": {
+    "services": {
+      "min": 3,
+      "max": 6,
+      "overflowLink": "Ask about other services"
+    },
+    "proof": {
+      "minRating": 4.0,
+      "minReviews": 5,
+      "showQuotes": true,
+      "maxQuotes": 2,
+      "maxQuoteChars": 160
+    },
+    "gallery": {
+      "minPhotos": 3
+    },
+    "area": {
+      "showMap": true,
+      "maxPlaces": 8
+    },
+    "hours": {
+      "showOpenNow": true,
+      "format": "week"
+    }
+  },
+  "copy": {
+    "hero": "Licensed electricians in {city}",
+    "subline": "Repairs, panels and installations for homes in {city}. Tell us what you need.",
+    "urgent": "Power out or burning smell? Call us now.",
+    "action": "Request an electrician",
+    "actionKind": "form",
+    "quoteTitle": "Tell us what you need",
+    "sublineNoServices": "Repairs, panels and installations for homes in {city}.",
+    "heroNoCity": "Licensed electricians"
+  },
+  "placeholders": [
+    "{business}",
+    "{city}",
+    "{state}",
+    "{zip}",
+    "{rating}",
+    "{reviewCount}",
+    "{years}"
+  ],
+  "services": {
+    "defaults": [
+      {
+        "id": "repair",
+        "label": "Electrical repair",
+        "icon": "zap",
+        "keywords": [
+          "repair",
+          "outlet",
+          "switch"
+        ]
+      },
+      {
+        "id": "panel",
+        "label": "Panel upgrades",
+        "icon": "server",
+        "keywords": [
+          "panel",
+          "breaker",
+          "200 amp"
+        ]
+      },
+      {
+        "id": "lighting",
+        "label": "Lighting installation",
+        "icon": "sun",
+        "keywords": [
+          "lighting",
+          "recessed",
+          "fixture"
+        ]
+      },
+      {
+        "id": "ev",
+        "label": "EV charger installation",
+        "icon": "battery-charging",
+        "keywords": [
+          "ev",
+          "charger",
+          "tesla"
+        ]
+      },
+      {
+        "id": "generator",
+        "label": "Generators",
+        "icon": "power",
+        "keywords": [
+          "generator",
+          "backup"
+        ]
+      },
+      {
+        "id": "rewire",
+        "label": "Rewiring",
+        "icon": "git-merge",
+        "keywords": [
+          "rewire",
+          "wiring",
+          "knob and tube"
+        ]
+      },
+      {
+        "id": "ceiling-fan",
+        "label": "Ceiling fans",
+        "icon": "fan",
+        "keywords": [
+          "ceiling fan"
+        ]
+      },
+      {
+        "id": "inspection",
+        "label": "Safety inspections",
+        "icon": "shield",
+        "keywords": [
+          "inspection",
+          "code"
+        ]
+      },
+      {
+        "id": "emergency",
+        "label": "24/7 emergency service",
+        "icon": "phone",
+        "keywords": [
+          "emergency",
+          "24"
+        ]
+      }
+    ]
+  },
+  "trust": {
+    "max": 4,
+    "templates": {
+      "licensed": "Licensed in {state}",
+      "insured": "Fully insured",
+      "years": "{years} years serving {city}",
+      "warranty": "Workmanship warranty"
+    }
+  },
+  "roger": {
+    "stickyBar": true,
+    "headerCallButton": true,
+    "chatBubble": true,
+    "textPrefill": "Hi, I need an electrician.",
+    "consentCopy": "By submitting, you agree to receive calls and texts about your request.",
+    "previewBanner": true,
+    "footerCredit": true
+  },
+  "seo": {
+    "titlePattern": "{business} | Electrical in {city}, {state}",
+    "descriptionPattern": "{business} is a licensed electrician in {city} for repairs, panel upgrades, lighting and EV chargers. Call or request service.",
+    "schemaType": "Electrician",
+    "ogImage": "hero"
+  },
+  "locale": "en-US",
+  "stock": {
+    "hero": [
+      {
+        "url": "/stock/electrical-hero.svg",
+        "width": 1920,
+        "height": 1080,
+        "alt": "Placeholder stock photo: electrical crew",
+        "source": "stock"
+      }
+    ],
+    "gallery": [
+      {
+        "url": "/stock/electrical-1.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: electrical work 1",
+        "source": "stock"
+      },
+      {
+        "url": "/stock/electrical-2.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: electrical work 2",
+        "source": "stock"
+      },
+      {
+        "url": "/stock/electrical-3.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: electrical work 3",
+        "source": "stock"
+      }
+    ]
+  }
+}

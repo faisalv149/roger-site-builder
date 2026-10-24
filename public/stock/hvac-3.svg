@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#BFD9EE"/><stop offset="1" stop-color="#EEF5FA"/></linearGradient>
+  <linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient></defs>
+  <rect width="1200" height="900" fill="url(#s)"/><circle cx="936" cy="180" r="63.00000000000001" fill="#FFFFFF" opacity=".55"/><path d="M0 648 Q 300 576 600 630 T 1200 603 V 900 H 0 Z" fill="#8AA0A8"/>
+    <rect x="336.00000000000006" y="378" width="504" height="270" fill="#F2F4F5"/>
+    <rect x="396.4800000000001" y="480.6" width="80.64" height="70.2" fill="#2E363B" opacity=".35"/>
+    <rect x="698.8800000000001" y="480.6" width="80.64" height="70.2" fill="#2E363B" opacity=".35"/>
+    <rect x="552.72" y="513" width="70.56" height="135" fill="#2E363B" opacity=".75"/><polygon points="295.68000000000006,378 588,162 880.3200000000002,378" fill="#2E363B"/>
+        <rect x="696" y="414" width="257.40000000000003" height="234" rx="14.04" fill="#5E6B73"/>
+        <circle cx="824.7" cy="531" r="84.24" fill="#2E363B" opacity=".85"/>
+        <ellipse cx="824.7" cy="531" rx="74.88" ry="16.380000000000003" fill="#F2F4F5" opacity=".5" transform="rotate(39 824.7 531)"/><ellipse cx="824.7" cy="531" rx="74.88" ry="16.380000000000003" fill="#F2F4F5" opacity=".5" transform="rotate(99 824.7 531)"/><ellipse cx="824.7" cy="531" rx="74.88" ry="16.380000000000003" fill="#F2F4F5" opacity=".5" transform="rotate(159 824.7 531)"/>
+  <rect width="1200" height="900" fill="url(#v)"/>
+  <text x="1176" y="878" text-anchor="end" font-family="Arial, sans-serif" font-size="23" fill="#fff" opacity=".7">Placeholder image</text>
+</svg>

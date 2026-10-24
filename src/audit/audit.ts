@@ -1,0 +1,246 @@
+import * as cheerio from 'cheerio';
+import { config } from '../config.js';
+import type { Business, WebsiteScan } from '../types.js';
+import { fetchJson, fetchRaw } from '../util/http.js';
+import { digits } from '../util/text.js';
+import { claudeJson } from '../content/claude.js';
+
+export type Category = 'security' | 'speed' | 'mobile' | 'seo' | 'conversion' | 'trust';
+export type Severity = 'critical' | 'high' | 'medium' | 'low';
+
+export interface AuditIssue {
+  id: string;
+  category: Category;
+  severity: Severity;
+  title: string; // owner-friendly, short
+  detail: string; // evidence
+  fix: string; // what Roger will do
+}
+
+export interface AuditResult {
+  url: string;
+  finalUrl: string;
+  reachable: boolean;
+  score: number;
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  categories: Record<Category, number>;
+  issues: AuditIssue[];
+  passed: string[];
+  metrics: { ttfbMs: number; htmlKb: number; imageKb: number; pageKb: number; images: number; requestsSampled: number; pagespeed?: PageSpeed };
+  summary: { headline: string; bullets: string[]; pitch: string; source: 'claude' | 'template' };
+  generatedAt: string;
+}
+
+export interface PageSpeed {
+  performance: number; // 0-100
+  lcp?: string;
+  cls?: string;
+  tbt?: string;
+  fcp?: string;
+}
+
+const PENALTY: Record<Severity, number> = { critical: 25, high: 12, medium: 6, low: 2 };
+const CATS: Category[] = ['security', 'speed', 'mobile', 'seo', 'conversion', 'trust'];
+
+async function pageSpeed(url: string): Promise<PageSpeed | undefined> {
+  if (!config.pagespeedKey || config.mock) return undefined;
+  try {
+    const api = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&category=performance&key=${encodeURIComponent(config.pagespeedKey)}`;
+    const r = await fetchJson<any>(api, { timeoutMs: 60000 });
+    const a = r.lighthouseResult?.audits || {};
+    return {
+      performance: Math.round((r.lighthouseResult?.categories?.performance?.score ?? 0) * 100),
+      lcp: a['largest-contentful-paint']?.displayValue,
+      cls: a['cumulative-layout-shift']?.displayValue,
+      tbt: a['total-blocking-time']?.displayValue,
+      fcp: a['first-contentful-paint']?.displayValue,
+    };
+  } catch (e) {
+    console.warn(`[pagespeed] ${(e as Error).message.slice(0, 120)}`);
+    return undefined;
+  }
+}
+
+async function imageWeight(scan: WebsiteScan): Promise<{ kb: number; sampled: number; biggest?: { src: string; kb: number } }> {
+  const srcs = [...new Set(scan.images.map((i) => i.src).filter((s) => s && !s.startsWith('data:')))].slice(0, 10);
+  let total = 0;
+  let biggest: { src: string; kb: number } | undefined;
+  await Promise.all(srcs.map(async (src) => {
+    const r = await fetchRaw(src, { timeoutMs: 8000, maxBytes: 12_000_000 }).catch(() => null);
+    if (!r?.ok) return;
+    const kb = Math.round(r.body.length / 1024);
+    total += kb;
+    if (!biggest || kb > biggest.kb) biggest = { src, kb };
+  }));
+  return { kb: total, sampled: srcs.length, biggest };
+}
+
+const FREE_EMAIL = /@(yahoo|gmail|aol|hotmail|outlook|msn|comcast|sbcglobal|att|icloud)\./i;
+const STREET_RE = /\b(\d{2,6})\s+(?:[NSEW]\.?\s+)?[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\s(?:St|Street|Rd|Road|Blvd|Boulevard|Ave|Avenue|Dr|Drive|Ln|Lane|Way|Pkwy|Parkway|Hwy|Highway|Ct|Court)\b/g;
+
+export async function auditWebsite(scan: WebsiteScan, b?: Business): Promise<AuditResult> {
+  const issues: AuditIssue[] = [];
+  const passed: string[] = [];
+  const add = (i: AuditIssue) => issues.push(i);
+  const ok = (s: string) => passed.push(s);
+
+  const psP = scan.ok ? pageSpeed(scan.finalUrl) : Promise.resolve(undefined);
+
+  if (!scan.ok) {
+    add({ id: 'down', category: 'security', severity: 'critical', title: 'Your website is not loading', detail: `${scan.url} returned ${scan.status || scan.error || 'no response'}.`, fix: 'We will put a fast, reliable site live on secure hosting.' });
+    return finalize(scan, issues, passed, { ttfbMs: 0, htmlKb: 0, imageKb: 0, pageKb: 0, images: 0, requestsSampled: 0 }, b);
+  }
+
+  const $ = cheerio.load(scan.html);
+  const html = scan.html;
+  const text = scan.text;
+  const year = new Date().getFullYear();
+
+  // ── security ──
+  if (scan.finalUrl.startsWith('http:')) add({ id: 'https', category: 'security', severity: 'high', title: 'Browsers mark your site "Not Secure"', detail: `The site loads over plain HTTP (${scan.finalUrl}).`, fix: 'Free HTTPS certificate on every page.' });
+  else ok('Uses HTTPS');
+  if (scan.finalUrl.startsWith('https:') && /\s(src|href)=["']http:\/\//i.test(html)) add({ id: 'mixed', category: 'security', severity: 'medium', title: 'Some files load insecurely', detail: 'The page pulls images or scripts over http:// (mixed content).', fix: 'Serve every asset over HTTPS.' });
+  const jq = html.match(/jquery[-.]?(1\.\d+(\.\d+)?|2\.\d+(\.\d+)?)(\.min)?\.js/i);
+  if (jq) add({ id: 'jquery', category: 'security', severity: 'low', title: 'Outdated code with known security holes', detail: `Uses jQuery ${jq[1]} (no longer supported).`, fix: 'Modern, dependency-free code.' });
+
+  // ── mobile ──
+  const viewport = $('meta[name="viewport"]').attr('content');
+  if (!viewport) add({ id: 'viewport', category: 'mobile', severity: 'critical', title: 'Not built for phones', detail: 'No mobile viewport tag, so phones show a shrunken desktop page.', fix: 'Mobile-first layout with big tap targets.' });
+  else ok('Has a mobile viewport');
+  const fixedTables = $('table[width]').filter((_, el) => Number($(el).attr('width')) >= 600).length;
+  // A bare desktop `width:` locks the page. `max-width: 1100px` and rules inside @media blocks are how
+  // responsive sites are built, so neither counts (they made live sites look broken).
+  const unscopedCss = html.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/gi, '');
+  const fixedWidth = fixedTables > 0 || /(?<![-\w])width\s*:\s*(9\d\d|1[0-2]\d\d)px/i.test(unscopedCss);
+  if (fixedWidth) add({ id: 'fixed-layout', category: 'mobile', severity: 'high', title: 'Layout is fixed-width', detail: fixedTables ? `${fixedTables} fixed-width tables used for layout.` : 'Content is locked to a desktop width.', fix: 'Responsive grid that fits any screen.' });
+
+  // ── speed ──
+  const img = await imageWeight(scan);
+  const htmlKb = Math.round(scan.bytes / 1024);
+  const pageKb = htmlKb + img.kb;
+  if (scan.timing.ttfbMs > 1800) add({ id: 'ttfb', category: 'speed', severity: 'high', title: 'Server is slow to respond', detail: `First byte took ${(scan.timing.ttfbMs / 1000).toFixed(1)}s.`, fix: 'Fast CDN hosting (pages load in under a second).' });
+  else if (scan.timing.ttfbMs > 800) add({ id: 'ttfb', category: 'speed', severity: 'medium', title: 'Server is a bit slow', detail: `First byte took ${scan.timing.ttfbMs}ms.`, fix: 'Fast CDN hosting.' });
+  if (pageKb > 3000) add({ id: 'weight', category: 'speed', severity: 'high', title: 'Page is very heavy', detail: `About ${(pageKb / 1024).toFixed(1)} MB to download${img.biggest ? `; the largest image alone is ${(img.biggest.kb / 1024).toFixed(1)} MB` : ''}.`, fix: 'Compressed, right-sized images (each under 250 KB).' });
+  else if (pageKb > 1500) add({ id: 'weight', category: 'speed', severity: 'medium', title: 'Page is heavier than it should be', detail: `About ${(pageKb / 1024).toFixed(1)} MB to download.`, fix: 'Compressed, right-sized images.' });
+  else ok(`Page weight is reasonable (${pageKb} KB sampled)`);
+  const noDims = scan.images.filter((i) => !i.width || !i.height).length;
+  if (noDims >= 2) add({ id: 'img-dims', category: 'speed', severity: 'low', title: 'Content jumps while loading', detail: `${noDims} images have no size set.`, fix: 'Reserved image space, no layout shift.' });
+
+  // ── SEO ──
+  const titleTxt = (scan.title || '').trim();
+  if (!titleTxt || /^(home|welcome|untitled|index|homepage)\b/i.test(titleTxt)) add({ id: 'title', category: 'seo', severity: 'high', title: 'Google sees a generic page title', detail: titleTxt ? `Title is just "${titleTxt}".` : 'The page has no title.', fix: `Title like "${b?.name || 'Business'} | ${b?.primaryTypeLabel || 'Service'} in ${b?.city || 'your city'}".` });
+  else if (titleTxt.length > 65) add({ id: 'title-long', category: 'seo', severity: 'low', title: 'Page title gets cut off in Google', detail: `${titleTxt.length} characters.`, fix: 'Tight 50-60 character title.' });
+  else ok('Has a descriptive title');
+  if (!scan.description) add({ id: 'meta-desc', category: 'seo', severity: 'medium', title: 'No description for Google results', detail: 'Missing meta description, so Google picks random text.', fix: 'A clear one-line description with your city and services.' });
+  else ok('Has a meta description');
+  const h1s = $('h1');
+  if (!h1s.length) add({ id: 'h1', category: 'seo', severity: 'medium', title: 'No main headline', detail: 'The page has no H1.', fix: 'One clear headline that says what you do and where.' });
+  else if (/^welcome\b/i.test(h1s.first().text().trim())) add({ id: 'h1-generic', category: 'seo', severity: 'low', title: 'Headline doesn\'t say what you do', detail: `Headline is "${h1s.first().text().trim().slice(0, 60)}".`, fix: 'Headline with your service and city.' });
+  const city = b?.city;
+  if (city && !new RegExp(`\\b${city}\\b`, 'i').test(`${titleTxt} ${h1s.text()}`)) add({ id: 'local-seo', category: 'seo', severity: 'medium', title: `Google can't tell you work in ${city}`, detail: `"${city}" isn't in the title or headline.`, fix: `${city} in the title, headline and service-area section.` });
+  // Many sites use a generic Organization but still give Google the address and hours; that counts.
+  const hasSchema = /"@type"\s*:\s*"(LocalBusiness|HomeAndConstructionBusiness|RoofingContractor|Plumber|Electrician|HVACBusiness|GeneralContractor|ProfessionalService|PostalAddress|OpeningHoursSpecification)"/i.test(html);
+  if (!hasSchema) add({ id: 'schema', category: 'seo', severity: 'medium', title: 'Missing local business data for Google', detail: 'No LocalBusiness structured data (schema.org).', fix: 'Structured data with your hours, address, phone and service area.' });
+  else ok('Has LocalBusiness structured data');
+  if (/<meta[^>]+name=["']robots["'][^>]+noindex/i.test(html)) add({ id: 'noindex', category: 'seo', severity: 'critical', title: 'Your site is hidden from Google', detail: 'A noindex tag tells Google not to list it.', fix: 'Indexable pages and a sitemap.' });
+  const origin = new URL(scan.finalUrl).origin;
+  const [robots, sitemap] = await Promise.all([fetchRaw(`${origin}/robots.txt`, { timeoutMs: 5000, maxBytes: 50_000 }), fetchRaw(`${origin}/sitemap.xml`, { timeoutMs: 5000, maxBytes: 200_000 })]);
+  if (!sitemap.ok || !/<urlset|<sitemapindex/i.test(sitemap.body.toString('utf8'))) add({ id: 'sitemap', category: 'seo', severity: 'low', title: 'No sitemap for Google', detail: '/sitemap.xml not found.', fix: 'Auto-generated sitemap.' });
+  if (!robots.ok) add({ id: 'robots', category: 'seo', severity: 'low', title: 'No robots.txt', detail: '/robots.txt not found.', fix: 'Standard robots.txt pointing to the sitemap.' });
+  const missingAlt = scan.images.filter((i) => !i.alt || !i.alt.trim()).length;
+  if (missingAlt >= 2) add({ id: 'alt', category: 'seo', severity: 'low', title: 'Photos are invisible to Google and screen readers', detail: `${missingAlt} of ${scan.images.length} images have no alt text.`, fix: 'Descriptive alt text on every photo.' });
+  const ogImg = $('meta[property="og:image"]').attr('content');
+  if (!ogImg) add({ id: 'og', category: 'seo', severity: 'low', title: 'Links to your site look blank when shared', detail: 'No preview image (og:image) for iMessage, Facebook or texts.', fix: 'A branded share image so links show a rich preview.' });
+
+  // ── conversion ──
+  const tel = $('a[href^="tel:"]').length;
+  if (!tel) add({ id: 'tel', category: 'conversion', severity: 'high', title: 'Phone number isn\'t tap-to-call', detail: 'No tel: link, so phone visitors have to copy the number.', fix: 'Tap-to-call button in the header and a sticky call bar on phones.' });
+  else ok('Phone number is tap-to-call');
+  const forms = $('form').filter((_, el) => $(el).find('input, textarea').length >= 2).length;
+  const booking = /calendly|housecallpro|jobber|servicetitan|book(ing)?\s+(now|online)|schedule\s+(service|online|now)/i.test(html)
+    // or a link to a quote / estimate / booking page ("Get a roof quote" → /roof-quote/, booking.example.com)
+    || $('a[href]').filter((_, el) => /quote|estimate|\bbook(ing)?\b|schedul/i.test(`${$(el).attr('href')} ${$(el).text()}`)).length > 0; // \b: not facebook.com
+  if (!forms && !booking) add({ id: 'form', category: 'conversion', severity: 'medium', title: 'No way to request a quote online', detail: 'No contact or estimate form found.', fix: 'Short quote form that texts you every new lead.' });
+  else ok('Has a contact form or booking');
+  const ctaRe = /\b(call now|get a (free )?(quote|estimate)|free (quote|estimate|inspection)|request (a )?(quote|estimate|service)|book|schedule)\b/i;
+  const ctaEls = $('a, button').filter((_, el) => ctaRe.test($(el).text())).length;
+  if (!ctaEls) add({ id: 'cta', category: 'conversion', severity: 'medium', title: 'No clear "call" or "get a quote" button', detail: 'Visitors aren\'t told what to do next.', fix: 'One obvious action button above the fold.' });
+  if (!$('a[href^="sms:"]').length) add({ id: 'sms', category: 'conversion', severity: 'low', title: 'Customers can\'t text you from the site', detail: 'No text/SMS link.', fix: 'A "Text us" button that opens Messages.' });
+  if (!/googletagmanager|gtag\(|google-analytics|analytics\.js|plausible|fbq\(|clarity\.ms/i.test(html)) add({ id: 'analytics', category: 'conversion', severity: 'low', title: 'You can\'t see how many people visit', detail: 'No analytics installed.', fix: 'Simple visitor and call tracking.' });
+
+  // ── trust / local consistency (vs Google Business) ──
+  if (b) {
+    const gPhone = digits(b.phone).slice(-10);
+    const sitePhones = scan.phones.map((p) => digits(p).slice(-10)).filter((p) => p.length === 10);
+    if (gPhone && sitePhones.length && !sitePhones.includes(gPhone)) add({ id: 'nap-phone', category: 'trust', severity: 'high', title: 'Phone number doesn\'t match Google', detail: `Website shows ${scan.phones[0]}, Google shows ${b.phone}. Mismatches confuse customers and hurt local ranking.`, fix: 'Same name, address and phone everywhere.' });
+    else if (gPhone && sitePhones.includes(gPhone)) ok('Phone matches Google');
+    const gNum = b.street?.match(/^\d+/)?.[0];
+    const siteStreets = [...text.matchAll(STREET_RE)].map((m) => m[0]);
+    if (gNum && siteStreets.length && !siteStreets.some((s) => s.startsWith(gNum))) add({ id: 'nap-address', category: 'trust', severity: 'high', title: 'Address doesn\'t match Google', detail: `Website lists "${siteStreets[0]}", Google lists "${b.street}".`, fix: 'Address synced from your Google Business Profile.' });
+    if ((b.rating || 0) >= 4.3 && (b.reviewCount || 0) >= 10 && !/\breview|testimonial|★|stars?\b/i.test(text)) add({ id: 'reviews', category: 'trust', severity: 'medium', title: `Your ${b.rating}★ Google rating isn't on your site`, detail: `${b.reviewCount} Google reviews, none shown on the website.`, fix: 'Your best Google reviews shown on the homepage.' });
+    if (b.hours?.weekdayText?.length && !/\b(mon(day)?|hours|open)\b/i.test(text)) add({ id: 'hours', category: 'trust', severity: 'low', title: 'Business hours aren\'t listed', detail: 'Visitors can\'t tell when you\'re open.', fix: 'Hours with a live "Open now" badge.' });
+  }
+  const copy = [...text.matchAll(/(?:©|&copy;|copyright)\s*(?:\d{4}\s*[-–]\s*)?(20\d\d|19\d\d)/gi)].map((m) => Number(m[1]));
+  const lastYear = copy.length ? Math.max(...copy) : undefined;
+  if (lastYear && lastYear < year - 1) add({ id: 'stale', category: 'trust', severity: 'medium', title: 'Site looks out of date', detail: `Footer says © ${lastYear}.`, fix: 'Fresh design that stays current automatically.' });
+  const freeMail = scan.emails.find((e) => FREE_EMAIL.test(e));
+  if (freeMail) add({ id: 'email', category: 'trust', severity: 'low', title: 'Free email address looks less professional', detail: `Uses ${freeMail}.`, fix: 'Contact form so customers never need your personal email.' });
+  if (!$('link[rel~="icon"]').length) add({ id: 'favicon', category: 'trust', severity: 'low', title: 'No browser icon', detail: 'Missing favicon.', fix: 'Favicon from your logo.' });
+
+  const ps = await psP;
+  if (ps) {
+    if (ps.performance < 50) add({ id: 'psi', category: 'speed', severity: 'high', title: 'Google rates your mobile speed as poor', detail: `PageSpeed ${ps.performance}/100${ps.lcp ? `, main content shows after ${ps.lcp}` : ''}.`, fix: 'Lightweight pages that score 90+.' });
+    else if (ps.performance < 90) add({ id: 'psi', category: 'speed', severity: 'medium', title: 'Mobile speed could be better', detail: `PageSpeed ${ps.performance}/100${ps.lcp ? `, LCP ${ps.lcp}` : ''}.`, fix: 'Lightweight pages that score 90+.' });
+    else ok(`Google PageSpeed ${ps.performance}/100`);
+  }
+  return finalize(scan, issues, passed, { ttfbMs: scan.timing.ttfbMs, htmlKb, imageKb: img.kb, pageKb, images: scan.images.length, requestsSampled: img.sampled, pagespeed: ps }, b);
+}
+
+const SEV_ORDER: Severity[] = ['critical', 'high', 'medium', 'low'];
+
+async function finalize(scan: WebsiteScan, issues: AuditIssue[], passed: string[], metrics: AuditResult['metrics'], b?: Business): Promise<AuditResult> {
+  issues.sort((a, c) => SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(c.severity));
+  // Exponential decay: a few small issues barely move the score; many serious ones push it down without hitting zero.
+  const pen = (list: AuditIssue[]) => list.reduce((s, i) => s + PENALTY[i.severity], 0);
+  const score = Math.max(5, Math.round(100 * Math.exp(-pen(issues) / 110)));
+  const categories = Object.fromEntries(CATS.map((c) => [c, Math.round(100 * Math.exp(-pen(issues.filter((i) => i.category === c)) / 40))])) as Record<Category, number>;
+  const grade = score >= 90 ? 'A' : score >= 75 ? 'B' : score >= 60 ? 'C' : score >= 40 ? 'D' : 'F';
+  const summary = await summarize(scan, issues, passed, score, b);
+  return { url: scan.url, finalUrl: scan.finalUrl, reachable: scan.ok, score, grade, categories, issues, passed, metrics, summary, generatedAt: new Date().toISOString() };
+}
+
+function domainOf(u: string) {
+  try { return new URL(u).host.replace(/^www\./, ''); } catch { return u; }
+}
+
+async function summarize(scan: WebsiteScan, issues: AuditIssue[], passed: string[], score: number, b?: Business): Promise<AuditResult['summary']> {
+  const top = issues.slice(0, 3);
+  const ai = await claudeJson<{ headline: string; bullets: string[]; pitch: string }>({
+    system:
+      'You are Roger, a friendly assistant texting a small home-services business owner over iMessage. ' +
+      'Write like a helpful person, not a marketer: short, specific, plain words, no jargon (say "tap-to-call" not "tel: link"), no emojis, no exclamation marks. ' +
+      'Only mention problems present in the issues list. Never invent numbers.',
+    prompt: JSON.stringify({ business: b?.name, website: domainOf(scan.finalUrl), score, issues: issues.slice(0, 8).map((i) => ({ title: i.title, detail: i.detail, severity: i.severity, fix: i.fix })), passed }),
+    toolName: 'imessage_audit',
+    toolDescription: 'The audit summary Roger will send in iMessage.',
+    schema: {
+      type: 'object',
+      properties: {
+        headline: { type: 'string', description: 'One sentence, under 110 characters, includes the score out of 100.' },
+        // the score-card image lists issues[0..2], so the text must cover the same three in the same order
+        bullets: { type: 'array', items: { type: 'string' }, maxItems: 3, description: 'The first 3 issues in the list, in the same order, each rewritten owner-friendly in under 80 characters.' },
+        pitch: { type: 'string', description: 'One or two sentences offering to fix it with a new site, under 200 characters.' },
+      },
+      required: ['headline', 'bullets', 'pitch'],
+    },
+    maxTokens: 600,
+  });
+  if (ai) return { ...ai.data, bullets: ai.data.bullets.slice(0, 3), source: 'claude' };
+  const dom = domainOf(scan.finalUrl);
+  return {
+    headline: scan.ok ? `I checked ${dom}. It scores ${score}/100.` : `I tried to open ${dom}, but it isn't loading right now.`,
+    bullets: top.map((i) => i.title),
+    pitch: top.length ? `We can fix ${top.length > 1 ? 'all of this' : 'that'} with a fast new site built from your Google profile. Want to see a free preview?` : 'Your site is in good shape. Want a free preview of a refreshed version anyway?',
+    source: 'template',
+  };
+}

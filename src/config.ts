@@ -1,0 +1,89 @@
+import 'dotenv/config';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// DATA_DIR lets QA runs use a throwaway folder instead of adding test builds to the real history
+const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT, 'data');
+
+// Executable locations inside a Playwright chromium-<rev> folder, per OS.
+const PW_INNER = [
+  'chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome',
+  'chrome-win64/chrome.exe', 'chrome-win/chrome.exe',
+  'chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+];
+
+function detectChromium(): string | undefined {
+  if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  // Playwright browser caches: explicit, sandbox, then the per-OS defaults.
+  const caches = [
+    process.env.PLAYWRIGHT_BROWSERS_PATH,
+    '/opt/pw-browsers',
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'ms-playwright'),
+    path.join(home, 'Library', 'Caches', 'ms-playwright'),
+    path.join(home, '.cache', 'ms-playwright'),
+  ].filter(Boolean) as string[];
+  const dirs: string[] = [];
+  for (const base of caches) {
+    dirs.push(path.join(base, 'chromium'));
+    try {
+      // newest revision first: chromium-1243 before chromium-1223
+      const revs = fs.readdirSync(base).filter((n) => /^chromium-\d+$/.test(n)).sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
+      dirs.push(...revs.map((r) => path.join(base, r)));
+    } catch { /* cache not present */ }
+  }
+  for (const d of dirs) for (const i of PW_INNER) if (fs.existsSync(path.join(d, i))) return path.join(d, i);
+  const pf = process.env.PROGRAMFILES || 'C:\\Program Files';
+  const pf86 = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
+  const system = [
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+  ].filter(Boolean) as string[];
+  return system.find((c) => { try { return fs.statSync(c).isFile(); } catch { return false; } });
+}
+
+const googleKey = process.env.GOOGLE_MAPS_API_KEY || '';
+
+export const config = {
+  port: Number(process.env.PORT || 4000),
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 4000}`).replace(/\/$/, ''),
+  googleKey,
+  pagespeedKey: process.env.PAGESPEED_API_KEY || googleKey,
+  anthropicKey: process.env.ANTHROPIC_API_KEY || '',
+  anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
+  /** Local demos without an API key: answer through the signed-in Claude Code CLI (`claude -p`). An API key wins. */
+  claudeCli: process.env.CLAUDE_CLI === '1',
+  claudeCliPath: process.env.CLAUDE_CLI_PATH || 'claude',
+  /** Your iMessage gateway's send endpoint: messages Roger sends later (the preview after "On it") are POSTed here as { from, replies } */
+  imessageOutboundUrl: process.env.IMESSAGE_OUTBOUND_URL || '',
+  mock: process.env.MOCK === '1' || !googleKey,
+  leadWebhook: process.env.LEAD_WEBHOOK_URL || '',
+  /** Roger's iMessage address (phone or Apple ID email). Used for "Claim this site" links on previews. */
+  rogerImessage: process.env.ROGER_IMESSAGE_ADDRESS || '',
+  chromiumPath: detectChromium(),
+  dirs: {
+    themes: path.join(ROOT, 'themes'),
+    customThemes: path.join(DATA, 'themes'),
+    out: path.join(ROOT, 'out'),
+    sites: path.join(ROOT, 'out', 'sites'),
+    reports: path.join(ROOT, 'out', 'reports'),
+    cards: path.join(ROOT, 'out', 'cards'),
+    data: DATA, // saved builds, conversations, leads, uploaded themes
+    public: path.join(ROOT, 'public'),
+    fixtures: path.join(ROOT, 'fixtures'),
+  },
+  userAgent:
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36 RogerSiteBuilder/0.1',
+};
+
+for (const d of Object.values(config.dirs)) fs.mkdirSync(d, { recursive: true });

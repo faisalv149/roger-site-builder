@@ -1,0 +1,720 @@
+{
+  "schemaVersion": 2,
+  "verticals": [
+    "roofing",
+    "hvac",
+    "plumbing",
+    "electrical",
+    "landscaping",
+    "general"
+  ],
+  "variants": [
+    "urgent",
+    "showcase",
+    "trust",
+    "estimate",
+    "classic",
+    "minimal"
+  ],
+  "themes": [
+    {
+      "id": "roofing-urgent",
+      "vertical": "roofing",
+      "variant": "urgent",
+      "name": "Roofing \u00b7 Urgent Response",
+      "file": "themes/roofing/roofing-urgent.theme.json",
+      "brand": "#C2410C",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "proof",
+        "quote",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "roofing-showcase",
+      "vertical": "roofing",
+      "variant": "showcase",
+      "name": "Roofing \u00b7 Work Showcase",
+      "file": "themes/roofing/roofing-showcase.theme.json",
+      "brand": "#1E3A5F",
+      "defaultPair": "modern",
+      "grid": "asymmetric-12",
+      "sections": [
+        "hero",
+        "gallery",
+        "proof",
+        "services",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "roofing-trust",
+      "vertical": "roofing",
+      "variant": "trust",
+      "name": "Roofing \u00b7 Local and Trusted",
+      "file": "themes/roofing/roofing-trust.theme.json",
+      "brand": "#2F6B3A",
+      "defaultPair": "friendly",
+      "grid": "centered-8",
+      "sections": [
+        "hero",
+        "proof",
+        "gallery",
+        "services",
+        "area",
+        "quote",
+        "footer"
+      ]
+    },
+    {
+      "id": "roofing-estimate",
+      "vertical": "roofing",
+      "variant": "estimate",
+      "name": "Roofing \u00b7 Fast Estimate",
+      "file": "themes/roofing/roofing-estimate.theme.json",
+      "brand": "#0F766E",
+      "defaultPair": "modern",
+      "grid": "sidebar-12",
+      "sections": [
+        "hero",
+        "quote",
+        "services",
+        "proof",
+        "urgent",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "roofing-classic",
+      "vertical": "roofing",
+      "variant": "classic",
+      "name": "Roofing \u00b7 Classic Balanced",
+      "file": "themes/roofing/roofing-classic.theme.json",
+      "brand": "#8C3B2A",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "gallery",
+        "proof",
+        "services",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "roofing-minimal",
+      "vertical": "roofing",
+      "variant": "minimal",
+      "name": "Roofing \u00b7 Minimal Editorial",
+      "file": "themes/roofing/roofing-minimal.theme.json",
+      "brand": "#374151",
+      "defaultPair": "modern",
+      "grid": "single-col",
+      "sections": [
+        "hero",
+        "services",
+        "proof",
+        "quote",
+        "area",
+        "gallery",
+        "footer"
+      ]
+    },
+    {
+      "id": "hvac-urgent",
+      "vertical": "hvac",
+      "variant": "urgent",
+      "name": "HVAC \u00b7 Urgent Response",
+      "file": "themes/hvac/hvac-urgent.theme.json",
+      "brand": "#B91C1C",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "proof",
+        "quote",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "hvac-showcase",
+      "vertical": "hvac",
+      "variant": "showcase",
+      "name": "HVAC \u00b7 Work Showcase",
+      "file": "themes/hvac/hvac-showcase.theme.json",
+      "brand": "#1D4ED8",
+      "defaultPair": "modern",
+      "grid": "asymmetric-12",
+      "sections": [
+        "hero",
+        "gallery",
+        "proof",
+        "services",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "hvac-trust",
+      "vertical": "hvac",
+      "variant": "trust",
+      "name": "HVAC \u00b7 Local and Trusted",
+      "file": "themes/hvac/hvac-trust.theme.json",
+      "brand": "#0E7490",
+      "defaultPair": "friendly",
+      "grid": "centered-8",
+      "sections": [
+        "hero",
+        "proof",
+        "gallery",
+        "services",
+        "area",
+        "quote",
+        "footer"
+      ]
+    },
+    {
+      "id": "hvac-estimate",
+      "vertical": "hvac",
+      "variant": "estimate",
+      "name": "HVAC \u00b7 Fast Estimate",
+      "file": "themes/hvac/hvac-estimate.theme.json",
+      "brand": "#1F2937",
+      "defaultPair": "modern",
+      "grid": "sidebar-12",
+      "sections": [
+        "hero",
+        "quote",
+        "services",
+        "proof",
+        "urgent",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "hvac-classic",
+      "vertical": "hvac",
+      "variant": "classic",
+      "name": "HVAC \u00b7 Classic Balanced",
+      "file": "themes/hvac/hvac-classic.theme.json",
+      "brand": "#C2410C",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "maintenance",
+        "proof",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "hvac-minimal",
+      "vertical": "hvac",
+      "variant": "minimal",
+      "name": "HVAC \u00b7 Minimal Editorial",
+      "file": "themes/hvac/hvac-minimal.theme.json",
+      "brand": "#2563EB",
+      "defaultPair": "modern",
+      "grid": "single-col",
+      "sections": [
+        "hero",
+        "services",
+        "proof",
+        "quote",
+        "area",
+        "gallery",
+        "footer"
+      ]
+    },
+    {
+      "id": "plumbing-urgent",
+      "vertical": "plumbing",
+      "variant": "urgent",
+      "name": "Plumbing \u00b7 Urgent Response",
+      "file": "themes/plumbing/plumbing-urgent.theme.json",
+      "brand": "#1D4ED8",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "proof",
+        "quote",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "plumbing-showcase",
+      "vertical": "plumbing",
+      "variant": "showcase",
+      "name": "Plumbing \u00b7 Work Showcase",
+      "file": "themes/plumbing/plumbing-showcase.theme.json",
+      "brand": "#0F766E",
+      "defaultPair": "modern",
+      "grid": "asymmetric-12",
+      "sections": [
+        "hero",
+        "gallery",
+        "proof",
+        "services",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "plumbing-trust",
+      "vertical": "plumbing",
+      "variant": "trust",
+      "name": "Plumbing \u00b7 Local and Trusted",
+      "file": "themes/plumbing/plumbing-trust.theme.json",
+      "brand": "#B45309",
+      "defaultPair": "friendly",
+      "grid": "centered-8",
+      "sections": [
+        "hero",
+        "proof",
+        "gallery",
+        "services",
+        "area",
+        "quote",
+        "footer"
+      ]
+    },
+    {
+      "id": "plumbing-estimate",
+      "vertical": "plumbing",
+      "variant": "estimate",
+      "name": "Plumbing \u00b7 Fast Estimate",
+      "file": "themes/plumbing/plumbing-estimate.theme.json",
+      "brand": "#1E3A5F",
+      "defaultPair": "modern",
+      "grid": "sidebar-12",
+      "sections": [
+        "hero",
+        "quote",
+        "services",
+        "proof",
+        "urgent",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "plumbing-classic",
+      "vertical": "plumbing",
+      "variant": "classic",
+      "name": "Plumbing \u00b7 Classic Balanced",
+      "file": "themes/plumbing/plumbing-classic.theme.json",
+      "brand": "#166534",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "proof",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "plumbing-minimal",
+      "vertical": "plumbing",
+      "variant": "minimal",
+      "name": "Plumbing \u00b7 Minimal Editorial",
+      "file": "themes/plumbing/plumbing-minimal.theme.json",
+      "brand": "#334155",
+      "defaultPair": "modern",
+      "grid": "single-col",
+      "sections": [
+        "hero",
+        "services",
+        "proof",
+        "quote",
+        "area",
+        "gallery",
+        "footer"
+      ]
+    },
+    {
+      "id": "electrical-urgent",
+      "vertical": "electrical",
+      "variant": "urgent",
+      "name": "Electrical \u00b7 Urgent Response",
+      "file": "themes/electrical/electrical-urgent.theme.json",
+      "brand": "#B45309",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "proof",
+        "quote",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "electrical-showcase",
+      "vertical": "electrical",
+      "variant": "showcase",
+      "name": "Electrical \u00b7 Work Showcase",
+      "file": "themes/electrical/electrical-showcase.theme.json",
+      "brand": "#1E3A5F",
+      "defaultPair": "modern",
+      "grid": "asymmetric-12",
+      "sections": [
+        "hero",
+        "gallery",
+        "proof",
+        "services",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "electrical-trust",
+      "vertical": "electrical",
+      "variant": "trust",
+      "name": "Electrical \u00b7 Local and Trusted",
+      "file": "themes/electrical/electrical-trust.theme.json",
+      "brand": "#991B1B",
+      "defaultPair": "friendly",
+      "grid": "centered-8",
+      "sections": [
+        "hero",
+        "proof",
+        "gallery",
+        "services",
+        "area",
+        "quote",
+        "footer"
+      ]
+    },
+    {
+      "id": "electrical-estimate",
+      "vertical": "electrical",
+      "variant": "estimate",
+      "name": "Electrical \u00b7 Fast Estimate",
+      "file": "themes/electrical/electrical-estimate.theme.json",
+      "brand": "#0F766E",
+      "defaultPair": "modern",
+      "grid": "sidebar-12",
+      "sections": [
+        "hero",
+        "quote",
+        "services",
+        "proof",
+        "urgent",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "electrical-classic",
+      "vertical": "electrical",
+      "variant": "classic",
+      "name": "Electrical \u00b7 Classic Balanced",
+      "file": "themes/electrical/electrical-classic.theme.json",
+      "brand": "#1F2937",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "proof",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "electrical-minimal",
+      "vertical": "electrical",
+      "variant": "minimal",
+      "name": "Electrical \u00b7 Minimal Editorial",
+      "file": "themes/electrical/electrical-minimal.theme.json",
+      "brand": "#4338CA",
+      "defaultPair": "modern",
+      "grid": "single-col",
+      "sections": [
+        "hero",
+        "services",
+        "proof",
+        "quote",
+        "area",
+        "gallery",
+        "footer"
+      ]
+    },
+    {
+      "id": "landscaping-urgent",
+      "vertical": "landscaping",
+      "variant": "urgent",
+      "name": "Landscaping \u00b7 Urgent Response",
+      "file": "themes/landscaping/landscaping-urgent.theme.json",
+      "brand": "#166534",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "proof",
+        "quote",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "landscaping-showcase",
+      "vertical": "landscaping",
+      "variant": "showcase",
+      "name": "Landscaping \u00b7 Work Showcase",
+      "file": "themes/landscaping/landscaping-showcase.theme.json",
+      "brand": "#365314",
+      "defaultPair": "modern",
+      "grid": "asymmetric-12",
+      "sections": [
+        "hero",
+        "gallery",
+        "proof",
+        "services",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "landscaping-trust",
+      "vertical": "landscaping",
+      "variant": "trust",
+      "name": "Landscaping \u00b7 Local and Trusted",
+      "file": "themes/landscaping/landscaping-trust.theme.json",
+      "brand": "#0F766E",
+      "defaultPair": "friendly",
+      "grid": "centered-8",
+      "sections": [
+        "hero",
+        "proof",
+        "gallery",
+        "services",
+        "area",
+        "quote",
+        "footer"
+      ]
+    },
+    {
+      "id": "landscaping-estimate",
+      "vertical": "landscaping",
+      "variant": "estimate",
+      "name": "Landscaping \u00b7 Fast Estimate",
+      "file": "themes/landscaping/landscaping-estimate.theme.json",
+      "brand": "#7C2D12",
+      "defaultPair": "modern",
+      "grid": "sidebar-12",
+      "sections": [
+        "hero",
+        "quote",
+        "services",
+        "proof",
+        "urgent",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "landscaping-classic",
+      "vertical": "landscaping",
+      "variant": "classic",
+      "name": "Landscaping \u00b7 Classic Balanced",
+      "file": "themes/landscaping/landscaping-classic.theme.json",
+      "brand": "#1E3A5F",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "gallery",
+        "services",
+        "proof",
+        "maintenance",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "landscaping-minimal",
+      "vertical": "landscaping",
+      "variant": "minimal",
+      "name": "Landscaping \u00b7 Minimal Editorial",
+      "file": "themes/landscaping/landscaping-minimal.theme.json",
+      "brand": "#4D7C0F",
+      "defaultPair": "modern",
+      "grid": "single-col",
+      "sections": [
+        "hero",
+        "services",
+        "proof",
+        "quote",
+        "area",
+        "gallery",
+        "footer"
+      ]
+    },
+    {
+      "id": "general-urgent",
+      "vertical": "general",
+      "variant": "urgent",
+      "name": "General \u00b7 Urgent Response",
+      "file": "themes/general/general-urgent.theme.json",
+      "brand": "#1D4ED8",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "proof",
+        "quote",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "general-showcase",
+      "vertical": "general",
+      "variant": "showcase",
+      "name": "General \u00b7 Work Showcase",
+      "file": "themes/general/general-showcase.theme.json",
+      "brand": "#0F766E",
+      "defaultPair": "modern",
+      "grid": "asymmetric-12",
+      "sections": [
+        "hero",
+        "gallery",
+        "proof",
+        "services",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "general-trust",
+      "vertical": "general",
+      "variant": "trust",
+      "name": "General \u00b7 Local and Trusted",
+      "file": "themes/general/general-trust.theme.json",
+      "brand": "#B45309",
+      "defaultPair": "friendly",
+      "grid": "centered-8",
+      "sections": [
+        "hero",
+        "proof",
+        "gallery",
+        "services",
+        "area",
+        "quote",
+        "footer"
+      ]
+    },
+    {
+      "id": "general-estimate",
+      "vertical": "general",
+      "variant": "estimate",
+      "name": "General \u00b7 Fast Estimate",
+      "file": "themes/general/general-estimate.theme.json",
+      "brand": "#1E3A5F",
+      "defaultPair": "modern",
+      "grid": "sidebar-12",
+      "sections": [
+        "hero",
+        "quote",
+        "services",
+        "proof",
+        "urgent",
+        "gallery",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "general-classic",
+      "vertical": "general",
+      "variant": "classic",
+      "name": "General \u00b7 Classic Balanced",
+      "file": "themes/general/general-classic.theme.json",
+      "brand": "#166534",
+      "defaultPair": "sturdy",
+      "grid": "12-col",
+      "sections": [
+        "hero",
+        "urgent",
+        "services",
+        "proof",
+        "quote",
+        "area",
+        "footer"
+      ]
+    },
+    {
+      "id": "general-minimal",
+      "vertical": "general",
+      "variant": "minimal",
+      "name": "General \u00b7 Minimal Editorial",
+      "file": "themes/general/general-minimal.theme.json",
+      "brand": "#334155",
+      "defaultPair": "modern",
+      "grid": "single-col",
+      "sections": [
+        "hero",
+        "services",
+        "proof",
+        "quote",
+        "area",
+        "gallery",
+        "footer"
+      ]
+    }
+  ]
+}

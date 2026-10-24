@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6D8AA8"/><stop offset="1" stop-color="#C9D6E2"/></linearGradient>
+  <linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient></defs>
+  <rect width="1200" height="900" fill="url(#s)"/><circle cx="456" cy="180" r="63.00000000000001" fill="#FFFFFF" opacity=".55"/><path d="M0 648 Q 300 576 600 630 T 1200 603 V 900 H 0 Z" fill="#5C7550"/>
+    <rect x="624" y="378" width="504" height="270" fill="#D9CBB8"/>
+    <rect x="684.48" y="480.6" width="80.64" height="70.2" fill="#2B201A" opacity=".55"/>
+    <rect x="986.88" y="480.6" width="80.64" height="70.2" fill="#2B201A" opacity=".55"/>
+    <rect x="840.72" y="513" width="70.56" height="135" fill="#2B201A" opacity=".75"/><polygon points="583.68,378 876,162 1168.3200000000002,378" fill="#5B3A29"/><line x1="834.24" y1="192.85714285714286" x2="917.76" y2="192.85714285714286" stroke="#2B201A" stroke-opacity=".25" stroke-width="3"/><line x1="792.48" y1="223.71428571428572" x2="959.52" y2="223.71428571428572" stroke="#2B201A" stroke-opacity=".25" stroke-width="3"/><line x1="750.72" y1="254.57142857142856" x2="1001.28" y2="254.57142857142856" stroke="#2B201A" stroke-opacity=".25" stroke-width="3"/><line x1="708.96" y1="285.42857142857144" x2="1043.04" y2="285.42857142857144" stroke="#2B201A" stroke-opacity=".25" stroke-width="3"/><line x1="667.2" y1="316.2857142857143" x2="1084.8" y2="316.2857142857143" stroke="#2B201A" stroke-opacity=".25" stroke-width="3"/><line x1="625.44" y1="347.1428571428571" x2="1126.56" y2="347.1428571428571" stroke="#2B201A" stroke-opacity=".25" stroke-width="3"/>
+  <rect width="1200" height="900" fill="url(#v)"/>
+  <text x="1176" y="878" text-anchor="end" font-family="Arial, sans-serif" font-size="23" fill="#fff" opacity=".7">Placeholder image</text>
+</svg>

@@ -1,0 +1,125 @@
+{
+  "placeId": "mock-blueline-plumbing",
+  "name": "BlueLine Plumbing & Drain",
+  "primaryType": "plumber",
+  "primaryTypeLabel": "Plumber",
+  "types": [
+    "plumber",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "880 Kalamath St, Denver, CO 80204, USA",
+  "shortAddress": "880 Kalamath St, Denver",
+  "street": "880 Kalamath St",
+  "city": "Denver",
+  "state": "CO",
+  "zip": "80204",
+  "country": "US",
+  "lat": 39.7302,
+  "lng": -105.0001,
+  "phone": "(303) 555-0187",
+  "phoneE164": "+13035550187",
+  "mapsUrl": "https://maps.google.com/?cid=2234567890",
+  "rating": 4.6,
+  "reviewCount": 58,
+  "reviews": [
+    {
+      "author": "Chris Allen",
+      "rating": 5,
+      "relativeTime": "1 week ago",
+      "text": "Pipe burst at 2am and they picked up on the first ring. Emergency plumber was here in 40 minutes and stopped the leak. Lifesavers."
+    },
+    {
+      "author": "Hannah Lee",
+      "rating": 5,
+      "relativeTime": "3 weeks ago",
+      "text": "Replaced our old water heater with a tankless unit the same day. Clean work and fair pricing."
+    },
+    {
+      "author": "Marcus Johnson",
+      "rating": 4,
+      "relativeTime": "2 months ago",
+      "text": "Drain cleaning and a camera inspection of our sewer line. They showed me the video and explained everything."
+    },
+    {
+      "author": "Sofia Ramirez",
+      "rating": 5,
+      "relativeTime": "4 months ago",
+      "text": "Fixed a leaking toilet and a dripping faucet. Friendly and quick."
+    },
+    {
+      "author": "Dev Patel",
+      "rating": 3,
+      "relativeTime": "6 months ago",
+      "text": "Work was fine but the price was higher than I expected for a clogged drain."
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/blueline-0.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "BlueLine Plumbing & Drain"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/blueline-1.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "BlueLine Plumbing & Drain"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/blueline-2.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "BlueLine Plumbing & Drain"
+        }
+      ],
+      "isOwner": true
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 0,
+          "hour": 0,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: Open 24 hours",
+      "Tuesday: Open 24 hours",
+      "Wednesday: Open 24 hours",
+      "Thursday: Open 24 hours",
+      "Friday: Open 24 hours",
+      "Saturday: Open 24 hours",
+      "Sunday: Open 24 hours"
+    ]
+  },
+  "utcOffsetMinutes": -360,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Denver",
+    "Lakewood",
+    "Englewood",
+    "Edgewater",
+    "Wheat Ridge",
+    "Arvada",
+    "Aurora",
+    "Littleton"
+  ],
+  "source": "mock"
+}

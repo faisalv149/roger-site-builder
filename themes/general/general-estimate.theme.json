@@ -1,0 +1,376 @@
+{
+  "meta": {
+    "name": "General · Fast Estimate",
+    "vertical": "general",
+    "variant": "estimate",
+    "description": "Lead capture first: form inside the hero, sticky quote sidebar on desktop. Trade-neutral copy for any local business.",
+    "schemaVersion": 2,
+    "previewImage": "/themes/general-estimate.png"
+  },
+  "match": {
+    "googleTypes": []
+  },
+  "fontPairs": [
+    {
+      "id": "sturdy",
+      "label": "Classic serif",
+      "heading": "Georgia, 'Times New Roman', serif",
+      "body": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    },
+    {
+      "id": "modern",
+      "label": "Clean modern",
+      "heading": "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+      "body": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    },
+    {
+      "id": "friendly",
+      "label": "Rounded friendly",
+      "heading": "ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'Trebuchet MS', sans-serif",
+      "body": "'Trebuchet MS', 'Segoe UI', Tahoma, sans-serif"
+    }
+  ],
+  "defaultPair": "modern",
+  "fontFaces": [],
+  "type": {
+    "scale": {
+      "xs": 13,
+      "sm": 15,
+      "md": 17,
+      "lg": 20,
+      "xl": 26,
+      "2xl": 34,
+      "3xl": 44,
+      "4xl": {
+        "phone": 40,
+        "desktop": 60
+      }
+    },
+    "measure": 65,
+    "bodyWeight": 400,
+    "headingWeight": 600,
+    "headingCase": "none",
+    "headingTracking": "-0.01em",
+    "lineHeight": {
+      "heading": 1.1,
+      "body": 1.55
+    }
+  },
+  "palette": {
+    "brand": "#1E3A5F",
+    "ink": "#14202B",
+    "inkMuted": "#4A5968",
+    "surface": "#FFFFFF",
+    "surfaceAlt": "#F0F3F7"
+  },
+  "derive": {
+    "space": "oklch",
+    "tints": [
+      97,
+      94,
+      90
+    ],
+    "shades": [
+      45,
+      35,
+      25
+    ],
+    "brandInkAuto": true,
+    "minButtonContrast": 4.5
+  },
+  "overlayAlpha": 0.58,
+  "overlayStyle": "gradient-left",
+  "brandColor": {
+    "source": [
+      "logo",
+      "website",
+      "default"
+    ],
+    "rejectNearGray": true,
+    "rejectNeon": true,
+    "minChroma": 0.04,
+    "maxChroma": 0.3,
+    "darkenUntilContrast": true
+  },
+  "logo": {
+    "placement": "header-left",
+    "maxHeight": {
+      "phone": 36,
+      "desktop": 48
+    },
+    "band": "surface",
+    "padding": 8,
+    "fallback": "wordmark",
+    "wordmark": {
+      "font": "heading",
+      "case": "title",
+      "maxLines": 2,
+      "color": "brand"
+    }
+  },
+  "grid": {
+    "system": "sidebar-12",
+    "columns": 12,
+    "maxWidth": 1280,
+    "gutter": 24,
+    "margin": {
+      "phone": 16,
+      "desktop": 40
+    },
+    "sidebar": {
+      "desktop": 4,
+      "side": "right",
+      "sticky": true,
+      "holds": "quote"
+    }
+  },
+  "spacing": {
+    "scale": [
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64
+    ],
+    "sectionY": {
+      "phone": 40,
+      "desktop": 72
+    },
+    "density": "comfortable"
+  },
+  "radius": {
+    "sm": 4,
+    "md": 8,
+    "lg": 12
+  },
+  "shadow": {
+    "card": "0 2px 8px rgba(0,0,0,0.08)"
+  },
+  "buttons": {
+    "primary": {
+      "fill": "brand",
+      "ink": "brand-ink",
+      "border": "none",
+      "radius": "md",
+      "height": 48,
+      "case": "none",
+      "weight": 600
+    },
+    "secondary": {
+      "fill": "transparent",
+      "ink": "brand",
+      "border": "brand",
+      "radius": "md",
+      "height": 48,
+      "case": "none",
+      "weight": 600
+    },
+    "minTapTarget": 44,
+    "focusRing": "2px solid shade-1"
+  },
+  "icons": {
+    "set": "lucide",
+    "stroke": 1.75,
+    "size": 24,
+    "color": "brand",
+    "style": "outline"
+  },
+  "images": {
+    "hero": {
+      "ratio": {
+        "phone": "4:5",
+        "desktop": "16:9"
+      },
+      "fit": "cover"
+    },
+    "gallery": {
+      "ratio": "4:3",
+      "fit": "cover"
+    },
+    "minWidth": 800,
+    "minHeight": 600,
+    "maxGallery": 9,
+    "rejectTextHeavy": true,
+    "maxFileKb": 250
+  },
+  "motion": "subtle",
+  "colorScheme": "light",
+  "sections": [
+    "hero",
+    "quote",
+    "services",
+    "proof",
+    "urgent",
+    "gallery",
+    "area",
+    "footer"
+  ],
+  "sectionLayout": {
+    "hero": {
+      "variant": "split-form",
+      "split": {
+        "desktop": [
+          7,
+          5
+        ]
+      },
+      "formSide": "right",
+      "background": "photo"
+    },
+    "quote": {
+      "variant": "sticky-sidebar",
+      "fallbackPhone": "inline"
+    },
+    "services": {
+      "variant": "checklist",
+      "columns": {
+        "phone": 1,
+        "desktop": 2
+      },
+      "span": {
+        "desktop": 8
+      }
+    },
+    "proof": {
+      "variant": "inline-badges",
+      "columns": {
+        "phone": 2,
+        "desktop": 4
+      },
+      "span": {
+        "desktop": 8
+      }
+    },
+    "urgent": {
+      "variant": "callout-box",
+      "span": {
+        "desktop": 8
+      }
+    },
+    "gallery": {
+      "variant": "filmstrip",
+      "columns": {
+        "phone": 2,
+        "desktop": 4
+      },
+      "span": {
+        "desktop": 8
+      }
+    },
+    "area": {
+      "variant": "two-col-list",
+      "columns": {
+        "phone": 1,
+        "desktop": 2
+      },
+      "span": {
+        "desktop": 8
+      }
+    },
+    "footer": {
+      "variant": "three-col",
+      "columns": {
+        "phone": 1,
+        "desktop": 3
+      }
+    }
+  },
+  "sectionRules": {
+    "urgent": {
+      "showWhen": [
+        "open24h",
+        "emergencyKeyword"
+      ]
+    },
+    "services": {
+      "min": 2,
+      "max": 6,
+      "overflowLink": "Ask about other services"
+    },
+    "proof": {
+      "minRating": 4,
+      "minReviews": 5,
+      "showQuotes": true,
+      "maxQuotes": 2,
+      "maxQuoteChars": 160
+    },
+    "gallery": {
+      "minPhotos": 3
+    },
+    "area": {
+      "showMap": true,
+      "maxPlaces": 8
+    },
+    "hours": {
+      "showOpenNow": true,
+      "format": "week"
+    }
+  },
+  "copy": {
+    "hero": "{business}",
+    "subline": "{category} in {city}. Here's what we offer and how to reach us.",
+    "urgent": "Need help right away? Call us now.",
+    "action": "Get in touch",
+    "actionKind": "form",
+    "quoteTitle": "Send us a message",
+    "sublineNoServices": "{category} in {city}. Call, text or send us a message.",
+    "heroNoCity": "{business}",
+    "titles": {
+      "services": "What we offer",
+      "gallery": "Photos"
+    }
+  },
+  "placeholders": [
+    "{business}",
+    "{city}",
+    "{state}",
+    "{zip}",
+    "{rating}",
+    "{reviewCount}",
+    "{years}",
+    "{category}"
+  ],
+  "services": {
+    "defaults": []
+  },
+  "trust": {
+    "max": 4,
+    "templates": {
+      "licensed": "Licensed in {state}",
+      "insured": "Fully insured",
+      "years": "{years} years in {city}",
+      "warranty": "Guarantee on our work"
+    }
+  },
+  "roger": {
+    "stickyBar": true,
+    "headerCallButton": true,
+    "chatBubble": true,
+    "textPrefill": "Hi, I have a question.",
+    "consentCopy": "By submitting, you agree to receive calls and texts about your request.",
+    "previewBanner": true,
+    "footerCredit": true
+  },
+  "seo": {
+    "titlePattern": "{business} | {category} in {city}",
+    "descriptionPattern": "{business}: {category} in {city}. Hours, photos, reviews and how to get in touch.",
+    "schemaType": "LocalBusiness",
+    "ogImage": "hero"
+  },
+  "locale": "en-US",
+  "stock": {
+    "hero": [
+      {
+        "url": "/stock/general-hero.svg",
+        "width": 1920,
+        "height": 1080,
+        "alt": "Placeholder image: a row of local storefronts",
+        "source": "stock"
+      }
+    ],
+    "gallery": []
+  }
+}

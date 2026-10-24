@@ -1,0 +1,457 @@
+{
+  "meta": {
+    "name": "Landscaping \u00b7 Local and Trusted",
+    "vertical": "landscaping",
+    "variant": "trust",
+    "description": "Reputation first: narrow centered 8-column grid, rounded cards, reviews before services.",
+    "schemaVersion": 2,
+    "previewImage": "/themes/landscaping-trust.png"
+  },
+  "match": {
+    "googleTypes": [
+      "landscaper",
+      "lawn_care_service"
+    ]
+  },
+  "fontPairs": [
+    {
+      "id": "sturdy",
+      "label": "Classic serif",
+      "heading": "Georgia, 'Times New Roman', serif",
+      "body": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    },
+    {
+      "id": "modern",
+      "label": "Clean modern",
+      "heading": "'Segoe UI', 'Helvetica Neue', Arial, sans-serif",
+      "body": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+    },
+    {
+      "id": "friendly",
+      "label": "Rounded friendly",
+      "heading": "ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'Trebuchet MS', sans-serif",
+      "body": "'Trebuchet MS', 'Segoe UI', Tahoma, sans-serif"
+    }
+  ],
+  "defaultPair": "friendly",
+  "fontFaces": [],
+  "type": {
+    "scale": {
+      "xs": 13,
+      "sm": 15,
+      "md": 17,
+      "lg": 20,
+      "xl": 26,
+      "2xl": 34,
+      "3xl": 44,
+      "4xl": {
+        "phone": 40,
+        "desktop": 60
+      }
+    },
+    "measure": 65,
+    "bodyWeight": 400,
+    "headingWeight": 700,
+    "headingCase": "none",
+    "headingTracking": "0",
+    "lineHeight": {
+      "heading": 1.2,
+      "body": 1.6
+    }
+  },
+  "palette": {
+    "brand": "#0F766E",
+    "ink": "#14202B",
+    "inkMuted": "#4A5968",
+    "surface": "#FFFFFF",
+    "surfaceAlt": "#ECF5F3"
+  },
+  "derive": {
+    "space": "oklch",
+    "tints": [
+      97,
+      94,
+      90
+    ],
+    "shades": [
+      45,
+      35,
+      25
+    ],
+    "brandInkAuto": true,
+    "minButtonContrast": 4.5
+  },
+  "overlayAlpha": 0.55,
+  "overlayStyle": "gradient-bottom",
+  "brandColor": {
+    "source": [
+      "logo",
+      "website",
+      "default"
+    ],
+    "rejectNearGray": true,
+    "rejectNeon": true,
+    "minChroma": 0.04,
+    "maxChroma": 0.3,
+    "darkenUntilContrast": true
+  },
+  "logo": {
+    "placement": "header-left",
+    "maxHeight": {
+      "phone": 36,
+      "desktop": 48
+    },
+    "band": "surface",
+    "padding": 8,
+    "fallback": "wordmark",
+    "wordmark": {
+      "font": "heading",
+      "case": "title",
+      "maxLines": 2,
+      "color": "brand"
+    }
+  },
+  "grid": {
+    "system": "centered-8",
+    "columns": 8,
+    "maxWidth": 960,
+    "gutter": 20,
+    "margin": {
+      "phone": 20,
+      "desktop": 40
+    }
+  },
+  "spacing": {
+    "scale": [
+      4,
+      8,
+      12,
+      16,
+      24,
+      32,
+      48,
+      64
+    ],
+    "sectionY": {
+      "phone": 48,
+      "desktop": 88
+    },
+    "density": "comfortable"
+  },
+  "radius": {
+    "sm": 8,
+    "md": 16,
+    "lg": 24
+  },
+  "shadow": {
+    "card": "0 4px 16px rgba(0,0,0,0.08)"
+  },
+  "buttons": {
+    "primary": {
+      "fill": "brand",
+      "ink": "brand-ink",
+      "border": "none",
+      "radius": "lg",
+      "height": 48,
+      "case": "none",
+      "weight": 700
+    },
+    "secondary": {
+      "fill": "transparent",
+      "ink": "brand",
+      "border": "brand",
+      "radius": "lg",
+      "height": 48,
+      "case": "none",
+      "weight": 700
+    },
+    "minTapTarget": 44,
+    "focusRing": "2px solid shade-1"
+  },
+  "icons": {
+    "set": "lucide",
+    "stroke": 1.75,
+    "size": 24,
+    "color": "brand",
+    "style": "outline"
+  },
+  "images": {
+    "hero": {
+      "ratio": {
+        "phone": "4:5",
+        "desktop": "16:9"
+      },
+      "fit": "cover"
+    },
+    "gallery": {
+      "ratio": "4:3",
+      "fit": "cover"
+    },
+    "minWidth": 800,
+    "minHeight": 600,
+    "maxGallery": 9,
+    "rejectTextHeavy": true,
+    "maxFileKb": 250
+  },
+  "motion": "subtle",
+  "colorScheme": "light",
+  "sections": [
+    "hero",
+    "proof",
+    "gallery",
+    "services",
+    "area",
+    "quote",
+    "footer"
+  ],
+  "sectionLayout": {
+    "hero": {
+      "variant": "stacked",
+      "imagePosition": "below",
+      "imageInset": true,
+      "align": "center"
+    },
+    "proof": {
+      "variant": "review-cards",
+      "columns": {
+        "phone": 1,
+        "desktop": 2
+      }
+    },
+    "gallery": {
+      "variant": "carousel",
+      "perView": {
+        "phone": 1.2,
+        "desktop": 2.5
+      }
+    },
+    "services": {
+      "variant": "card-list",
+      "columns": {
+        "phone": 1,
+        "desktop": 2
+      }
+    },
+    "area": {
+      "variant": "card",
+      "span": {
+        "desktop": 8
+      }
+    },
+    "quote": {
+      "variant": "inset-card",
+      "span": {
+        "desktop": 6,
+        "offset": 1
+      }
+    },
+    "footer": {
+      "variant": "centered-stack",
+      "columns": {
+        "phone": 1,
+        "desktop": 1
+      }
+    }
+  },
+  "sectionRules": {
+    "services": {
+      "min": 3,
+      "max": 6,
+      "overflowLink": "Ask about other services"
+    },
+    "proof": {
+      "minRating": 4.0,
+      "minReviews": 5,
+      "showQuotes": true,
+      "maxQuotes": 2,
+      "maxQuoteChars": 160
+    },
+    "gallery": {
+      "minPhotos": 3
+    },
+    "area": {
+      "showMap": true,
+      "maxPlaces": 8
+    },
+    "hours": {
+      "showOpenNow": true,
+      "format": "week"
+    }
+  },
+  "copy": {
+    "hero": "Landscaping and lawn care in {city}",
+    "subline": "Lawn care, planting and hardscapes for homes in {city}. Tell us what you need.",
+    "urgent": "Storm cleanup and fallen trees? Call us.",
+    "action": "Get a free quote",
+    "actionKind": "form",
+    "quoteTitle": "Get a free quote",
+    "sublineNoServices": "Lawn care, planting and hardscapes for homes in {city}.",
+    "heroNoCity": "Landscaping and lawn care"
+  },
+  "placeholders": [
+    "{business}",
+    "{city}",
+    "{state}",
+    "{zip}",
+    "{rating}",
+    "{reviewCount}",
+    "{years}"
+  ],
+  "services": {
+    "defaults": [
+      {
+        "id": "lawn",
+        "label": "Lawn care and mowing",
+        "icon": "scissors",
+        "keywords": [
+          "lawn",
+          "mowing",
+          "mow"
+        ]
+      },
+      {
+        "id": "design",
+        "label": "Landscape design",
+        "icon": "pen-tool",
+        "keywords": [
+          "design",
+          "landscape"
+        ]
+      },
+      {
+        "id": "hardscape",
+        "label": "Patios and walkways",
+        "icon": "grid",
+        "keywords": [
+          "patio",
+          "paver",
+          "hardscape",
+          "walkway"
+        ]
+      },
+      {
+        "id": "planting",
+        "label": "Planting and gardens",
+        "icon": "flower",
+        "keywords": [
+          "planting",
+          "garden",
+          "flower bed"
+        ]
+      },
+      {
+        "id": "trees",
+        "label": "Tree and shrub care",
+        "icon": "tree-deciduous",
+        "keywords": [
+          "tree",
+          "shrub",
+          "pruning"
+        ]
+      },
+      {
+        "id": "irrigation",
+        "label": "Irrigation and sprinklers",
+        "icon": "droplet",
+        "keywords": [
+          "irrigation",
+          "sprinkler"
+        ]
+      },
+      {
+        "id": "cleanup",
+        "label": "Seasonal cleanups",
+        "icon": "leaf",
+        "keywords": [
+          "cleanup",
+          "fall",
+          "spring"
+        ]
+      },
+      {
+        "id": "mulch",
+        "label": "Mulch and sod",
+        "icon": "layers",
+        "keywords": [
+          "mulch",
+          "sod"
+        ]
+      },
+      {
+        "id": "lighting",
+        "label": "Outdoor lighting",
+        "icon": "sun",
+        "keywords": [
+          "outdoor lighting"
+        ]
+      },
+      {
+        "id": "snow",
+        "label": "Snow removal",
+        "icon": "cloud-snow",
+        "keywords": [
+          "snow"
+        ]
+      }
+    ]
+  },
+  "trust": {
+    "max": 4,
+    "templates": {
+      "licensed": "Licensed in {state}",
+      "insured": "Fully insured",
+      "years": "{years} years serving {city}",
+      "warranty": "Workmanship warranty"
+    }
+  },
+  "roger": {
+    "stickyBar": true,
+    "headerCallButton": true,
+    "chatBubble": true,
+    "textPrefill": "Hi, I'd like a quote for my yard.",
+    "consentCopy": "By submitting, you agree to receive calls and texts about your request.",
+    "previewBanner": true,
+    "footerCredit": true
+  },
+  "seo": {
+    "titlePattern": "{business} | Landscaping in {city}, {state}",
+    "descriptionPattern": "{business} offers landscaping, lawn care and hardscaping in {city}. Get a free quote today.",
+    "schemaType": "HomeAndConstructionBusiness",
+    "ogImage": "hero"
+  },
+  "locale": "en-US",
+  "stock": {
+    "hero": [
+      {
+        "url": "/stock/landscaping-hero.svg",
+        "width": 1920,
+        "height": 1080,
+        "alt": "Placeholder stock photo: landscaping crew",
+        "source": "stock"
+      }
+    ],
+    "gallery": [
+      {
+        "url": "/stock/landscaping-1.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: landscaping work 1",
+        "source": "stock"
+      },
+      {
+        "url": "/stock/landscaping-2.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: landscaping work 2",
+        "source": "stock"
+      },
+      {
+        "url": "/stock/landscaping-3.svg",
+        "width": 1200,
+        "height": 900,
+        "alt": "Placeholder stock photo: landscaping work 3",
+        "source": "stock"
+      }
+    ]
+  }
+}

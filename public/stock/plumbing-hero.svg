@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#D8E6EF"/><stop offset="1" stop-color="#F5F9FB"/></linearGradient>
+  <linearGradient id="v" x1="0" y1="0" x2="0" y2="1"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".18"/></linearGradient></defs>
+  <rect width="1920" height="1080" fill="url(#s)"/><circle cx="1497.6000000000001" cy="216" r="75.60000000000001" fill="#FFFFFF" opacity=".55"/><path d="M0 777.6 Q 480 691.2 960 756 T 1920 723.6 V 1080 H 0 Z" fill="#B8C4CB"/>
+        <path d="M0 378 H1056 a120.96000000000002 120.96000000000002 0 0 1 120.96000000000002 120.96000000000002 V1080" stroke="#9AA9B2" stroke-width="75.60000000000001" fill="none"/>
+        <path d="M1920 626.4 H576 a75.60000000000001 75.60000000000001 0 0 0 -75.60000000000001 75.60000000000001 V1080" stroke="#33414A" stroke-opacity=".6" stroke-width="60.48000000000001" fill="none"/>
+        <rect x="960" y="309.96" width="105.84" height="136.08" rx="15.120000000000003" fill="#33414A" opacity=".7"/>
+        <circle cx="1012.92" cy="272.15999999999997" r="41.580000000000005" fill="none" stroke="#33414A" stroke-width="16.632" opacity=".7"/>
+  <rect width="1920" height="1080" fill="url(#v)"/>
+  <text x="1896" y="1058" text-anchor="end" font-family="Arial, sans-serif" font-size="27" fill="#fff" opacity=".7">Placeholder image</text>
+</svg>

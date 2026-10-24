@@ -1,0 +1,40 @@
+{
+  "name": "roger-site-builder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Roger: build a local-business website from a Google Business link + theme.json, and audit an existing site for the iMessage flow.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "cli": "tsx src/cli.ts",
+    "demo": "tsx scripts/demo.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "fixtures": "tsx scripts/make-fixtures.ts",
+    "sweep": "tsx scripts/sweep.ts",
+    "e2e": "tsx scripts/e2e.ts out/qa/studio",
+    "e2e:imessage": "tsx scripts/imessage-e2e.ts out/qa/imessage"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.2.0",
+    "cheerio": "^1.2.0",
+    "dotenv": "^18.0.9",
+    "express": "^4.22.3",
+    "lucide-static": "^1.61.0",
+    "multer": "^2.5.0",
+    "sharp": "^0.35.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.5",
+    "playwright-core": "^1.64.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

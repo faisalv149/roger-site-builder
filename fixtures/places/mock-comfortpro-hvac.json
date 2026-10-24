@@ -1,0 +1,155 @@
+{
+  "placeId": "mock-comfortpro-hvac",
+  "name": "ComfortPro Heating & Air",
+  "primaryType": "hvac_contractor",
+  "primaryTypeLabel": "HVAC contractor",
+  "types": [
+    "hvac_contractor",
+    "air_conditioning_contractor",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "1550 W University Dr, Tempe, AZ 85281, USA",
+  "shortAddress": "1550 W University Dr, Tempe",
+  "street": "1550 W University Dr",
+  "city": "Tempe",
+  "state": "AZ",
+  "zip": "85281",
+  "country": "US",
+  "lat": 33.4218,
+  "lng": -111.9619,
+  "phone": "(480) 555-0163",
+  "phoneE164": "+14805550163",
+  "mapsUrl": "https://maps.google.com/?cid=4234567890",
+  "rating": 4.4,
+  "reviewCount": 23,
+  "reviews": [
+    {
+      "author": "Luis Herrera",
+      "rating": 5,
+      "relativeTime": "3 weeks ago",
+      "text": "AC died in July and they had a new heat pump installed in two days. Great financing options too."
+    },
+    {
+      "author": "Karen Wu",
+      "rating": 4,
+      "relativeTime": "2 months ago",
+      "text": "Annual maintenance tune-up was thorough. They also cleaned our ducts."
+    },
+    {
+      "author": "Omar Haddad",
+      "rating": 5,
+      "relativeTime": "4 months ago",
+      "text": "Furnace repair done right the first time. Fair and honest."
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/comfortpro-0.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "ComfortPro Heating & Air"
+        }
+      ],
+      "isOwner": true
+    },
+    {
+      "ref": "file:fixtures/places/photos/comfortpro-1.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "ComfortPro Heating & Air"
+        }
+      ],
+      "isOwner": true
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 8:00 AM – 5:00 PM",
+      "Tuesday: 8:00 AM – 5:00 PM",
+      "Wednesday: 8:00 AM – 5:00 PM",
+      "Thursday: 8:00 AM – 5:00 PM",
+      "Friday: 8:00 AM – 5:00 PM",
+      "Saturday: Closed",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -420,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Tempe",
+    "Mesa",
+    "Chandler",
+    "Scottsdale",
+    "Phoenix",
+    "Gilbert",
+    "Guadalupe"
+  ],
+  "source": "mock"
+}

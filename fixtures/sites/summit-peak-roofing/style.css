@@ -1,0 +1,10 @@
+
+body { font-family: 'Open Sans', Arial; background: #f2f2f2; color: #333; margin: 0; }
+h1, h2 { font-family: 'Oswald', sans-serif; color: #1D3F6E; }
+#header { background: #fff; border-bottom: 4px solid #E8742B; }
+#nav a { color: #1D3F6E; font-weight: bold; text-decoration: none; padding: 8px 14px; }
+#nav a:hover { color: #E8742B; }
+.box { background: #fff; border: 1px solid #ddd; padding: 12px; }
+.btn { background: #1D3F6E; color: #fff; padding: 6px 10px; }
+.footer { background: #1D3F6E; color: #ccc; font-size: 11px; }
+.highlight { color: #E8742B; }

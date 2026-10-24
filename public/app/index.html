@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roger Site Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F172A'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='Arial' font-weight='700' font-size='32' fill='%23fff'%3ER%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/app/studio.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">R</span><div><b>Roger Site Studio</b><span class="sub">Google Business + theme.json → website in minutes</span></div></div>
+  <div class="mode" id="mode">checking…</div>
+</header>
+
+<div class="shell">
+  <aside class="panel">
+    <section class="step">
+      <h2><span class="num">1</span>Find the business</h2>
+      <label class="lbl" for="q">Google Maps link, place ID, or name + ZIP</label>
+      <div class="row">
+        <input id="q" placeholder="Summit Peak Roofing 78704" autocomplete="off">
+        <button class="btn ghost" id="findBtn" type="button">Find</button>
+      </div>
+      <div id="candidates" class="cands"></div>
+    </section>
+
+    <section class="step">
+      <h2><span class="num">2</span>Existing website <span class="opt">optional</span></h2>
+      <label class="lbl" for="website">If they have one, we audit it and pull logo, colors and fonts</label>
+      <div class="row">
+        <input id="website" placeholder="https://example.com" autocomplete="off">
+        <button class="btn ghost" id="auditBtn" type="button">Audit only</button>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2><span class="num">3</span>Theme</h2>
+      <div class="seg" role="tablist">
+        <button type="button" class="on" data-tmode="library">From library</button>
+        <button type="button" data-tmode="upload">Upload theme.json</button>
+      </div>
+      <div data-tpane="library">
+        <label class="lbl" for="themeSel">Pick one, or let Roger choose from the Google category and profile</label>
+        <select id="themeSel"><option value="">Auto-pick (recommended)</option></select>
+        <div id="themeInfo" class="hint"></div>
+      </div>
+      <div data-tpane="upload" hidden>
+        <label class="drop" id="drop" for="themeFile">
+          <input type="file" id="themeFile" accept=".json,application/json" hidden>
+          <b>Drop a theme.json here</b><span>or click to choose a file</span>
+        </label>
+        <div id="themeCheck" class="hint"></div>
+        <label class="check"><input type="checkbox" id="saveTheme"> Also save it to the theme library</label>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2><span class="num">4</span>Options</h2>
+      <label class="check"><input type="checkbox" id="optFonts"> Use the business website's Google Font for headings</label>
+      <label class="check"><input type="checkbox" id="optColorOn"> Force brand color <input type="color" id="optColor" value="#1D4ED8"></label>
+      <label class="check"><input type="checkbox" id="optPreview" checked> Preview mode (banner + noindex)</label>
+    </section>
+
+    <div class="eta" id="eta" aria-live="polite" hidden></div>
+    <button class="btn primary big" id="buildBtn" type="button">Build website</button>
+    <p class="fine">Mock mode uses sample businesses in <code>fixtures/places</code>. Add a Google key in <code>.env</code> for live data.</p>
+  </aside>
+
+  <main class="work">
+    <nav class="tabs" role="tablist">
+      <button type="button" data-tab="sites">Sites <span class="count" id="sitesCount" hidden></span></button>
+      <button type="button" class="on" data-tab="progress">Progress</button>
+      <button type="button" data-tab="preview">Preview</button>
+      <button type="button" data-tab="audit">Audit</button>
+      <button type="button" data-tab="imessage">iMessage cards</button>
+      <button type="button" data-tab="sim">Conversation simulator</button>
+      <button type="button" data-tab="data">Data</button>
+    </nav>
+
+    <section class="tab" data-pane="sites" hidden>
+      <p class="hint" style="margin-top:0">Every site built from the Studio, the iMessage page or the API, saved in <code>data/builds/</code>. Updates on its own; click a site to open it here.</p>
+      <div id="sitesList" class="sites"><p class="hint">Loading…</p></div>
+      <h3 class="sub-h">Conversations</h3>
+      <p class="hint" style="margin-top:0">iMessage conversations with Roger, saved in <code>data/conversations/</code>.</p>
+      <div id="convosList" class="sites"></div>
+      <div id="convoView"></div>
+    </section>
+
+    <section class="tab" data-pane="progress">
+      <div id="empty" class="empty">
+        <h3>Build a site in three clicks</h3>
+        <ol><li>Find the business on Google</li><li>Optional: add their current website</li><li>Pick or upload a theme, then <b>Build website</b></li></ol>
+        <p>Try one of the sample businesses:</p>
+        <div class="chips" id="samples"></div>
+      </div>
+      <ol id="log" class="log"></ol>
+      <div id="summary"></div>
+    </section>
+
+    <section class="tab" data-pane="preview" hidden>
+      <div class="toolbar">
+        <div class="seg small"><button type="button" class="on" data-dev="desktop">Desktop</button><button type="button" data-dev="phone">Phone</button></div>
+        <a id="openSite" class="btn ghost sm" target="_blank" rel="noopener">Open in new tab ↗</a>
+      </div>
+      <div class="frame-wrap"><iframe id="frame" title="Site preview"></iframe></div>
+    </section>
+
+    <section class="tab" data-pane="audit" hidden><div id="auditOut" class="empty"><p>No audit yet. Add a website and build, or use <b>Audit only</b>.</p></div></section>
+
+    <section class="tab" data-pane="imessage" hidden>
+      <p class="hint">What Roger sends. iMessage draws each card from the link's <code>og:image</code>, so every card below is a text plus a URL with a purpose-made 1200×630 image.</p>
+      <div id="cardsOut" class="phone-ui"></div>
+    </section>
+
+    <section class="tab" data-pane="sim" hidden>
+      <p class="hint">Reference conversation flow (<code>POST /api/imessage/inbound</code>). Point your iMessage gateway at it, or use it as the spec.</p>
+      <div class="phone-ui sim">
+        <div id="simLog" class="sim-log"></div>
+        <div id="simQuick" class="quick"></div>
+        <form id="simForm" class="sim-input"><input id="simText" placeholder="Text Roger…" autocomplete="off"><button class="btn primary sm" type="submit">Send</button></form>
+      </div>
+      <button class="btn ghost sm" id="simReset" type="button">Restart conversation</button>
+    </section>
+
+    <section class="tab" data-pane="data" hidden><pre id="dataOut" class="code">Build something first.</pre></section>
+  </main>
+</div>
+<script src="/app/studio.js"></script>
+</body>
+</html>
