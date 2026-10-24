@@ -43,12 +43,24 @@ export async function writeOgCard(file: string, opts: { heroFile: string; name: 
   await sharp(base).composite([{ input: Buffer.from(overlay) }]).jpeg({ quality: 82, mozjpeg: true }).toFile(file);
 }
 
+/** Chromium for screenshots: the local install (Playwright cache, Chrome, Edge) or, on Vercel, @sparticuz/chromium. */
+export const screenshotsAvailable = () => !!config.chromiumPath || !!process.env.VERCEL;
+
+async function launchBrowser() {
+  const { chromium } = await import('playwright-core');
+  if (!config.chromiumPath && process.env.VERCEL) {
+    const { default: serverless } = await import('@sparticuz/chromium'); // a Chromium build for serverless Linux
+    serverless.setGraphicsMode = false; // no GPU there; skipping it starts faster
+    return chromium.launch({ executablePath: await serverless.executablePath(), args: serverless.args, headless: true });
+  }
+  return chromium.launch({ executablePath: config.chromiumPath, args: ['--no-sandbox'] });
+}
+
 /** Real screenshot of the generated site (needs Chromium). Returns false if unavailable. */
 export async function screenshot(htmlFile: string, outFile: string, opts: { width?: number; height?: number; fullPage?: boolean; mobile?: boolean } = {}): Promise<boolean> {
-  if (!config.chromiumPath) return false;
+  if (!screenshotsAvailable()) return false;
   try {
-    const { chromium } = await import('playwright-core');
-    const browser = await chromium.launch({ executablePath: config.chromiumPath, args: ['--no-sandbox'] });
+    const browser = await launchBrowser();
     try {
       const ctx = await browser.newContext({
         viewport: { width: opts.width ?? 1200, height: opts.height ?? 630 },

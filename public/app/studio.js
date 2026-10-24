@@ -36,7 +36,7 @@ $$('[data-dev]').forEach((b) => b.addEventListener('click', () => {
       h.mock ? '<span class="pill mock">Mock Google data</span>' : '<span class="pill on">Live Google Places</span>',
       h.claude ? `<span class="pill on">Claude · ${esc(h.model)}${h.claudeVia === 'cli' ? ' (local CLI)' : ''}</span>` : '<span class="pill">Claude off (templates)</span>',
       h.screenshots ? '<span class="pill on">Screenshots</span>' : '<span class="pill">No screenshots</span>',
-      `<span class="pill">${h.themes} themes</span>`,
+      `<span class="pill${h.themes ? ' on' : ''}">${h.themes} themes</span>`,
     ].join('');
     if (h.mock) {
       const samples = [

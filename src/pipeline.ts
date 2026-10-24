@@ -13,7 +13,7 @@ import { pickLogo } from './brand/logo.js';
 import { processPhotos } from './brand/photos.js';
 import { resolveBrand, brandTextOnSurface } from './brand/brand.js';
 import { renderPage } from './render/page.js';
-import { screenshot, writeIcons, writeOgCard } from './render/og.js';
+import { screenshot, screenshotsAvailable, writeIcons, writeOgCard } from './render/og.js';
 import { auditWebsite, type AuditResult } from './audit/audit.js';
 import { writeReport } from './audit/report.js';
 import { auditCard, noWebsiteCard, siteCard, type IMessageCard } from './imessage/cards.js';
@@ -204,7 +204,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   }, (n) => `${Math.round(n / 1024)} KB html`);
 
   let shot = false;
-  if (input.screenshot !== false && config.chromiumPath) {
+  if (input.screenshot !== false && screenshotsAvailable()) {
     shot = await timed(steps, emit, 'Screenshot preview', () => screenshot(path.join(siteDir, 'index.html'), path.join(siteDir, 'preview.jpg'), { width: 1200, height: 630 }), (ok) => (ok ? 'preview.jpg' : 'skipped'));
   }
 
