@@ -1,8 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { config } from './config.js';
 import { getPublish, savePublish, type PublishRecord } from './store.js';
+import { listOut } from './files.js';
 
 /**
  * Publish a finished site (out/sites/<slug>/) to Vercel as its own static project, e.g. roger-baked-lahore.vercel.app.
@@ -26,30 +25,30 @@ export function rewriteForPublish(text: string, slug: string, domain: string): s
   return text.split(`${config.publicBaseUrl}/sites/${slug}/`).join(`https://${domain}/`);
 }
 
-function siteFiles(slug: string, domain: string): { file: string; data: Buffer }[] {
-  const root = path.join(config.dirs.sites, slug);
-  const out: { file: string; data: Buffer }[] = [];
-  const walk = (dir: string) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) { walk(p); continue; }
-      const file = path.relative(root, p).split(path.sep).join('/');
-      if (SKIP.has(file) || file.endsWith('.tmp')) continue;
-      const raw = fs.readFileSync(p);
-      out.push({ file, data: TEXT.test(file) ? Buffer.from(rewriteForPublish(raw.toString('utf8'), slug, domain)) : raw });
-    }
-  };
-  walk(root);
-  return out;
+// the site's files from this disk or, on Vercel, from Redis (it may have been built on another instance)
+async function siteFiles(slug: string, domain: string): Promise<{ file: string; data: Buffer }[]> {
+  return (await listOut(`sites/${slug}`))
+    .filter((f) => !SKIP.has(f.file))
+    .map((f) => (TEXT.test(f.file) ? { file: f.file, data: Buffer.from(rewriteForPublish(f.data.toString('utf8'), slug, domain)) } : f));
 }
 
 async function vercel(route: string, init: RequestInit = {}): Promise<any> {
   const team = config.vercelTeamId ? `${route.includes('?') ? '&' : '?'}teamId=${encodeURIComponent(config.vercelTeamId)}` : '';
-  const r = await fetch(`${config.vercelApi}${route}${team}`, {
-    ...init,
-    headers: { authorization: `Bearer ${config.vercelToken}`, ...(init.headers as Record<string, string>) },
-    signal: AbortSignal.timeout(60_000),
-  });
+  let r: Response | undefined;
+  for (let attempt = 1; !r; attempt++) {
+    try {
+      r = await fetch(`${config.vercelApi}${route}${team}`, {
+        ...init,
+        headers: { authorization: `Bearer ${config.vercelToken}`, ...(init.headers as Record<string, string>) },
+        signal: AbortSignal.timeout(60_000),
+      });
+    } catch (e) {
+      // retry only when the connection never opened (nothing reached Vercel, so even a POST is safe to repeat)
+      const code = (e as { cause?: { code?: string } }).cause?.code;
+      if (attempt >= 3 || !['UND_ERR_CONNECT_TIMEOUT', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'].includes(code || '')) throw new Error(`Could not reach Vercel: ${code || (e as Error).message}`);
+      await sleep(1000 * attempt);
+    }
+  }
   const body = await r.text();
   let j: any = {};
   try { j = body ? JSON.parse(body) : {}; } catch { j = { message: body.slice(0, 200) }; }
@@ -92,16 +91,17 @@ function productionDomain(d: any, name: string): string {
 
 export async function publishSite(slug: string): Promise<PublishRecord> {
   if (!publishEnabled()) throw new Error('Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).');
-  if (!/^[a-z0-9-]{1,100}$/.test(slug) || !fs.existsSync(path.join(config.dirs.sites, slug, 'index.html'))) throw Object.assign(new Error(`No built site "${slug}"`), { status: 404 });
+  const exists = /^[a-z0-9-]{1,100}$/.test(slug) && (await siteFiles(slug, 'x')).some((f) => f.file === 'index.html');
+  if (!exists) throw Object.assign(new Error(`No built site "${slug}"`), { status: 404 });
   const name = projectName(slug);
-  let domain = getPublish(slug)?.domain || `${name}.vercel.app`; // best guess before the first deployment
-  let d = await deploy(name, siteFiles(slug, domain));
+  let domain = (await getPublish(slug))?.domain || `${name}.vercel.app`; // best guess before the first deployment
+  let d = await deploy(name, await siteFiles(slug, domain));
   const actual = productionDomain(d, name);
   if (actual !== domain) { // Vercel picked another domain: fix the self-links (only index.html changes, the rest dedupes)
     domain = actual;
-    d = await deploy(name, siteFiles(slug, domain));
+    d = await deploy(name, await siteFiles(slug, domain));
   }
   const rec: PublishRecord = { slug, project: name, domain, url: `https://${domain}/`, deploymentId: d.id, publishedAt: new Date().toISOString() };
-  savePublish(rec);
+  await savePublish(rec);
   return rec;
 }

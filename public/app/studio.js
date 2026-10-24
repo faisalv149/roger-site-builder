@@ -148,6 +148,17 @@ $('#buildBtn').addEventListener('click', async () => {
       preview: $('#optPreview').checked,
       source: 'studio',
     };
+    if (state.health?.vercel) {
+      // Vercel: the progress stream would be a separate request that can reach another server instance,
+      // so wait for the whole build in one request (the estimate box keeps counting) and list its steps after
+      logStep({ step: 'Building on Vercel (steps appear when it finishes)', status: 'start' });
+      const r = await postJson('/api/build?wait=1', body);
+      $('#log').innerHTML = '';
+      for (const s of r.steps || []) logStep({ step: s.name, status: s.ok ? 'done' : 'error', ms: s.ms, note: s.note });
+      built = true;
+      renderResult(r, performance.now() - t0);
+      return;
+    }
     const { jobId } = await postJson('/api/build', body);
     sites.openId = jobId; // the job id is also the saved build's id
     await new Promise((resolve, reject) => {

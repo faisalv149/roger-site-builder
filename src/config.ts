@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // DATA_DIR lets QA runs use a throwaway folder instead of adding test builds to the real history
-const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT, 'data');
+// On Vercel only /tmp is writable (and per instance); lasting copies go to Redis (src/kv.ts, src/store.ts, src/files.ts)
+const TMP = process.env.VERCEL ? '/tmp/roger' : '';
+const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : TMP ? path.join(TMP, 'data') : path.join(ROOT, 'data');
 
 // Executable locations inside a Playwright chromium-<rev> folder, per OS.
 const PW_INNER = [
@@ -54,9 +56,11 @@ function detectChromium(): string | undefined {
 
 const googleKey = process.env.GOOGLE_MAPS_API_KEY || '';
 // OUT_DIR: generated sites, cards and reports (default out/). On a host, point it and DATA_DIR at the persistent disk.
-const OUT = process.env.OUT_DIR ? path.resolve(process.env.OUT_DIR) : path.join(ROOT, 'out');
+const OUT = process.env.OUT_DIR ? path.resolve(process.env.OUT_DIR) : TMP ? path.join(TMP, 'out') : path.join(ROOT, 'out');
 // Hosts that announce their public URL: Render (RENDER_EXTERNAL_URL), Railway (RAILWAY_PUBLIC_DOMAIN, no scheme)
-const hostUrl = process.env.RENDER_EXTERNAL_URL || (process.env.RAILWAY_PUBLIC_DOMAIN && `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
+const hostUrl = process.env.RENDER_EXTERNAL_URL
+  || (process.env.RAILWAY_PUBLIC_DOMAIN && `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`)
+  || (process.env.VERCEL_PROJECT_PRODUCTION_URL && `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`);
 
 export const config = {
   port: Number(process.env.PORT || 4000),

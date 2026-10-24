@@ -50,7 +50,7 @@ export function startBuild(input: BuildInput, meta: JobMeta = {}): Job {
       console.error(`[job ${job.id}]`, e);
     } finally {
       try {
-        saveBuild({ id: job.id, createdAt: new Date(job.createdAt).toISOString(), finishedAt: new Date().toISOString(), source: meta.source || 'api', from: meta.from, status: job.status === 'done' ? 'done' : 'error', error: job.error, result: job.result });
+        await saveBuild({ id: job.id, createdAt: new Date(job.createdAt).toISOString(), finishedAt: new Date().toISOString(), source: meta.source || 'api', from: meta.from, status: job.status === 'done' ? 'done' : 'error', error: job.error, result: job.result });
       } catch (e) { console.error(`[job ${job.id}] could not save build record`, e); }
       running--;
       job.bus.emit('end');

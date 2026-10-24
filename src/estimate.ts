@@ -48,11 +48,11 @@ export function friendlyDuration(sec: number): { seconds: number; label: string 
 
 const p75 = (xs: number[]) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(s.length * 0.75))]; };
 
-export function estimateBuild(input: EstimateInput): Estimate {
+export async function estimateBuild(input: EstimateInput): Promise<Estimate> {
   const mock = config.mock;
   const via: Via = claudeVia() || 'off';
   const fallback = defaultSeconds(mock, via, input.website, input.audit);
-  const same = buildTimings()
+  const same = (await buildTimings())
     .filter((t) => t.mode.mock === mock && (t.mode.claudeVia ?? (t.mode.claude ? 'cli' : 'off')) === via && t.website === input.website && t.audit === input.audit)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 20)

@@ -20,6 +20,7 @@ import { auditCard, noWebsiteCard, siteCard, type IMessageCard } from './imessag
 import { slugify } from './util/text.js';
 import { claudeEnabled, claudeVia } from './content/claude.js';
 import { estimateBuild } from './estimate.js';
+import { persistDir } from './files.js';
 
 export interface BuildInput {
   /** Google Maps link, maps.app.goo.gl short link, place ID, or "Business name 78704" */
@@ -211,7 +212,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     auditOut = { ...audit, reportUrl: rep.url, image: rep.image };
     cards.push(auditCard(audit, rep.url, rep.image));
   } else if (!websiteUrl) {
-    cards.push(noWebsiteCard(b.name, estimateBuild({ website: false, audit: false }).label));
+    cards.push(noWebsiteCard(b.name, (await estimateBuild({ website: false, audit: false })).label));
   }
   cards.push(siteCard({ name: b.name, url: model.urls.site, image: shot ? `${model.urls.site}preview.jpg` : model.urls.og, hadWebsite: !!websiteUrl }));
   if (shot && model.preview) {
@@ -220,6 +221,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace(`content="${model.urls.og}"`, `content="${model.urls.site}preview.jpg"`));
   }
 
+  await persistDir(siteDir); // on Vercel: copy the finished site to Redis so any server instance can serve it
   const totalMs = Date.now() - started;
   emit({ type: 'step', step: 'Done', status: 'done', ms: totalMs, note: model.urls.site });
   return {

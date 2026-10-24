@@ -29,32 +29,29 @@ interface Session {
   /** the website audit from this conversation, attached to the build so the Studio can show it */
   audit?: BuildResult['audit'];
 }
-// Sessions live in memory and are mirrored to data/conversations/ (src/store.ts) with every message.
-const sessions = new Map<string, Session>();
 const fresh = (): Session => ({ state: 'start', candidates: [], idx: 0 });
 
-function getSession(from: string): Session {
-  let s = sessions.get(from);
-  if (!s) {
-    s = (getConversation(from)?.session as Session | undefined) || fresh();
-    sessions.set(from, s);
-  }
-  return s;
+// The session is saved with the conversation (src/store.ts) and loaded on every message: on Vercel the next
+// message can reach a different server instance, so memory can't be trusted between messages.
+async function loadSession(from: string): Promise<Session> {
+  return ((await getConversation(from))?.session as Session | undefined) || fresh();
 }
 
-function record(from: string, add: Conversation['messages'], s: Session) {
+async function record(from: string, add: Conversation['messages'], s: Session): Promise<Conversation> {
   const now = new Date().toISOString();
-  const c: Conversation = getConversation(from) || { from, startedAt: now, updatedAt: now, messages: [], buildIds: [] };
+  const c: Conversation = (await getConversation(from)) || { from, startedAt: now, updatedAt: now, messages: [], buildIds: [] };
   c.messages.push(...add);
   c.updatedAt = now;
   c.business = s.chosen?.name || c.business;
   if (s.lastBuildId && !c.buildIds.includes(s.lastBuildId)) c.buildIds.push(s.lastBuildId);
   c.session = s;
-  try { saveConversation(c); } catch (e) { console.error(`[imessage] could not save conversation ${from}`, e); }
+  try { await saveConversation(c); } catch (e) { console.error(`[imessage] could not save conversation ${from}`, e); }
+  return c;
 }
 
 export interface Reply { text: string; url?: string; image?: string; title?: string; quickReplies?: string[] }
 const fromCard = (c: IMessageCard): Reply => ({ text: c.text, url: c.url, image: c.image, title: c.title, quickReplies: c.quickReplies });
+const outgoing = (replies: Reply[]): Conversation['messages'] => { const at = new Date().toISOString(); return replies.map((r) => ({ dir: 'out' as const, at, ...r })); };
 
 const YES = /^(y|yes|yep|yeah|yup|sure|correct|that'?s (me|us|it)|ok|okay|please|do it|build it|let'?s go|sounds good|go ahead|show me)\b/i;
 const NO = /^(n|no|nope|not (me|us|really|now)|wrong)\b/i;
@@ -67,7 +64,7 @@ export interface InboundResult {
   /** saved messages in this conversation so far; later replies are the ones after this */
   messageCount: number;
 }
-interface Ctx { async: boolean; pending?: InboundResult['pending'] }
+interface Ctx { async: boolean; s: Session; pending?: InboundResult['pending'] }
 
 /**
  * One inbound text → Roger's replies. Both are saved as they happen.
@@ -75,40 +72,56 @@ interface Ctx { async: boolean; pending?: InboundResult['pending'] }
  * (saved to the conversation and POSTed to IMESSAGE_OUTBOUND_URL). Otherwise everything comes back in one go.
  */
 export async function handleInbound(from: string, text: string, opts: { async?: boolean } = {}): Promise<InboundResult> {
-  record(from, [{ dir: 'in', at: new Date().toISOString(), text }], getSession(from));
-  const ctx: Ctx = { async: !!opts.async };
+  const ctx: Ctx = { async: !!opts.async, s: await loadSession(from) };
+  await record(from, [{ dir: 'in', at: new Date().toISOString(), text }], ctx.s);
   const replies = await respond(from, text, ctx);
-  const at = new Date().toISOString();
-  record(from, replies.map((r) => ({ dir: 'out' as const, at, ...r })), getSession(from));
-  return { replies, pending: ctx.pending, messageCount: getConversation(from)?.messages.length ?? 0 };
+  const c = await record(from, outgoing(replies), ctx.s);
+  return { replies, pending: ctx.pending, messageCount: c.messages.length };
 }
 
-/** Is a preview build running for this conversation? (the clients keep showing "typing" until it lands) */
-export function isPending(from: string): boolean {
-  const s = getSession(from);
-  return s.state === 'building' && !!s.lastBuildId && !!getJob(s.lastBuildId);
+/**
+ * Is a preview build still running? Locally this server ran it, so its job list knows. On Vercel another
+ * instance may be running it, so go by the start time: well past the estimate means the build died.
+ */
+function pending(s: Session): boolean {
+  if (s.state !== 'building' || !s.lastBuildId || !s.buildEta) return false;
+  if (getJob(s.lastBuildId)) return true;
+  if (!process.env.VERCEL) return false; // single server: no job here means it restarted mid-build
+  return Date.now() - s.buildEta.startedAt < Math.min(10 * 60_000, Math.max(120_000, s.buildEta.seconds * 4000));
+}
+export async function isPending(from: string): Promise<boolean> {
+  return pending(await loadSession(from));
 }
 
-function deliverLater(from: string, replies: Reply[]) {
-  const at = new Date().toISOString();
-  record(from, replies.map((r) => ({ dir: 'out' as const, at, ...r })), getSession(from));
+/** The build finished after "On it": update the saved session (if it's still about this build) and send the preview. */
+async function deliverLater(from: string, jobId: string, replies: Reply[], siteUrl?: string) {
+  const s = await loadSession(from);
+  if (s.lastBuildId === jobId && s.state === 'building') { s.state = 'done'; if (siteUrl) s.lastSiteUrl = siteUrl; }
+  await record(from, outgoing(replies), s);
   if (!config.imessageOutboundUrl) return;
-  fetch(config.imessageOutboundUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ from, replies }), signal: AbortSignal.timeout(10_000) })
+  await fetch(config.imessageOutboundUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ from, replies }), signal: AbortSignal.timeout(10_000) })
     .then((r) => { if (!r.ok) console.warn(`[imessage] outbound ${r.status} for ${from}`); })
     .catch((e) => console.warn(`[imessage] outbound failed for ${from}: ${(e as Error).message}`));
 }
 
+/** On Vercel the function would stop after the response; waitUntil keeps it alive until the build is delivered. */
+async function keepAlive(p: Promise<unknown>) {
+  if (!process.env.VERCEL) return;
+  const { waitUntil } = await import('@vercel/functions');
+  waitUntil(p);
+}
+
 async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
-  const s = getSession(from);
   const msg = text.trim();
-  if (/^(restart|reset|start over)$/i.test(msg)) { sessions.set(from, fresh()); return respond(from, 'hi', ctx); }
+  if (/^(restart|reset|start over)$/i.test(msg)) { ctx.s = fresh(); return respond(from, 'hi', ctx); }
+  const s = ctx.s;
 
   if (s.state === 'building') {
-    if (isPending(from)) {
+    if (pending(s)) {
       const left = s.buildEta ? s.buildEta.seconds - (Date.now() - s.buildEta.startedAt) / 1000 : 0;
       return [{ text: left > 8 ? `Still working on your preview. ${friendlyDuration(left).label.replace(/^about /, 'About ')} to go.` : 'Almost done. It will be here in a moment.' }];
     }
-    s.state = 'offer'; // the server restarted mid-build
+    s.state = 'offer'; // the server restarted (or the function stopped) mid-build
     return [{ text: 'Sorry, building your preview got interrupted. Want me to try again?', quickReplies: ['Yes, build it', 'Not now'] }];
   }
 
@@ -160,30 +173,34 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
         fromCard(a.card),
       ];
     }
-    return [fromCard(noWebsiteCard(s.chosen.name, estimateBuild({ website: false, audit: false, queue: queueDepth() }).label))];
+    return [fromCard(noWebsiteCard(s.chosen.name, (await estimateBuild({ website: false, audit: false, queue: queueDepth() })).label))];
   }
 
   if (s.state === 'offer') {
     if (NO.test(msg)) { s.state = 'done'; return [{ text: "No worries. If you change your mind, just text me \"build my site\"." }]; }
     if (!YES.test(msg) && !/build|preview|new site/i.test(msg)) return [{ text: 'Want me to build the free preview? Reply yes or no.' }];
-    const eta = estimateBuild({ website: !!s.website, audit: false, queue: queueDepth() }); // the audit already ran
+    const eta = await estimateBuild({ website: !!s.website, audit: false, queue: queueDepth() }); // the audit already ran
     const job = startBuild({ placeId: s.chosen!.placeId, website: s.website, audit: false }, { source: 'imessage', from, audit: s.audit });
     s.lastBuildId = job.id;
     s.state = 'building';
     s.buildEta = { startedAt: Date.now(), seconds: eta.seconds };
     const ack: Reply = { text: `On it. Your preview will be ready in ${eta.label}.` };
-    const finished = waitForJob(job).then((): Reply[] => {
-      s.state = 'done';
-      if (job.status !== 'done' || !job.result) return [{ text: `Sorry, something went wrong building the preview (${job.error}). I'll have a person look at it.` }];
-      s.lastSiteUrl = job.result.siteUrl;
-      return [fromCard(job.result.cards.find((c) => c.kind === 'site-preview')!)];
-    });
+    const finished = waitForJob(job).then(() => ({
+      siteUrl: job.result?.siteUrl,
+      replies: job.status === 'done' && job.result
+        ? [fromCard(job.result.cards.find((c) => c.kind === 'site-preview')!)]
+        : [{ text: `Sorry, something went wrong building the preview (${job.error}). I'll have a person look at it.` }],
+    }));
     if (ctx.async) {
       ctx.pending = { jobId: job.id, seconds: eta.seconds, label: eta.label };
-      void finished.then((replies) => deliverLater(from, replies));
+      const delivered = finished.then((f) => deliverLater(from, job.id, f.replies, f.siteUrl)).catch((e) => console.error(`[imessage] delivering ${job.id} failed`, e));
+      await keepAlive(delivered);
       return [ack];
     }
-    return [ack, ...(await finished)];
+    const f = await finished;
+    s.state = 'done';
+    if (f.siteUrl) s.lastSiteUrl = f.siteUrl;
+    return [ack, ...f.replies];
   }
 
   if (/build|preview/i.test(msg) && s.chosen) { s.state = 'offer'; return respond(from, 'yes', ctx); }
@@ -191,8 +208,7 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
 }
 
 /** Start the flow over for this sender. The saved messages stay; only the flow state is cleared. */
-export function resetSession(from: string) {
-  sessions.delete(from);
-  const c = getConversation(from);
-  if (c) { c.session = undefined; c.updatedAt = new Date().toISOString(); saveConversation(c); }
+export async function resetSession(from: string) {
+  const c = await getConversation(from);
+  if (c) { c.session = undefined; c.updatedAt = new Date().toISOString(); await saveConversation(c); }
 }

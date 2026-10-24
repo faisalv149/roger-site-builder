@@ -2,13 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { config } from './config.js';
+import { kv, kvEnabled } from './kv.js';
 import type { BuildResult } from './pipeline.js';
 
 /**
  * Saved history, so nothing is lost on a page reload or server restart:
- *  data/builds/<id>.json          every build the server runs (Studio, iMessage, API), with its full result
- *  data/conversations/<from>.json every iMessage conversation: the messages plus the flow's session state
- * Plain JSON files; swap for a database when running more than one server.
+ *  builds/<id>             every build the server runs (Studio, iMessage, API), with its full result
+ *  conversations/<from>    every iMessage conversation: the messages plus the flow's session state
+ *  publishes/<slug>        sites published to Vercel
+ * Locally these are JSON files under data/ (DATA_DIR). On Vercel (Upstash configured) they are Redis keys,
+ * because every server instance there starts with an empty disk.
  */
 export type BuildSource = 'studio' | 'imessage' | 'api' | 'imported';
 
@@ -66,55 +69,80 @@ export interface Conversation {
   session?: unknown;
 }
 
-const buildsDir = () => path.join(config.dirs.data, 'builds');
-const convosDir = () => path.join(config.dirs.data, 'conversations');
-for (const d of [buildsDir(), convosDir()]) fs.mkdirSync(d, { recursive: true });
+/** A site published to Vercel (src/publish.ts) */
+export interface PublishRecord {
+  slug: string;
+  project: string;
+  domain: string;
+  url: string;
+  deploymentId: string;
+  publishedAt: string;
+}
 
-const readJson = <T>(file: string): T | undefined => {
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')) as T; } catch { return undefined; }
-};
-// write to a temp file first so a crash mid-write never leaves half a JSON file
-const writeJson = (file: string, data: unknown) => {
-  fs.writeFileSync(`${file}.tmp`, JSON.stringify(data, null, 2));
-  fs.renameSync(`${file}.tmp`, file);
+type Collection = 'builds' | 'conversations' | 'publishes';
+
+// One tiny document store, two backends: JSON files (local) or Redis keys "<collection>:<id>" (Vercel).
+const docs = {
+  file: (col: Collection, id: string) => path.join(config.dirs.data, col, `${id}.json`),
+  async get<T>(col: Collection, id: string): Promise<T | undefined> {
+    if (kvEnabled) { const v = await kv.get(`${col}:${id}`); return v ? (JSON.parse(v) as T) : undefined; }
+    try { return JSON.parse(fs.readFileSync(this.file(col, id), 'utf8')) as T; } catch { return undefined; }
+  },
+  async put(col: Collection, id: string, data: unknown): Promise<void> {
+    if (kvEnabled) { await kv.set(`${col}:${id}`, JSON.stringify(data)); return; }
+    const file = this.file(col, id);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify(data, null, 2)); // temp file first: a crash never leaves half a JSON file
+    fs.renameSync(`${file}.tmp`, file);
+  },
+  async list<T>(col: Collection): Promise<T[]> {
+    if (kvEnabled) {
+      const keys = await kv.keys(`${col}:`);
+      return (await kv.mget(keys)).filter(Boolean).map((v) => JSON.parse(v as string) as T);
+    }
+    const dir = path.join(config.dirs.data, col);
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => {
+      try { return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as T; } catch { return undefined; }
+    }).filter(Boolean) as T[];
+  },
 };
 const safeId = (id: string) => /^[a-z0-9-]{1,64}$/i.test(id);
 
-export function saveBuild(rec: BuildRecord) {
-  writeJson(path.join(buildsDir(), `${rec.id}.json`), rec);
-  const t = timingOf(rec);
-  if (t && timings) timings.push(t);
+export async function saveBuild(rec: BuildRecord) {
+  await docs.put('builds', rec.id, rec);
+  timings = null; // estimates pick up the new build
 }
 
-const readAllBuilds = () => fs.readdirSync(buildsDir()).filter((f) => f.endsWith('.json')).map((f) => readJson<BuildRecord>(path.join(buildsDir(), f))).filter(Boolean) as BuildRecord[];
+export async function getBuild(id: string): Promise<BuildRecord | undefined> {
+  return safeId(id) ? docs.get<BuildRecord>('builds', id) : undefined;
+}
 
 /** How long finished builds took and what they ran with (src/estimate.ts). Imported builds have no timing. */
 export interface BuildTiming { createdAt: string; totalMs: number; mode: BuildResult['mode']; website: boolean; audit: boolean }
-let timings: BuildTiming[] | null = null;
+let timings: { at: number; list: BuildTiming[] } | null = null;
 function timingOf(r: BuildRecord): BuildTiming | undefined {
   const x = r.result;
   if (r.status !== 'done' || !x || !(x.totalMs > 0)) return undefined;
   // older records lack mode.website/audit: fall back to what the result shows
   return { createdAt: r.createdAt, totalMs: x.totalMs, mode: x.mode, website: x.mode.website ?? !!x.business.website, audit: x.mode.audit ?? (!!x.audit && r.source !== 'imessage') };
 }
-export function buildTimings(): BuildTiming[] {
-  if (!timings) timings = readAllBuilds().map(timingOf).filter(Boolean) as BuildTiming[];
-  return timings;
+export async function buildTimings(): Promise<BuildTiming[]> {
+  // cached for a minute: other server instances add builds too
+  if (!timings || Date.now() - timings.at > 60_000) timings = { at: Date.now(), list: (await docs.list<BuildRecord>('builds')).map(timingOf).filter(Boolean) as BuildTiming[] };
+  return timings.list;
 }
 
-export function getBuild(id: string): BuildRecord | undefined {
-  return safeId(id) ? readJson<BuildRecord>(path.join(buildsDir(), `${id}.json`)) : undefined;
-}
-
-export function listBuilds(): BuildSummary[] {
-  const recs = readAllBuilds();
+export async function listBuilds(): Promise<BuildSummary[]> {
+  const recs = await docs.list<BuildRecord>('builds');
   recs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const pubs = new Map((await docs.list<PublishRecord>('publishes')).map((p) => [p.slug, p]));
   const seen = new Set<string>();
   return recs.map((r) => {
     const x = r.result;
     const replaced = !!x?.slug && seen.has(x.slug);
     if (x?.slug) seen.add(x.slug);
-    const pub = x?.slug ? getPublish(x.slug) : undefined;
+    const pub = x?.slug ? pubs.get(x.slug) : undefined;
     return {
       id: r.id, createdAt: r.createdAt, source: r.source, from: r.from, status: r.status, error: r.error,
       name: x?.business.name, category: x?.business.primaryTypeLabel, address: x?.business.formattedAddress,
@@ -124,19 +152,19 @@ export function listBuilds(): BuildSummary[] {
   });
 }
 
-// `from` is whatever the gateway sends (a phone number, an email): keep file names safe and unique
-const convoFile = (from: string) => path.join(convosDir(), `${from.replace(/[^a-z0-9]+/gi, '-').slice(0, 40)}-${createHash('sha1').update(from).digest('hex').slice(0, 8)}.json`);
+// `from` is whatever the gateway sends (a phone number, an email): keep ids safe and unique
+const convoId = (from: string) => `${from.replace(/[^a-z0-9]+/gi, '-').slice(0, 40)}-${createHash('sha1').update(from).digest('hex').slice(0, 8)}`;
 
-export function getConversation(from: string): Conversation | undefined {
-  return readJson<Conversation>(convoFile(from));
+export async function getConversation(from: string): Promise<Conversation | undefined> {
+  return docs.get<Conversation>('conversations', convoId(from));
 }
 
-export function saveConversation(c: Conversation) {
-  writeJson(convoFile(c.from), c);
+export async function saveConversation(c: Conversation) {
+  await docs.put('conversations', convoId(c.from), c);
 }
 
-export function listConversations() {
-  const all = fs.readdirSync(convosDir()).filter((f) => f.endsWith('.json')).map((f) => readJson<Conversation>(path.join(convosDir(), f))).filter(Boolean) as Conversation[];
+export async function listConversations() {
+  const all = await docs.list<Conversation>('conversations');
   all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return all.map((c) => {
     const last = c.messages[c.messages.length - 1];
@@ -144,22 +172,10 @@ export function listConversations() {
   });
 }
 
-/** A site published to Vercel (src/publish.ts): data/publishes/<slug>.json */
-export interface PublishRecord {
-  slug: string;
-  project: string;
-  domain: string;
-  url: string;
-  deploymentId: string;
-  publishedAt: string;
-}
-const publishesDir = () => path.join(config.dirs.data, 'publishes');
-fs.mkdirSync(publishesDir(), { recursive: true });
-
-export function savePublish(p: PublishRecord) {
-  writeJson(path.join(publishesDir(), `${p.slug}.json`), p);
+export async function savePublish(p: PublishRecord) {
+  await docs.put('publishes', p.slug, p);
 }
 
-export function getPublish(slug: string): PublishRecord | undefined {
-  return /^[a-z0-9-]{1,100}$/.test(slug) ? readJson<PublishRecord>(path.join(publishesDir(), `${slug}.json`)) : undefined;
+export async function getPublish(slug: string): Promise<PublishRecord | undefined> {
+  return /^[a-z0-9-]{1,100}$/.test(slug) ? docs.get<PublishRecord>('publishes', slug) : undefined;
 }

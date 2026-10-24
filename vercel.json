@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "src/server.ts": {
+      "includeFiles": "{themes,fixtures,public/stock,node_modules/lucide-static/icons}/**",
+      "maxDuration": 120
+    }
+  }
+}

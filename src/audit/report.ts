@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { config } from '../config.js';
+import { persistDir } from '../files.js';
 import { esc, truncateWords } from '../util/text.js';
 import type { AuditResult, Category } from './audit.js';
 
@@ -83,5 +84,6 @@ ${a.passed.length ? `<h2>What's already working</h2><ul class="passed">${a.passe
 </main></body></html>`;
   fs.writeFileSync(path.join(dir, 'index.html'), html);
   fs.writeFileSync(path.join(dir, 'audit.json'), JSON.stringify(a, null, 2));
+  await persistDir(dir); // on Vercel: so any server instance can serve the report
   return { dir, url, image };
 }

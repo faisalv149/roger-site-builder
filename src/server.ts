@@ -14,6 +14,8 @@ import { getBuild, getConversation, listBuilds, listConversations } from './stor
 import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { publishEnabled, publishSite } from './publish.js';
+import { readOut } from './files.js';
+import { kvEnabled } from './kv.js';
 import { claudeEnabled, claudeVia } from './content/claude.js';
 
 const app = express();
@@ -50,16 +52,26 @@ app.use('/sites', express.static(config.dirs.sites));
 app.use('/reports', express.static(config.dirs.reports));
 app.use('/cards', express.static(config.dirs.cards));
 app.use('/demo-sites', express.static(path.join(config.dirs.fixtures, 'sites'))); // the deliberately outdated demo site
-app.get('/', (_req, res) => res.sendFile(path.join(config.dirs.public, 'app', 'index.html')));
+app.get('/', (_req, res) => res.redirect('/app/')); // on Vercel public/ is served by its CDN, not by Express
+// generated files, also when they were built on another server instance (src/files.ts)
+app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
+  let rel = decodeURIComponent(req.path).slice(1);
+  if (rel.split('/').includes('..')) return res.status(400).end();
+  if (rel.endsWith('/')) rel += 'index.html';
+  else if (!path.extname(rel)) return res.redirect(301, `${req.path}/`);
+  const data = await readOut(rel);
+  if (!data) return res.status(404).send('Not found');
+  res.type(path.extname(rel)).set('cache-control', 'public, max-age=60').send(data);
+}));
 
 // ── meta ──
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null });
+  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: kvEnabled ? 'redis' : 'disk' });
 });
 // how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
-app.get('/api/estimate', (req, res) => {
+app.get('/api/estimate', (req, res, next) => {
   const on = (v: unknown) => v === '1' || v === 'true';
-  res.json(estimateBuild({ website: on(req.query.website), audit: on(req.query.audit), queue: queueDepth() }));
+  estimateBuild({ website: on(req.query.website), audit: on(req.query.audit), queue: queueDepth() }).then((e) => res.json(e), next);
 });
 
 // ── themes ──
@@ -185,27 +197,27 @@ app.post('/api/imessage/inbound', wrap(async (req, res) => {
   // async: true → "On it, about 20 seconds" now, the preview later (see handleInbound)
   res.json(await handleInbound(from, text, { async: req.body.async === true || req.body.async === 'true' }));
 }));
-app.post('/api/imessage/reset', (req, res) => { resetSession(String(req.body.from || 'demo')); res.json({ ok: true }); });
+app.post('/api/imessage/reset', wrap(async (req, res) => { await resetSession(String(req.body.from || 'demo')); res.json({ ok: true }); }));
 
 // ── saved history (data/builds, data/conversations). No auth: fine locally, add it before this is public. ──
-app.get('/api/builds', (_req, res) => res.json({ builds: listBuilds() }));
+app.get('/api/builds', wrap(async (_req, res) => res.json({ builds: await listBuilds() })));
 // put a built site live on Vercel as its own static project (VERCEL_TOKEN); re-publishing updates it
 app.post('/api/sites/:slug/publish', wrap(async (req, res) => {
   if (!publishEnabled()) return res.status(400).json({ error: 'Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).' });
   res.json(await publishSite(String(req.params.slug)));
 }));
-app.get('/api/builds/:id', (req, res) => {
-  const b = getBuild(req.params.id);
+app.get('/api/builds/:id', wrap(async (req, res) => {
+  const b = await getBuild(String(req.params.id));
   if (!b) return res.status(404).json({ error: 'not found' });
   res.json(b);
-});
-app.get('/api/conversations', (_req, res) => res.json({ conversations: listConversations() }));
-app.get('/api/conversations/:from', (req, res) => {
-  const c = getConversation(req.params.from);
+}));
+app.get('/api/conversations', wrap(async (_req, res) => res.json({ conversations: await listConversations() })));
+app.get('/api/conversations/:from', wrap(async (req, res) => {
+  const c = await getConversation(String(req.params.from));
   if (!c) return res.status(404).json({ error: 'not found' });
   const { session: _s, ...rest } = c; // flow internals stay server-side
-  res.json({ ...rest, pending: isPending(c.from) });
-});
+  res.json({ ...rest, pending: await isPending(c.from) });
+}));
 
 app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
   // body-parser marks client errors (bad JSON, body too large) with a 4xx status
@@ -214,7 +226,9 @@ app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: 
   res.status(500).json({ error: err.message });
 });
 
-app.listen(config.port, () => {
+// Vercel runs the exported app as a function; everywhere else this is a normal server
+export default app;
+if (!process.env.VERCEL) app.listen(config.port, () => {
   console.log(`Roger Site Builder on ${config.publicBaseUrl}  (mock=${config.mock}, claude=${claudeVia() ?? 'off'}, screenshots=${!!config.chromiumPath}, themes=${loadThemes().size}, password=${config.studioPassword ? 'on' : 'off'}, publish=${config.vercelToken ? 'vercel' : 'off'})`);
   if (!config.studioPassword && !/\/\/(localhost|127\.0\.0\.1)\b/.test(config.publicBaseUrl)) console.warn('[security] STUDIO_PASSWORD is not set: anyone who finds this URL can run builds on your API keys and read conversations.');
 });

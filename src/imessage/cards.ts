@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { config } from '../config.js';
+import { persistDir } from '../files.js';
 import type { BusinessCandidate } from '../types.js';
 import type { AuditResult } from '../audit/audit.js';
 import { downloadPhoto } from '../sources/places.js';
@@ -52,6 +53,7 @@ export async function confirmBusinessCard(c: BusinessCandidate): Promise<IMessag
 <meta property="og:image" content="${esc(image)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
 ${c.mapsUrl ? `<meta http-equiv="refresh" content="0;url=${esc(c.mapsUrl)}">` : ''}</head>
 <body style="font-family:system-ui;padding:24px"><img src="card.jpg" alt="" style="max-width:100%;border-radius:12px"><h1>${esc(c.name)}</h1><p>${esc(c.address || '')}</p>${c.mapsUrl ? `<p><a href="${esc(c.mapsUrl)}">Open in Google Maps</a></p>` : ''}</body></html>`);
+  await persistDir(dir); // on Vercel: so any server instance can serve the card
   return {
     kind: 'confirm-business',
     text: `Is this you?\n${c.name}\n${(c.address || '').replace(/, USA$/, '')}${rating ? `\n${rating}` : ''}`,
