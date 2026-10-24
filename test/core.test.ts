@@ -14,6 +14,8 @@ import { selectTheme } from '../src/theme/select.js';
 import { pickServices } from '../src/content/services.js';
 import { friendlyDuration } from '../src/estimate.js';
 import { projectName, rewriteForPublish } from '../src/publish.js';
+import { PACKAGE_THEMES } from '../src/theme/package-themes.js';
+import { themeFiles } from '../scripts/theme-manifest.js';
 
 const theme = () => structuredClone(loadThemes().get('roofing-urgent')!.theme);
 
@@ -125,4 +127,8 @@ test('publishing to Vercel: valid project names, self-links rewritten, lead form
   assert.ok(out.includes('href="https://roger-baked-lahore.vercel.app/"'));
   assert.ok(out.includes('content="https://roger-baked-lahore.vercel.app/preview.jpg"'));
   assert.ok(out.includes(`action="${base}/api/leads/baked-lahore"`));
+});
+
+test('the bundled theme list matches themes/ on disk (re-run scripts/theme-manifest.ts if not)', () => {
+  assert.deepEqual(PACKAGE_THEMES.map((t) => t.file), themeFiles());
 });

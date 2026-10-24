@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { PACKAGE_THEMES } from './package-themes.js';
 import { themeSchema, SUPPORTED_VARIANTS, SECTION_IDS, type Theme } from './schema.js';
 
 export interface ThemeEntry {
@@ -60,6 +61,13 @@ export function validateTheme(raw: unknown): ValidationResult {
 
 let cache: Map<string, ThemeEntry> | null = null;
 
+function addTheme(raw: unknown, file: string, origin: ThemeEntry['origin'], into: Map<string, ThemeEntry>) {
+  const v = validateTheme(raw);
+  if (!v.ok || !v.theme || !v.id) { console.warn(`[themes] skipped ${file}: ${v.errors.slice(0, 3).join('; ')}`); return; }
+  into.set(v.id, { id: v.id, vertical: v.theme.meta.vertical, variant: v.theme.meta.variant, name: v.theme.meta.name, file, origin, theme: v.theme, warnings: v.warnings });
+}
+
+// uploaded themes (data/themes); package themes come from src/theme/package-themes.ts
 function loadDir(dir: string, origin: ThemeEntry['origin'], into: Map<string, ThemeEntry>) {
   if (!fs.existsSync(dir)) return;
   const walk = (d: string): string[] =>
@@ -69,33 +77,14 @@ function loadDir(dir: string, origin: ThemeEntry['origin'], into: Map<string, Th
       return e.name.endsWith('.theme.json') || (origin === 'custom' && e.name.endsWith('.json')) ? [p] : [];
     });
   for (const file of walk(dir)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const v = validateTheme(raw);
-      if (!v.ok || !v.theme || !v.id) {
-        console.warn(`[themes] skipped ${path.relative(dir, file)}: ${v.errors.slice(0, 3).join('; ')}`);
-        continue;
-      }
-      into.set(v.id, {
-        id: v.id,
-        vertical: v.theme.meta.vertical,
-        variant: v.theme.meta.variant,
-        name: v.theme.meta.name,
-        file,
-        origin,
-        theme: v.theme,
-        warnings: v.warnings,
-      });
-    } catch (e) {
-      console.warn(`[themes] could not parse ${file}: ${(e as Error).message}`);
-    }
+    try { addTheme(JSON.parse(fs.readFileSync(file, 'utf8')), file, origin, into); } catch (e) { console.warn(`[themes] could not parse ${file}: ${(e as Error).message}`); }
   }
 }
 
 export function loadThemes(force = false): Map<string, ThemeEntry> {
   if (cache && !force) return cache;
   const m = new Map<string, ThemeEntry>();
-  loadDir(config.dirs.themes, 'package', m);
+  for (const p of PACKAGE_THEMES) addTheme(structuredClone(p.raw), path.join(config.dirs.themes, '..', p.file), 'package', m);
   loadDir(config.dirs.customThemes, 'custom', m); // custom uploads override package themes with the same id
   cache = m;
   return m;

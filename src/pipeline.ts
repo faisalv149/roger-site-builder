@@ -166,8 +166,12 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   if (!hero && theme.stock.hero[0]) {
     const stock = theme.stock.hero[0];
     const src = path.join(config.dirs.public, stock.url.replace(/^\//, ''));
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, path.join(assetDir, path.basename(src)));
+    // on Vercel public/ is on its CDN, not next to the server: fetch the placeholder from the public URL instead
+    const data = fs.existsSync(src)
+      ? fs.readFileSync(src)
+      : await fetch(`${config.publicBaseUrl}${stock.url}`, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.arrayBuffer() : undefined)).then((b) => (b ? Buffer.from(b) : undefined)).catch(() => undefined);
+    if (data) {
+      fs.writeFileSync(path.join(assetDir, path.basename(src)), data);
       hero = { publicPath: `assets/${path.basename(src)}`, width: stock.width || 1920, height: stock.height || 1080, alt: stock.alt || '', source: 'stock' };
     }
   }
