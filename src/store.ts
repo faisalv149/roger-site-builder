@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { config } from './config.js';
-import { kv, kvEnabled } from './kv.js';
+import { remote } from './remote.js';
 import type { BuildResult } from './pipeline.js';
 
 /**
@@ -10,7 +10,7 @@ import type { BuildResult } from './pipeline.js';
  *  builds/<id>             every build the server runs (Studio, iMessage, API), with its full result
  *  conversations/<from>    every iMessage conversation: the messages plus the flow's session state
  *  publishes/<slug>        sites published to Vercel
- * Locally these are JSON files under data/ (DATA_DIR). On Vercel (Upstash configured) they are Redis keys,
+ * Locally these are JSON files under data/ (DATA_DIR). On Vercel they go to Supabase or Redis (src/remote.ts),
  * because every server instance there starts with an empty disk.
  */
 export type BuildSource = 'studio' | 'imessage' | 'api' | 'imported';
@@ -85,21 +85,18 @@ type Collection = 'builds' | 'conversations' | 'publishes';
 const docs = {
   file: (col: Collection, id: string) => path.join(config.dirs.data, col, `${id}.json`),
   async get<T>(col: Collection, id: string): Promise<T | undefined> {
-    if (kvEnabled) { const v = await kv.get(`${col}:${id}`); return v ? (JSON.parse(v) as T) : undefined; }
+    if (remote) { const v = await remote.getDoc(col, id); return v ? (JSON.parse(v) as T) : undefined; }
     try { return JSON.parse(fs.readFileSync(this.file(col, id), 'utf8')) as T; } catch { return undefined; }
   },
   async put(col: Collection, id: string, data: unknown): Promise<void> {
-    if (kvEnabled) { await kv.set(`${col}:${id}`, JSON.stringify(data)); return; }
+    if (remote) { await remote.putDoc(col, id, JSON.stringify(data)); return; }
     const file = this.file(col, id);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(`${file}.tmp`, JSON.stringify(data, null, 2)); // temp file first: a crash never leaves half a JSON file
     fs.renameSync(`${file}.tmp`, file);
   },
   async list<T>(col: Collection): Promise<T[]> {
-    if (kvEnabled) {
-      const keys = await kv.keys(`${col}:`);
-      return (await kv.mget(keys)).filter(Boolean).map((v) => JSON.parse(v as string) as T);
-    }
+    if (remote) return (await remote.listDocs(col)).map((v) => JSON.parse(v) as T);
     const dir = path.join(config.dirs.data, col);
     if (!fs.existsSync(dir)) return [];
     return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => {

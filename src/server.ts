@@ -15,7 +15,7 @@ import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { publishEnabled, publishSite } from './publish.js';
 import { readOut } from './files.js';
-import { kvEnabled } from './kv.js';
+import { remote } from './remote.js';
 import { claudeEnabled, claudeVia } from './content/claude.js';
 
 const app = express();
@@ -66,7 +66,7 @@ app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
 
 // ── meta ──
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: kvEnabled ? 'redis' : 'disk' });
+  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk' });
 });
 // how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
 app.get('/api/estimate', (req, res, next) => {

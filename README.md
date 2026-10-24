@@ -46,6 +46,7 @@ Mock mode (no `GOOGLE_MAPS_API_KEY`) uses 4 sample businesses in `fixtures/place
 | `IMESSAGE_OUTBOUND_URL` | Optional. Your iMessage gateway's send endpoint. Messages Roger sends later (the preview after "On it") are POSTed here as `{ from, replies }`. |
 | `STUDIO_PASSWORD` / `STUDIO_USER` | Password (user default `roger`) for the Studio, `/imessage` and `/api/*`. Unset = open, fine only on your own machine. |
 | `VERCEL_TOKEN` / `VERCEL_TEAM_ID` / `VERCEL_PROJECT_PREFIX` | Publish finished sites to Vercel (token from vercel.com/account/tokens; team id only for a team token; project prefix default `roger-`). |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Storage on Vercel: records in the `roger_docs` table (create it once with `supabase/schema.sql`), generated files in a private `roger` bucket the app creates. Used automatically on Vercel; elsewhere only with `REMOTE_STORAGE=1`. Upstash Redis (`KV_REST_API_URL` / `KV_REST_API_TOKEN`) works the same way if you prefer it. |
 | `OUT_DIR` | Optional. Where generated sites, cards and reports go (default `out/`). On a host, the persistent disk. |
 
 ## Deploy

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // DATA_DIR lets QA runs use a throwaway folder instead of adding test builds to the real history
-// On Vercel only /tmp is writable (and per instance); lasting copies go to Redis (src/kv.ts, src/store.ts, src/files.ts)
+// On Vercel only /tmp is writable (and per instance); lasting copies go to Supabase or Redis (src/remote.ts)
 const TMP = process.env.VERCEL ? '/tmp/roger' : '';
 const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : TMP ? path.join(TMP, 'data') : path.join(ROOT, 'data');
 
