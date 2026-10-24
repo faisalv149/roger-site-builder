@@ -195,3 +195,11 @@ export async function saveLead(lead: Lead) {
 export async function listLeads(slug: string): Promise<Lead[]> {
   return (await docs.list<Lead>('leads')).filter((l) => l.slug === slug).sort((a, b) => b.at.localeCompare(a.at));
 }
+
+/** Delete every saved build of a site (its history in the Studio). Returns how many. */
+export async function deleteBuildsForSlug(slug: string): Promise<number> {
+  const recs = (await docs.list<BuildRecord>('builds')).filter((r) => r.result?.slug === slug);
+  for (const r of recs) await docs.del('builds', r.id);
+  timings = null;
+  return recs.length;
+}

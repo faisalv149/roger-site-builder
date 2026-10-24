@@ -195,7 +195,7 @@ function renderResult(r, ms, rec) {
       ${r.audit ? `<dt>Old site score</dt><dd>${r.audit.score}/100 (${r.audit.issues.length} issues)</dd>` : ''}
     </dl>
     ${r.warnings.length ? `<ul class="warns">${r.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
-    <div class="row"><a class="btn primary" href="${esc(r.siteUrl)}" target="_blank" rel="noopener">Open site ↗</a><button class="btn ghost" type="button" onclick="showTab('preview')">Preview here</button>${r.audit ? `<a class="btn ghost" href="${esc(r.audit.reportUrl)}" target="_blank" rel="noopener">Audit report ↗</a>` : ''}${state.health?.publish ? `<button class="btn ghost" type="button" data-publish="${esc(r.slug)}">Publish to Vercel</button>` : ''}</div>
+    <div class="row"><a class="btn primary" href="${esc(r.siteUrl)}" target="_blank" rel="noopener">Open site ↗</a><button class="btn ghost" type="button" onclick="showTab('preview')">Preview here</button>${r.audit ? `<a class="btn ghost" href="${esc(r.audit.reportUrl)}" target="_blank" rel="noopener">Audit report ↗</a>` : ''}<span class="pubctl" data-pubctl="${esc(r.slug)}" data-built="${esc(rec?.createdAt || new Date().toISOString())}"></span>${deleteBtn(r.slug, false)}</div>
   </div>`;
   $('#frame').src = `${r.siteUrl}?t=${Date.now()}`;
   $('#openSite').href = r.siteUrl;
@@ -203,6 +203,7 @@ function renderResult(r, ms, rec) {
   if (r.audit) renderAudit(r.audit, r.audit.reportUrl);
   else { $('#auditOut').className = 'empty'; $('#auditOut').innerHTML = '<p>No audit for this build (the business had no website, or the audit was turned off).</p>'; }
   renderCards(r.cards, 'Steps 2–3 · audit and preview');
+  fillPubCtls();
 }
 
 /* ── audit ── */
@@ -297,33 +298,74 @@ function siteRow(b) {
   return `<div class="site-row${sites.openId === b.id ? ' sel' : ''}"><button type="button" class="site-main" data-build="${esc(b.id)}">${thumb}<span><b>${esc(b.name || 'Build failed')}</b><span class="line">${esc([b.category, b.address].filter(Boolean).join(' · '))}</span><span class="line">${badge}${meta}</span></span></button>${ok && b.siteUrl ? `<div class="row-actions">${publishControls(b)}<a class="btn ghost sm" href="${esc(b.siteUrl)}" target="_blank" rel="noopener">Open site ↗</a></div>` : ''}</div>`;
 }
 
-// Vercel: "Live ↗" once published, "Publish" / "Republish" (a newer build than what's live) when VERCEL_TOKEN is set
+// Vercel controls, shared by the Sites rows and the build summary: "Live ↗" + "Unpublish" once published,
+// "Publish" / "Republish" (this build is newer than what's live) when VERCEL_TOKEN is set. sm: the rows' small buttons.
+function pubCtlHtml(slug, p, stale, sm = true) {
+  if (!state.health?.publish) return '';
+  const s = sm ? ' sm' : '';
+  const live = p ? `<a class="btn ghost${s} live" href="${esc(p.url)}" target="_blank" rel="noopener" title="Published ${esc(ago(p.at))}">Live ↗</a>` : '';
+  const pub = !p || stale ? `<button class="btn ghost${s}" type="button" data-publish="${esc(slug)}">${p ? 'Republish' : sm ? 'Publish' : 'Publish to Vercel'}</button>` : '';
+  const unpub = p ? `<button class="btn ghost${s} unpub" type="button" data-unpublish="${esc(slug)}" title="Take this site offline (deletes its Vercel project)">Unpublish</button>` : '';
+  return live + pub + unpub;
+}
+const deleteBtn = (slug, sm = true) => `<button class="btn ghost${sm ? ' sm' : ''} unpub" type="button" data-delete="${esc(slug)}" title="Delete this site from Roger (and from Vercel if published)">${sm ? 'Delete' : 'Delete site'}</button>`;
+
 function publishControls(b) {
-  const p = b.published;
-  const live = p ? `<a class="btn ghost sm live" href="${esc(p.url)}" target="_blank" rel="noopener" title="Published ${esc(ago(p.at))}">Live ↗</a>` : '';
-  const canPublish = state.health?.publish && !b.replaced && (!p || p.stale);
-  const unpub = p && state.health?.publish ? `<button class="btn ghost sm unpub" type="button" data-unpublish="${esc(b.slug)}" title="Take this site offline (deletes its Vercel project)">Unpublish</button>` : '';
-  return live + (canPublish ? `<button class="btn ghost sm" type="button" data-publish="${esc(b.slug)}">${p ? 'Republish' : 'Publish'}</button>` : '') + unpub;
+  return b.replaced ? '' : pubCtlHtml(b.slug, b.published, b.published?.stale) + deleteBtn(b.slug); // a replaced build shares the newer one's site
 }
 
-// Unpublish: first click arms it for a few seconds, the second takes the site offline
+// the build summary asks the server whether its site is on Vercel
+async function fillPubCtls() {
+  for (const el of $$('[data-pubctl]')) {
+    try {
+      const p = await api(`/api/sites/${encodeURIComponent(el.dataset.pubctl)}/publish`);
+      el.innerHTML = pubCtlHtml(el.dataset.pubctl, p.published ? { url: p.url, at: p.publishedAt } : null, p.published && (el.dataset.built || '') > p.publishedAt, false);
+    } catch { el.innerHTML = ''; }
+  }
+}
+const afterChange = () => { fillPubCtls(); sites.sig = ''; loadSites(); };
+
+// Unpublish and Delete: the first click arms the button for 4 seconds, the second one acts
+function armed(btn, label, ask) {
+  if (btn.dataset.armed) return true;
+  btn.dataset.armed = '1'; btn.textContent = ask; btn.classList.add('danger');
+  setTimeout(() => { if (btn.isConnected && btn.dataset.armed && !btn.disabled) { delete btn.dataset.armed; btn.textContent = label; btn.classList.remove('danger'); } }, 4000);
+  return false;
+}
+function disarm(btn, label) { btn.disabled = false; delete btn.dataset.armed; btn.textContent = label; btn.classList.remove('danger'); }
+const say = (html) => { $('#sitesMsg').innerHTML = html; };
+
 document.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-unpublish]');
-  if (!btn || btn.disabled) return;
-  if (!btn.dataset.armed) {
-    btn.dataset.armed = '1'; btn.textContent = 'Confirm unpublish?'; btn.classList.add('danger');
-    setTimeout(() => { if (btn.isConnected && btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = 'Unpublish'; btn.classList.remove('danger'); } }, 4000);
-    return;
-  }
+  if (!btn || btn.disabled || !armed(btn, 'Unpublish', 'Confirm unpublish?')) return;
   btn.disabled = true; btn.textContent = 'Removing…';
   try {
     const r = await api(`/api/sites/${encodeURIComponent(btn.dataset.unpublish)}/publish`, { method: 'DELETE' });
-    $('#sitesMsg').innerHTML = `<span class="okk">Unpublished: ${esc(r.project)} is offline${r.removed ? '' : ' (it was already gone on Vercel)'}.</span>`;
-    sites.sig = ''; loadSites();
-  } catch (err) {
-    btn.disabled = false; delete btn.dataset.armed; btn.textContent = 'Unpublish'; btn.classList.remove('danger');
-    $('#sitesMsg').innerHTML = `<span class="err">Unpublish failed: ${esc(err.message)}</span>`;
-  }
+    say(`<span class="okk">Unpublished: ${esc(r.project)} is offline${r.removed ? '' : ' (it was already gone on Vercel)'}.</span>`);
+    afterChange();
+  } catch (err) { disarm(btn, 'Unpublish'); say(`<span class="err">Unpublish failed: ${esc(err.message)}</span>`); }
+});
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-delete]');
+  const label = btn?.classList.contains('sm') ? 'Delete' : 'Delete site';
+  if (!btn || btn.disabled || !armed(btn, label, 'Confirm delete?')) return;
+  const slug = btn.dataset.delete;
+  btn.disabled = true; btn.textContent = 'Deleting…';
+  try {
+    const r = await api(`/api/sites/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+    say(`<span class="okk">Deleted ${esc(slug)}: ${r.builds} saved build${r.builds === 1 ? '' : 's'} and its files${r.unpublished ? ', and it is off Vercel' : ''}.</span>`);
+    // if that site is open in the tabs, empty them
+    if (state.last?.slug === slug) {
+      state.last = null; sites.openId = null;
+      $('#summary').innerHTML = ''; $('#log').innerHTML = ''; $('#empty').hidden = false;
+      $('#frame').removeAttribute('src'); $('#dataOut').textContent = 'Build something first.';
+      $('#cardsOut').innerHTML = '<p class="hint" style="margin:0">No cards yet. Open a site in the <b>Sites</b> tab, find a business, or build one.</p>';
+      $('#auditOut').className = 'empty'; $('#auditOut').innerHTML = '<p>No audit yet.</p>';
+    }
+    showTab('sites');
+    afterChange();
+  } catch (err) { disarm(btn, label); say(`<span class="err">Delete failed: ${esc(err.message)}</span>`); showTab('sites'); }
 });
 
 document.addEventListener('click', async (e) => {
@@ -333,12 +375,11 @@ document.addEventListener('click', async (e) => {
   btn.disabled = true; btn.textContent = 'Publishing…';
   try {
     const p = await postJson(`/api/sites/${encodeURIComponent(btn.dataset.publish)}/publish`, {});
-    btn.outerHTML = `<a class="btn ghost sm live" href="${esc(p.url)}" target="_blank" rel="noopener">Live ↗</a>`;
-    $('#sitesMsg').innerHTML = `<span class="okk">Published: <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></span>`;
-    sites.sig = ''; loadSites();
+    say(`<span class="okk">Published: <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></span>`);
+    afterChange();
   } catch (err) {
     btn.disabled = false; btn.textContent = label;
-    $('#sitesMsg').innerHTML = `<span class="err">Publish failed: ${esc(err.message)}</span>`;
+    say(`<span class="err">Publish failed: ${esc(err.message)}</span>`);
     showTab('sites');
   }
 });

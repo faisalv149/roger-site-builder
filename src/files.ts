@@ -62,3 +62,15 @@ export async function listOut(relDir: string): Promise<{ file: string; data: Buf
   }
   return out;
 }
+
+/** Remove a folder under out/ ("sites/<slug>") from this disk and from the remote store. */
+export async function deleteOut(relDir: string): Promise<number> {
+  const abs = path.join(config.dirs.out, relDir);
+  if (!abs.startsWith(config.dirs.out + path.sep)) return 0;
+  const local = walk(abs).length;
+  fs.rmSync(abs, { recursive: true, force: true });
+  if (!remote) return local;
+  const paths = await remote.listFiles(relDir);
+  if (paths.length) await remote.delFiles(paths);
+  return Math.max(local, paths.length);
+}

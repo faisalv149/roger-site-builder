@@ -12,12 +12,12 @@ import { searchCandidates } from './sources/places.js';
 import { confirmBusinessCard } from './imessage/cards.js';
 import { runAudit, type BuildInput } from './pipeline.js';
 import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
-import { getBuild, getConversation, listBuilds, listConversations, listLeads, saveLead } from './store.js';
+import { deleteBuildsForSlug, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead } from './store.js';
 import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { screenshotsAvailable } from './render/og.js';
 import { publishEnabled, publishSite, unpublishSite } from './publish.js';
-import { readOut } from './files.js';
+import { deleteOut, readOut } from './files.js';
 import { remote } from './remote.js';
 import { claudeEnabled, claudeKeyStatus, claudeVia } from './content/claude.js';
 
@@ -213,6 +213,26 @@ app.post('/api/sites/:slug/publish', wrap(async (req, res) => {
 app.delete('/api/sites/:slug/publish', wrap(async (req, res) => {
   if (!publishEnabled()) return res.status(400).json({ error: 'Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).' });
   res.json(await unpublishSite(String(req.params.slug)));
+}));
+// is it on Vercel? (the Studio's build summary shows Publish / Live / Unpublish from this)
+app.get('/api/sites/:slug/publish', wrap(async (req, res) => {
+  const p = await getPublish(String(req.params.slug));
+  res.json(p ? { published: true, url: p.url, publishedAt: p.publishedAt, project: p.project } : { published: false });
+}));
+// delete a site from Roger: takes it off Vercel first (if published), then its pages, audit report and build history.
+// The iMessage conversation that produced it and any leads from its widget are kept.
+app.delete('/api/sites/:slug', wrap(async (req, res) => {
+  const slug = String(req.params.slug);
+  if (!/^[a-z0-9-]{1,100}$/.test(slug)) return res.status(400).json({ error: 'bad site name' });
+  let unpublished = false;
+  if (await getPublish(slug)) {
+    if (publishEnabled()) { await unpublishSite(slug); unpublished = true; } // fails → nothing deleted yet
+    else await deletePublish(slug);
+  }
+  const builds = await deleteBuildsForSlug(slug);
+  const files = (await deleteOut(`sites/${slug}`)) + (await deleteOut(`reports/${slug}`));
+  if (!builds && !files && !unpublished) return res.status(404).json({ error: `No site "${slug}"` });
+  res.json({ slug, builds, files, unpublished });
 }));
 app.get('/api/builds/:id', wrap(async (req, res) => {
   const b = await getBuild(String(req.params.id));
