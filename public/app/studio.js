@@ -302,8 +302,29 @@ function publishControls(b) {
   const p = b.published;
   const live = p ? `<a class="btn ghost sm live" href="${esc(p.url)}" target="_blank" rel="noopener" title="Published ${esc(ago(p.at))}">Live ↗</a>` : '';
   const canPublish = state.health?.publish && !b.replaced && (!p || p.stale);
-  return live + (canPublish ? `<button class="btn ghost sm" type="button" data-publish="${esc(b.slug)}">${p ? 'Republish' : 'Publish'}</button>` : '');
+  const unpub = p && state.health?.publish ? `<button class="btn ghost sm unpub" type="button" data-unpublish="${esc(b.slug)}" title="Take this site offline (deletes its Vercel project)">Unpublish</button>` : '';
+  return live + (canPublish ? `<button class="btn ghost sm" type="button" data-publish="${esc(b.slug)}">${p ? 'Republish' : 'Publish'}</button>` : '') + unpub;
 }
+
+// Unpublish: first click arms it for a few seconds, the second takes the site offline
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-unpublish]');
+  if (!btn || btn.disabled) return;
+  if (!btn.dataset.armed) {
+    btn.dataset.armed = '1'; btn.textContent = 'Confirm unpublish?'; btn.classList.add('danger');
+    setTimeout(() => { if (btn.isConnected && btn.dataset.armed) { delete btn.dataset.armed; btn.textContent = 'Unpublish'; btn.classList.remove('danger'); } }, 4000);
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Removing…';
+  try {
+    const r = await api(`/api/sites/${encodeURIComponent(btn.dataset.unpublish)}/publish`, { method: 'DELETE' });
+    $('#sitesMsg').innerHTML = `<span class="okk">Unpublished: ${esc(r.project)} is offline${r.removed ? '' : ' (it was already gone on Vercel)'}.</span>`;
+    sites.sig = ''; loadSites();
+  } catch (err) {
+    btn.disabled = false; delete btn.dataset.armed; btn.textContent = 'Unpublish'; btn.classList.remove('danger');
+    $('#sitesMsg').innerHTML = `<span class="err">Unpublish failed: ${esc(err.message)}</span>`;
+  }
+});
 
 document.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-publish]');

@@ -16,7 +16,7 @@ import { getBuild, getConversation, listBuilds, listConversations, listLeads, sa
 import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { screenshotsAvailable } from './render/og.js';
-import { publishEnabled, publishSite } from './publish.js';
+import { publishEnabled, publishSite, unpublishSite } from './publish.js';
 import { readOut } from './files.js';
 import { remote } from './remote.js';
 import { claudeEnabled, claudeKeyStatus, claudeVia } from './content/claude.js';
@@ -208,6 +208,11 @@ app.get('/api/builds', wrap(async (_req, res) => res.json({ builds: await listBu
 app.post('/api/sites/:slug/publish', wrap(async (req, res) => {
   if (!publishEnabled()) return res.status(400).json({ error: 'Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).' });
   res.json(await publishSite(String(req.params.slug)));
+}));
+// take it offline again: deletes that site's Vercel project (the live URL stops working)
+app.delete('/api/sites/:slug/publish', wrap(async (req, res) => {
+  if (!publishEnabled()) return res.status(400).json({ error: 'Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).' });
+  res.json(await unpublishSite(String(req.params.slug)));
 }));
 app.get('/api/builds/:id', wrap(async (req, res) => {
   const b = await getBuild(String(req.params.id));

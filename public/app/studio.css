@@ -126,3 +126,5 @@ details.convo-in-sum .phone-ui{margin-top:10px;max-height:520px;overflow:auto}
 .eta.done b{color:var(--ok)}
 .row-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .btn.live{border-color:#86EFAC;color:#166534;background:#F0FDF4}
+.btn.unpub{color:var(--muted)}.btn.unpub:hover{color:var(--bad);border-color:#FCA5A5}
+.btn.danger{color:#fff;background:var(--bad);border-color:var(--bad)}.btn.danger:hover{color:#fff;background:#991B1B}

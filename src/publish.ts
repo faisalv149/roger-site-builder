@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { config } from './config.js';
-import { getPublish, savePublish, type PublishRecord } from './store.js';
+import { deletePublish, getPublish, savePublish, type PublishRecord } from './store.js';
 import { listOut } from './files.js';
 
 /**
@@ -104,4 +104,24 @@ export async function publishSite(slug: string): Promise<PublishRecord> {
   const rec: PublishRecord = { slug, project: name, domain, url: `https://${domain}/`, deploymentId: d.id, publishedAt: new Date().toISOString() };
   await savePublish(rec);
   return rec;
+}
+
+/**
+ * Take a published site offline: delete its Vercel project (the live URL stops working) and forget the publish.
+ * Only the project Roger recorded for this site is touched, and only if it carries Roger's name for it.
+ */
+export async function unpublishSite(slug: string): Promise<{ slug: string; project: string; removed: boolean }> {
+  if (!publishEnabled()) throw new Error('Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).');
+  const rec = /^[a-z0-9-]{1,100}$/.test(slug) ? await getPublish(slug) : undefined;
+  if (!rec) throw Object.assign(new Error(`"${slug}" is not published`), { status: 404 });
+  if (rec.project !== projectName(slug)) throw Object.assign(new Error(`Refusing to delete Vercel project "${rec.project}": it isn't Roger's project for "${slug}"`), { status: 400 });
+  let removed = true;
+  try {
+    await vercel(`/v9/projects/${encodeURIComponent(rec.project)}`, { method: 'DELETE' });
+  } catch (e) {
+    if (!/^Vercel 404/.test((e as Error).message)) throw e; // already gone on Vercel's side: just forget it
+    removed = false;
+  }
+  await deletePublish(slug);
+  return { slug, project: rec.project, removed };
 }

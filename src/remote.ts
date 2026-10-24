@@ -1,5 +1,5 @@
 import { kv, kvEnabled } from './kv.js';
-import { sbDelFiles, sbGetDoc, sbGetFile, sbListDocs, sbListFiles, sbPutDoc, sbPutFile, supabaseEnabled } from './supabase.js';
+import { sbDelDoc, sbDelFiles, sbGetDoc, sbGetFile, sbListDocs, sbListFiles, sbPutDoc, sbPutFile, supabaseEnabled } from './supabase.js';
 
 /**
  * Lasting storage for when the local disk doesn't last (Vercel): Supabase if configured, else Upstash Redis,
@@ -10,6 +10,7 @@ export interface Remote {
   getDoc(col: string, id: string): Promise<string | null>;
   putDoc(col: string, id: string, json: string): Promise<void>;
   listDocs(col: string): Promise<string[]>;
+  delDoc(col: string, id: string): Promise<void>;
   putFile(path: string, data: Buffer, contentType?: string): Promise<void>;
   getFile(path: string): Promise<Buffer | undefined>;
   /** full paths of every file under prefix ("sites/<slug>") */
@@ -22,6 +23,7 @@ const supabase: Remote = {
   getDoc: sbGetDoc,
   putDoc: sbPutDoc,
   listDocs: sbListDocs,
+  delDoc: sbDelDoc,
   putFile: sbPutFile,
   getFile: sbGetFile,
   listFiles: sbListFiles,
@@ -34,6 +36,7 @@ const redis: Remote = {
   getDoc: (col, id) => kv.get(`${col}:${id}`),
   putDoc: async (col, id, json) => { await kv.set(`${col}:${id}`, json); },
   listDocs: async (col) => (await kv.mget(await kv.keys(`${col}:`))).filter(Boolean) as string[],
+  delDoc: async (col, id) => { await kv.del(`${col}:${id}`); },
   putFile: async (path, data) => { await kv.set(`file:${path}`, data.toString('base64')); },
   getFile: async (path) => { const v = await kv.get(`file:${path}`); return v ? Buffer.from(v, 'base64') : undefined; },
   listFiles: async (prefix) => (await kv.keys(`file:${prefix.replace(/\/$/, '')}/`)).map((k) => k.slice('file:'.length)),

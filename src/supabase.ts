@@ -58,6 +58,10 @@ export async function sbListDocs(col: string): Promise<string[]> {
   }
 }
 
+export async function sbDelDoc(col: string, id: string): Promise<void> {
+  await call(`/rest/v1/${TABLE}?collection=eq.${encodeURIComponent(col)}&id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { prefer: 'return=minimal' } });
+}
+
 // ── files: a private bucket; the server streams them out through /sites, /cards, /reports ──
 let bucketReady: Promise<void> | null = null;
 function ensureBucket(): Promise<void> {

@@ -95,6 +95,10 @@ const docs = {
     fs.writeFileSync(`${file}.tmp`, JSON.stringify(data, null, 2)); // temp file first: a crash never leaves half a JSON file
     fs.renameSync(`${file}.tmp`, file);
   },
+  async del(col: Collection, id: string): Promise<void> {
+    if (remote) { await remote.delDoc(col, id); return; }
+    fs.rmSync(this.file(col, id), { force: true });
+  },
   async list<T>(col: Collection): Promise<T[]> {
     if (remote) return (await remote.listDocs(col)).map((v) => JSON.parse(v) as T);
     const dir = path.join(config.dirs.data, col);
@@ -171,6 +175,10 @@ export async function listConversations() {
 
 export async function savePublish(p: PublishRecord) {
   await docs.put('publishes', p.slug, p);
+}
+
+export async function deletePublish(slug: string) {
+  if (/^[a-z0-9-]{1,100}$/.test(slug)) await docs.del('publishes', slug);
 }
 
 export async function getPublish(slug: string): Promise<PublishRecord | undefined> {
