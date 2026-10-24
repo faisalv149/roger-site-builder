@@ -356,13 +356,14 @@ async function loadSites() {
   }
 }
 
-async function openBuild(id) {
+/** stay: fill the tabs without leaving the current one (used when the Studio opens) */
+async function openBuild(id, { stay = false } = {}) {
   const rec = await api(`/api/builds/${encodeURIComponent(id)}`);
   sites.openId = id;
   sites.sig = ''; // redraw the list with this row selected
   loadSites();
   $('#empty').hidden = true; $('#log').innerHTML = ''; $('#summary').innerHTML = '';
-  showTab('progress');
+  if (!stay) showTab('progress');
   if (rec.status !== 'done' || !rec.result) { logStep({ step: 'Build failed', status: 'error', note: rec.error || '' }); return; }
   for (const s of rec.result.steps) logStep({ step: s.name, status: s.ok ? 'done' : 'error', ms: s.ms, note: s.note });
   renderResult(rec.result, rec.result.totalMs, rec);
@@ -388,8 +389,13 @@ $('[data-pane="sites"]').addEventListener('click', (e) => {
 const alertInline = (err) => { $('#convoView').innerHTML = `<p class="hint"><span class="err">${esc(err.message)}</span></p>`; };
 document.querySelector('[data-tab="sites"]').addEventListener('click', () => { sites.unseen = 0; updateCount(); loadSites(); });
 
-// first load: open the Sites tab when there is history and nothing has been built in this session yet
-loadSites().then((builds) => { if (builds.length && !state.last) showTab('sites'); });
+// first load: open the Sites tab and put the newest site in the other tabs, so Preview, Audit and iMessage cards aren't empty
+loadSites().then((builds) => {
+  if (!builds.length || state.last) return;
+  showTab('sites');
+  const newest = builds.find((b) => b.status === 'done');
+  if (newest) openBuild(newest.id, { stay: true }).catch(() => {});
+});
 setInterval(() => { if (!document.hidden) loadSites(); }, 5000);
 
 /* ── build-time estimate: shown before building, and the line Roger texts the owner ── */

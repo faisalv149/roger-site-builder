@@ -1,3 +1,5 @@
+// first: fonts for the generated images must be set up before sharp draws anything (src/fonts.ts)
+import { textRendering } from './fonts.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, timingSafeEqual } from 'node:crypto';
@@ -67,9 +69,9 @@ app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
 }));
 
 // ── meta ──
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk' });
-});
+app.get('/api/health', wrap(async (_req, res) => {
+  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', fonts: await textRendering() });
+}));
 // how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
 app.get('/api/estimate', (req, res, next) => {
   const on = (v: unknown) => v === '1' || v === 'true';

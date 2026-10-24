@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -6,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // DATA_DIR lets QA runs use a throwaway folder instead of adding test builds to the real history
 // On Vercel only /tmp is writable (and per instance); lasting copies go to Supabase or Redis (src/remote.ts)
-const TMP = process.env.VERCEL ? '/tmp/roger' : '';
+const TMP = process.env.VERCEL ? path.join(os.tmpdir(), 'roger') : '';
 const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : TMP ? path.join(TMP, 'data') : path.join(ROOT, 'data');
 
 // Executable locations inside a Playwright chromium-<rev> folder, per OS.
