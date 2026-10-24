@@ -2,6 +2,7 @@ import type { SiteModel } from '../content/model.js';
 import type { SectionLayout } from '../theme/schema.js';
 import { esc } from '../util/text.js';
 import { icon } from './icons.js';
+import { reviewSlider } from './widgets.js';
 import {
   colsVar, gi, head, hoursTable, ic, img, leadForm, mapEmbed, nextSteps, primaryCta, ratingBadge, secondaryCta, stars, title, trustRow,
 } from './parts.js';
@@ -130,6 +131,8 @@ function quoteCards(m: SiteModel, cols?: { phone?: number; desktop?: number }) {
   if (!m.proof.quotes.length) return '';
   return `<div class="cols quotes" style="${colsVar(cols, { phone: 1, desktop: 2 })}">${m.proof.quotes.map((q) => `<figure class="card quote-card">${stars(q.rating)}<blockquote><p>“${esc(q.text)}”</p></blockquote><figcaption>${esc(q.author)} · Google review</figcaption></figure>`).join('')}</div>`;
 }
+// 2+ reviews: the slider (all of them); otherwise the theme's quote cards
+const reviewsOr = (m: SiteModel, fallback: () => string, summary = true) => (m.proof.reviews.length >= 2 ? reviewSlider(m, { summary }) : fallback());
 const googleAttrib = (m: SiteModel) => (m.proof.showRating ? `<p class="attrib">Ratings and reviews from Google.</p>` : '');
 
 export function proof(ctx: Ctx): string {
@@ -138,14 +141,14 @@ export function proof(ctx: Ctx): string {
   let body = '';
   switch (l.variant) {
     case 'stat-row':
-      body = `${head('reviews', title(m, 'proof'))}<div class="cols" style="${colsVar(l.columns, { phone: 2, desktop: 4 })}">${p.stats.map((s) => `<div class="stat"><span class="v${/^[\d.]+[★+]?$/.test(s.value) ? '' : ' word'}">${esc(s.value)}</span><span class="l">${esc(s.label)}</span></div>`).join('')}</div>${quoteCards(m)}${googleAttrib(m)}`;
+      body = `${head('reviews', title(m, 'proof'))}<div class="cols" style="${colsVar(l.columns, { phone: 2, desktop: 4 })}">${p.stats.map((s) => `<div class="stat"><span class="v${/^[\d.]+[★+]?$/.test(s.value) ? '' : ' word'}">${esc(s.value)}</span><span class="l">${esc(s.label)}</span></div>`).join('')}</div>${reviewsOr(m, () => quoteCards(m), false)}${googleAttrib(m)}`;
       break;
     case 'inline-badges': {
       const chips = [
         ...(p.showRating ? [`<li class="chip">${stars(p.rating || 0, 14)} ${p.rating?.toFixed(1)} on Google</li>`, `<li class="chip">${icon('message-square', { size: 16 })} ${p.reviewCount} reviews</li>`] : []),
         ...m.trust.map((t) => `<li class="chip">${icon('badge-check', { size: 16 })} ${esc(t)}</li>`),
       ].join('');
-      body = `${head('reviews', title(m, 'proof'))}<ul class="chips">${chips}</ul>${quoteCards(m, { phone: 1, desktop: m.theme.grid.columns <= 6 ? 1 : 2 })}${googleAttrib(m)}`;
+      body = `${head('reviews', title(m, 'proof'))}<ul class="chips">${chips}</ul>${reviewsOr(m, () => quoteCards(m, { phone: 1, desktop: m.theme.grid.columns <= 6 ? 1 : 2 }), false)}${googleAttrib(m)}`;
       break;
     }
     case 'pull-quote-band': {
@@ -154,7 +157,9 @@ export function proof(ctx: Ctx): string {
         p.showRating ? `<span>${stars(p.rating || 0, 15)} ${p.rating?.toFixed(1)} · ${p.reviewCount} Google reviews</span>` : '',
         ...m.trust.map((t) => `<span>${icon('badge-check', { size: 16 })} ${esc(t)}</span>`),
       ].join('');
-      const inner = q
+      const inner = p.reviews.length >= 2
+        ? `<h2 id="reviews-h" class="visually-hidden">${esc(title(m, 'proof'))}</h2>${reviewSlider(m, { big: true })}<div class="pull"><div class="meta">${meta}</div></div>`
+        : q
         ? `<h2 id="reviews-h" class="visually-hidden">${esc(title(m, 'proof'))}</h2><figure class="pull"><blockquote><p>“${esc(q.text)}”</p></blockquote><figcaption>${esc(q.author)} · Google review</figcaption><div class="meta">${meta}</div></figure>`
         : `${head('reviews', title(m, 'proof'), undefined, true)}<div class="pull"><div class="meta">${meta}</div></div>`;
       return `<section id="reviews" class="section tint reveal" aria-labelledby="reviews-h"><div class="wrap"><div class="grid"><div ${gi(l.span?.desktop, l.span?.offset)}>${inner}${googleAttrib(m)}</div></div></div></section>`;
@@ -162,8 +167,9 @@ export function proof(ctx: Ctx): string {
     case 'review-cards':
     default: {
       const summary = p.showRating ? `<p class="badge-rating">${stars(p.rating || 0)} <span>${p.rating?.toFixed(1)} average from ${p.reviewCount} Google reviews</span></p>` : '';
-      const cards = p.quotes.length ? quoteCards(m, l.columns) : '';
-      body = `<div class="sec-head"><h2 id="reviews-h">${esc(title(m, 'proof'))}</h2>${summary}</div>${m.trust.length ? `<ul class="chips">${m.trust.map((t) => `<li class="chip">${icon('badge-check', { size: 16 })} ${esc(t)}</li>`).join('')}</ul>` : ''}${cards}${googleAttrib(m)}`;
+      const slider = p.reviews.length >= 2;
+      const cards = slider ? reviewSlider(m) : p.quotes.length ? quoteCards(m, l.columns) : '';
+      body = `<div class="sec-head"><h2 id="reviews-h">${esc(title(m, 'proof'))}</h2>${slider ? '' : summary}</div>${m.trust.length ? `<ul class="chips">${m.trust.map((t) => `<li class="chip">${icon('badge-check', { size: 16 })} ${esc(t)}</li>`).join('')}</ul>` : ''}${cards}${googleAttrib(m)}`;
     }
   }
   const content = l.span?.desktop ? `<div class="grid"><div ${gi(l.span.desktop, l.span.offset)}>${body}</div></div>` : body;
@@ -198,9 +204,11 @@ export function quote(ctx: Ctx): string {
 }
 
 /* ───────────────────────────── GALLERY ───────────────────────────── */
-function fig(p: SiteModel['images']['gallery'][number], cls = '') {
-  return `<figure class="${cls}">${img(p)}${p.credit ? `<figcaption>${esc(p.credit)}</figcaption>` : ''}</figure>`;
+// each photo opens the full-screen viewer (src/render/widgets.ts); more = photos not shown in the grid
+function fig(p: SiteModel['images']['gallery'][number], i: number, total: number, cls = '', more = 0) {
+  return `<figure class="${cls}"><button type="button" class="lb-open" data-lb-i="${i}" aria-label="${more ? `Open photos (${more} more)` : `Open photo ${i + 1} of ${total}`}">${img(p)}${more ? `<span class="gal-more">+${more}</span>` : ''}</button>${p.credit ? `<figcaption>${esc(p.credit)}</figcaption>` : ''}</figure>`;
 }
+const arrows = (inner: string) => `<div class="gal-wrap"><button type="button" class="gal-arrow l" aria-label="Previous photos">${icon('chevron-left', { size: 22 })}</button>${inner}<button type="button" class="gal-arrow r" aria-label="More photos">${icon('chevron-right', { size: 22 })}</button></div>`;
 export function gallery(ctx: Ctx): string {
   const { m, l, bg } = ctx;
   const photos = m.images.gallery;
@@ -208,23 +216,33 @@ export function gallery(ctx: Ctx): string {
   switch (l.variant) {
     case 'bento': {
       const pattern: string[] = (l as any).pattern || ['2x2', '1x1', '1x1', '2x1', '1x1', '1x1'];
-      body = `<div class="gal bento" style="${colsVar(l.columns, { phone: 2, desktop: 4 })}">${photos.slice(0, pattern.length).map((p, i) => fig(p, `s${pattern[i % pattern.length]}`)).join('')}</div>`;
+      const shown = photos.slice(0, pattern.length);
+      // the pattern may not fill the last desktop row: widen the last tile into the gap
+      const cd = l.columns?.desktop ?? 4;
+      const size = (s: string) => { const [w, h] = s.split('x').map(Number); return { w: Math.min(w || 1, cd), h: h || 1 }; };
+      const area = shown.reduce((a, _, i) => { const z = size(pattern[i]); return a + z.w * z.h; }, 0);
+      const gap = (cd - (area % cd)) % cd;
+      const lastW = shown.length ? size(pattern[shown.length - 1]).w : 1;
+      body = `<div class="gal bento" style="${colsVar(l.columns, { phone: 2, desktop: 4 })}">${shown.map((p, i) => {
+        const tile = fig(p, i, photos.length, `s${pattern[i]}${i === shown.length - 1 && gap ? ' fill' : ''}`, i === shown.length - 1 ? photos.length - shown.length : 0);
+        return i === shown.length - 1 && gap ? tile.replace('<figure class="', `<figure style="--span:${lastW + gap}" class="`) : tile;
+      }).join('')}</div>`;
       break;
     }
     case 'carousel': {
       const pv = (l as any).perView || { phone: 1.2, desktop: 2.5 };
-      body = `<div class="gal scroller" style="--pvp:${pv.phone};--pvd:${pv.desktop}" tabindex="0" aria-label="Photo gallery, scroll sideways">${photos.map((p) => fig(p)).join('')}</div>`;
+      body = arrows(`<div class="gal scroller" style="--pvp:${pv.phone};--pvd:${pv.desktop}" tabindex="0" aria-label="Photo gallery, scroll sideways">${photos.map((p, i) => fig(p, i, photos.length)).join('')}</div>`);
       break;
     }
     case 'filmstrip':
-      body = `<div class="gal scroller" style="--pvp:${l.columns?.phone ?? 2};--pvd:${l.columns?.desktop ?? 4}" tabindex="0" aria-label="Photo gallery, scroll sideways">${photos.map((p) => fig(p)).join('')}</div>`;
+      body = arrows(`<div class="gal scroller" style="--pvp:${l.columns?.phone ?? 2};--pvd:${l.columns?.desktop ?? 4}" tabindex="0" aria-label="Photo gallery, scroll sideways">${photos.map((p, i) => fig(p, i, photos.length)).join('')}</div>`);
       break;
     case 'uniform-grid':
     default: {
       // Avoid a lonely last row: trim to a multiple of the desktop column count.
       const cd = l.columns?.desktop ?? 3;
       const n = photos.length > cd ? photos.length - (photos.length % cd) : photos.length;
-      body = `<div class="gal cols" style="${colsVar(l.columns, { phone: 2, desktop: 3 })}">${photos.slice(0, n).map((p) => fig(p)).join('')}</div>`;
+      body = `<div class="gal cols" style="${colsVar(l.columns, { phone: 2, desktop: 3 })}">${photos.slice(0, n).map((p, i) => fig(p, i, photos.length, '', i === n - 1 ? photos.length - n : 0)).join('')}</div>`;
     }
   }
   const inner = `${head('work', title(m, 'gallery'))}${body}`;

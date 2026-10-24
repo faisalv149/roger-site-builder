@@ -1,4 +1,5 @@
 import type { SiteModel } from '../content/model.js';
+import { WIDGETS_CSS } from './widgets.js';
 import { withAlpha } from '../color/oklch.js';
 
 const DESK = 900; // desktop breakpoint (px)
@@ -304,6 +305,7 @@ body.has-bar{padding-bottom:64px}
 @media (min-width:${DESK}px){.bubble{bottom:24px}.bubble .t{display:inline}}
 @media (max-width:${DESK - 1}px){.has-bar .bubble{display:none}}
 .credit{opacity:.75}
+${WIDGETS_CSS(DESK)}
 
 /* ── motion ── */
 ${t.motion !== 'none' ? `.js .reveal{opacity:0;transform:translateY(14px);transition:opacity .5s ease, transform .5s ease}.js .reveal.in{opacity:1;transform:none}

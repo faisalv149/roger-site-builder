@@ -4,6 +4,7 @@ import { esc } from '../util/text.js';
 import { buildCss } from './css.js';
 import { icon } from './icons.js';
 import { RENDERERS, type Ctx } from './sections.js';
+import { WIDGETS_JS, lightbox, rogerWidget } from './widgets.js';
 
 const NAV: Record<string, [string, string]> = {
   services: ['#services', 'Services'],
@@ -83,6 +84,9 @@ document.documentElement.classList.add('js');
 export function renderPage(m: SiteModel): string {
   const t = m.theme;
   const order = t.sections.filter((s) => m.visible[s] !== false && RENDERERS[s]);
+  // Real photos deserve a gallery: themes without one get a carousel before the quote form (or the area/footer)
+  const autoGallery = !t.sections.includes('gallery') && m.images.gallery.length >= 4;
+  if (autoGallery) { const at = ['quote', 'area', 'footer'].map((s) => order.indexOf(s)).find((i) => i >= 0) ?? order.length; order.splice(at, 0, 'gallery'); }
   const sidebar = t.grid.system === 'sidebar-12' && t.grid.sidebar ? t.grid.sidebar : undefined;
   const held = sidebar?.holds && order.includes(sidebar.holds) ? sidebar.holds : undefined;
 
@@ -95,7 +99,7 @@ export function renderPage(m: SiteModel): string {
     return alt ? '' : 'alt';
   };
   const render = (s: string, inSidebarMain = false, bgOverride?: Ctx['bg']) => {
-    const l = t.sectionLayout[s] || { variant: '' };
+    const l = t.sectionLayout[s] || (s === 'gallery' ? ({ variant: 'carousel', perView: { phone: 1.15, desktop: 3 } } as Ctx['l']) : { variant: '' });
     return RENDERERS[s]({ m, l, bg: bgOverride ?? bgFor(s), inSidebarMain });
   };
 
@@ -133,13 +137,15 @@ export function renderPage(m: SiteModel): string {
   const preview = m.preview && t.roger.previewBanner
     ? `<div class="preview">Preview: a free website draft Roger made for ${esc(m.business.name)}.${claim}</div>` : '';
 
-  const sticky = t.roger.stickyBar
+  // the Roger widget (Book / Chat / Call) replaces the sticky bar and the text bubble
+  const widget = t.roger.widget !== false;
+  const sticky = t.roger.stickyBar && !widget
     ? `<nav class="sticky-bar" aria-label="Quick contact">
         ${m.contact.tel ? `<a class="${m.copy.actionKind === 'call' ? 'primary' : ''}" href="${m.contact.tel}" data-ev="call">${icon('phone', { size: 18 })}Call</a>` : ''}
         ${m.contact.sms ? `<a href="${esc(m.contact.sms)}" data-ev="text">${icon('message-circle', { size: 18 })}Text</a>` : ''}
         <a class="${m.copy.actionKind === 'form' || !m.contact.tel ? 'primary' : ''}" href="#quote" data-ev="quote">${icon('clipboard-list', { size: 18 })}Quote</a>
       </nav>` : '';
-  const bubble = t.roger.chatBubble && m.contact.sms
+  const bubble = t.roger.chatBubble && m.contact.sms && !widget
     ? `<a class="bubble" href="${esc(m.contact.sms)}" data-ev="text" aria-label="Text ${esc(m.business.name)}">${icon('message-circle', { size: 22 })}<span class="t">Text us</span></a>` : '';
 
   const og = esc(m.urls.og);
@@ -168,7 +174,7 @@ ${fontLinks(m)}
 <style>${buildCss(m)}</style>
 <script type="application/ld+json">${jsonLd(m)}</script>
 </head>
-<body class="${t.roger.stickyBar ? 'has-bar' : ''}" data-theme="${esc(m.themeId)}">
+<body class="${widget ? 'has-rw' : t.roger.stickyBar ? 'has-bar' : ''}" data-theme="${esc(m.themeId)}">
 <a class="skip" href="#main">Skip to content</a>
 ${preview}
 <header class="site-header"><div class="wrap hdr">
@@ -180,8 +186,8 @@ ${preview}
 ${body.replace(/<footer[\s\S]*<\/footer>/, '')}
 </main>
 ${(body.match(/<footer[\s\S]*<\/footer>/) || [''])[0]}
-${sticky}${bubble}
-<script>${CLIENT_JS(m)}</script>
+${sticky}${bubble}${widget ? rogerWidget(m) : ''}${lightbox(m)}
+<script>${CLIENT_JS(m)}${WIDGETS_JS(m)}</script>
 </body>
 </html>`;
 }

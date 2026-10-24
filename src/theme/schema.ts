@@ -189,6 +189,8 @@ export const themeSchema = z
         stickyBar: z.boolean().default(true),
         headerCallButton: z.boolean().default(true),
         chatBubble: z.boolean().default(true),
+        /** the Roger widget (Book / Chat / Call, bottom right); replaces stickyBar and chatBubble when on */
+        widget: z.boolean().default(true),
         textPrefill: z.string().default(''),
         consentCopy: z.string().default(''),
         previewBanner: z.boolean().default(true),

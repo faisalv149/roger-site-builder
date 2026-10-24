@@ -31,6 +31,8 @@ export interface SiteModel {
     rating?: number;
     reviewCount?: number;
     quotes: { text: string; author: string; rating: number }[];
+    /** every review good enough to show, for the review slider (src/render/widgets.ts) */
+    reviews: { text: string; author: string; rating: number; when?: string }[];
     stats: { value: string; label: string }[];
   };
   areas: string[];
@@ -139,6 +141,14 @@ export function buildModel(i: ModelInputs): SiteModel {
         .slice(0, pr.maxQuotes ?? 2)
         .map((r) => ({ text: truncateWords(r.text, pr.maxQuoteChars ?? 160), author: r.author, rating: r.rating }))
     : [];
+  // the slider shows all of them (Google returns up to 5); long ones are clamped with a Read more
+  const reviews = showRating && pr.showQuotes !== false
+    ? b.reviews
+        .filter((r) => r.rating >= 4 && r.text.trim().length >= 40)
+        .sort((a, c) => c.rating - a.rating || c.text.length - a.text.length)
+        .slice(0, 8)
+        .map((r) => ({ text: truncateWords(r.text.trim(), 700), author: r.author, rating: r.rating, when: r.relativeTime }))
+    : [];
   const stats: SiteModel['proof']['stats'] = [];
   if (showRating) {
     stats.push({ value: `${b.rating!.toFixed(1)}★`, label: 'Google rating' });
@@ -213,7 +223,7 @@ export function buildModel(i: ModelInputs): SiteModel {
     },
     services: { items: i.services.items, overflow: i.services.overflow, overflowLabel: (t.sectionRules.services as any)?.overflowLink },
     trust,
-    proof: { showRating, rating: b.rating, reviewCount: b.reviewCount, quotes, stats: stats.slice(0, 4) },
+    proof: { showRating, rating: b.rating, reviewCount: b.reviewCount, quotes, reviews, stats: stats.slice(0, 4) },
     areas,
     showMap: ar.showMap !== false && !!(b.formattedAddress || (b.lat && b.lng)),
     hours: { rows, compact: compactHours(rows), periods: b.hours?.periods || [], utcOffsetMinutes: b.utcOffsetMinutes, showOpenNow: hr.showOpenNow !== false },

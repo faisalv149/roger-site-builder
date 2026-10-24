@@ -12,8 +12,9 @@ await page.goto('http://localhost:4000/', { waitUntil: 'load' });
 // the Studio opens on Sites when there is saved history: let that settle, then go to Progress
 await page.waitForFunction(() => !document.querySelector('#sitesList')?.textContent?.includes('Loading'));
 await page.click('[data-tab="progress"]');
-await page.waitForSelector('#samples .chip');
-await page.click('#samples .chip');
+// type the business like a user would (the sample chips hide once a saved site is loaded into the tabs)
+await page.fill('#q', 'Summit Peak Roofing 78704');
+await page.click('#findBtn');
 await page.waitForSelector('.cand.sel');
 await page.click('#buildBtn');
 await page.waitForSelector('.sum', { timeout: 30000 });

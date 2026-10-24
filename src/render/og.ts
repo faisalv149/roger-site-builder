@@ -73,7 +73,7 @@ export async function screenshot(htmlFile: string, outFile: string, opts: { widt
       // Keep it offline and fast: block third-party requests (maps embed, fonts CDN).
       await page.route('**/*', (r) => (/^(file:|data:)/.test(r.request().url()) || r.request().url().startsWith(config.publicBaseUrl) ? r.continue() : r.abort()));
       await page.goto(htmlFile.startsWith('http') ? htmlFile : `file://${htmlFile}`, { waitUntil: 'load', timeout: 20000 });
-      await page.addStyleTag({ content: '.reveal{opacity:1!important;transform:none!important}.bubble,.sticky-bar,.preview{display:none!important}' });
+      await page.addStyleTag({ content: '.reveal{opacity:1!important;transform:none!important}.bubble,.sticky-bar,.preview,.rw{display:none!important}' });
       await page.screenshot({ path: outFile, fullPage: !!opts.fullPage, type: outFile.endsWith('.png') ? 'png' : 'jpeg', ...(outFile.endsWith('.png') ? {} : { quality: 82 }) });
       return true;
     } finally {
