@@ -44,6 +44,22 @@ Mock mode (no `GOOGLE_MAPS_API_KEY`) uses 4 sample businesses in `fixtures/place
 | `CHROMIUM_PATH` | Optional. Real screenshot for the preview card; auto-detected from Playwright. |
 | `DATA_DIR` | Optional. Where saved builds, conversations, leads and uploaded themes go (default `data/`). Point QA runs at a throwaway folder so test builds stay out of the real history. |
 | `IMESSAGE_OUTBOUND_URL` | Optional. Your iMessage gateway's send endpoint. Messages Roger sends later (the preview after "On it") are POSTed here as `{ from, replies }`. |
+| `STUDIO_PASSWORD` / `STUDIO_USER` | Password (user default `roger`) for the Studio, `/imessage` and `/api/*`. Unset = open, fine only on your own machine. |
+| `VERCEL_TOKEN` / `VERCEL_TEAM_ID` / `VERCEL_PROJECT_PREFIX` | Publish finished sites to Vercel (token from vercel.com/account/tokens; team id only for a team token; project prefix default `roger-`). |
+| `OUT_DIR` | Optional. Where generated sites, cards and reports go (default `out/`). On a host, the persistent disk. |
+
+## Deploy
+
+**Builder (Studio, API, iMessage page) on Render.** It needs an always-on server with a disk (it writes sites, builds and conversations), so it does not run as Vercel functions.
+1. Render → **New → Blueprint** → this repo. `render.yaml` sets Node 22, `npm ci`, `node --import tsx src/server.ts`, a 1 GB disk at `/var/data` (`DATA_DIR`, `OUT_DIR`) and the `/api/health` check.
+2. Fill in what it asks for: `STUDIO_PASSWORD` (required on a server), `GOOGLE_MAPS_API_KEY`, `ANTHROPIC_API_KEY` (the local Claude Code mode does not exist on a server; without a key Roger uses templates), `VERCEL_TOKEN`, and `VERCEL_TEAM_ID` only for a team token.
+3. Open the Render URL and sign in as `roger` with that password. `PUBLIC_BASE_URL` defaults to the Render URL; set it when you add a custom domain.
+
+Railway works too: start command `npm start`, a volume, and `DATA_DIR` / `OUT_DIR` pointing into it (`PUBLIC_BASE_URL` defaults to `RAILWAY_PUBLIC_DOMAIN`).
+
+**Finished sites on Vercel.** With `VERCEL_TOKEN` set, every site gets a **Publish** button (Sites tab and build summary). Each site becomes its own Vercel project, `roger-<slug>.vercel.app` (prefix: `VERCEL_PROJECT_PREFIX`); **Republish** appears when a newer build exists. Links the site makes to itself are rewritten to the Vercel domain, the lead form keeps posting to the builder, and `site.json` (raw Google data) is not uploaded. Preview builds keep their banner and `noindex`.
+
+Notes: Render's Node runtime has no Chromium, so preview cards use the generated share image instead of a screenshot. `STUDIO_PASSWORD` covers the Studio, `/imessage` and `/api/*`; sites, cards, reports, stock images, `/api/leads/*` and `/api/health` stay public. An iMessage gateway calling `/api/imessage/inbound` sends the same credentials (HTTP Basic). Google photos and reviews on a published site are still subject to the Places API terms (see below).
 
 ## API
 

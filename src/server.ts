@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import multer from 'multer';
 import { config } from './config.js';
@@ -12,6 +13,7 @@ import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
 import { getBuild, getConversation, listBuilds, listConversations } from './store.js';
 import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
+import { publishEnabled, publishSite } from './publish.js';
 import { claudeEnabled, claudeVia } from './content/claude.js';
 
 const app = express();
@@ -27,6 +29,19 @@ app.use(express.urlencoded({ extended: false }));
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 
+// ── password (STUDIO_PASSWORD) on the Studio, the API and the iMessage page. Generated sites, cards, reports and
+// stock images stay public (owners, site visitors and iMessage link previews fetch them), as do the lead form
+// endpoint the sites post to and the health check the host pings.
+const OPEN = /^\/(sites|cards|reports|stock|demo-sites)\/|^\/api\/(leads\/|health$)/;
+const sha = (s: string) => createHash('sha256').update(s).digest();
+app.use((req, res, next) => {
+  if (!config.studioPassword || OPEN.test(req.path)) return next();
+  const [scheme, b64] = (req.headers.authorization || '').split(' ');
+  const given = scheme === 'Basic' && b64 ? Buffer.from(b64, 'base64').toString('utf8') : '';
+  if (given && timingSafeEqual(sha(given), sha(`${config.studioUser}:${config.studioPassword}`))) return next();
+  res.set('WWW-Authenticate', 'Basic realm="Roger Studio", charset="UTF-8"').status(401).send('Password required');
+});
+
 // ── static ──
 app.use('/app', express.static(path.join(config.dirs.public, 'app')));
 app.use('/imessage', express.static(path.join(config.dirs.public, 'imessage'))); // stand-in iMessage UI for local demos (no gateway)
@@ -39,7 +54,7 @@ app.get('/', (_req, res) => res.sendFile(path.join(config.dirs.public, 'app', 'i
 
 // ── meta ──
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl });
+  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: !!config.chromiumPath, themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null });
 });
 // how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
 app.get('/api/estimate', (req, res) => {
@@ -174,6 +189,11 @@ app.post('/api/imessage/reset', (req, res) => { resetSession(String(req.body.fro
 
 // ── saved history (data/builds, data/conversations). No auth: fine locally, add it before this is public. ──
 app.get('/api/builds', (_req, res) => res.json({ builds: listBuilds() }));
+// put a built site live on Vercel as its own static project (VERCEL_TOKEN); re-publishing updates it
+app.post('/api/sites/:slug/publish', wrap(async (req, res) => {
+  if (!publishEnabled()) return res.status(400).json({ error: 'Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).' });
+  res.json(await publishSite(String(req.params.slug)));
+}));
 app.get('/api/builds/:id', (req, res) => {
   const b = getBuild(req.params.id);
   if (!b) return res.status(404).json({ error: 'not found' });
@@ -195,5 +215,6 @@ app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: 
 });
 
 app.listen(config.port, () => {
-  console.log(`Roger Site Builder on ${config.publicBaseUrl}  (mock=${config.mock}, claude=${claudeVia() ?? 'off'}, screenshots=${!!config.chromiumPath}, themes=${loadThemes().size})`);
+  console.log(`Roger Site Builder on ${config.publicBaseUrl}  (mock=${config.mock}, claude=${claudeVia() ?? 'off'}, screenshots=${!!config.chromiumPath}, themes=${loadThemes().size}, password=${config.studioPassword ? 'on' : 'off'}, publish=${config.vercelToken ? 'vercel' : 'off'})`);
+  if (!config.studioPassword && !/\/\/(localhost|127\.0\.0\.1)\b/.test(config.publicBaseUrl)) console.warn('[security] STUDIO_PASSWORD is not set: anyone who finds this URL can run builds on your API keys and read conversations.');
 });

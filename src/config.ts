@@ -53,10 +53,22 @@ function detectChromium(): string | undefined {
 }
 
 const googleKey = process.env.GOOGLE_MAPS_API_KEY || '';
+// OUT_DIR: generated sites, cards and reports (default out/). On a host, point it and DATA_DIR at the persistent disk.
+const OUT = process.env.OUT_DIR ? path.resolve(process.env.OUT_DIR) : path.join(ROOT, 'out');
+// Hosts that announce their public URL: Render (RENDER_EXTERNAL_URL), Railway (RAILWAY_PUBLIC_DOMAIN, no scheme)
+const hostUrl = process.env.RENDER_EXTERNAL_URL || (process.env.RAILWAY_PUBLIC_DOMAIN && `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
 
 export const config = {
   port: Number(process.env.PORT || 4000),
-  publicBaseUrl: (process.env.PUBLIC_BASE_URL || `http://localhost:${process.env.PORT || 4000}`).replace(/\/$/, ''),
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL || hostUrl || `http://localhost:${process.env.PORT || 4000}`).replace(/\/$/, ''),
+  /** Password for the Studio, the API and the iMessage demo page (user STUDIO_USER, default "roger"). Unset = open (local). */
+  studioPassword: process.env.STUDIO_PASSWORD || '',
+  studioUser: process.env.STUDIO_USER || 'roger',
+  /** Publishing finished sites to Vercel: an access token (vercel.com/account/tokens) and, for a team, its id */
+  vercelToken: process.env.VERCEL_TOKEN || '',
+  vercelTeamId: process.env.VERCEL_TEAM_ID || '',
+  vercelProjectPrefix: process.env.VERCEL_PROJECT_PREFIX ?? 'roger-',
+  vercelApi: (process.env.VERCEL_API_URL || 'https://api.vercel.com').replace(/\/$/, ''), // overridable for tests
   googleKey,
   pagespeedKey: process.env.PAGESPEED_API_KEY || googleKey,
   anthropicKey: process.env.ANTHROPIC_API_KEY || '',
@@ -74,10 +86,10 @@ export const config = {
   dirs: {
     themes: path.join(ROOT, 'themes'),
     customThemes: path.join(DATA, 'themes'),
-    out: path.join(ROOT, 'out'),
-    sites: path.join(ROOT, 'out', 'sites'),
-    reports: path.join(ROOT, 'out', 'reports'),
-    cards: path.join(ROOT, 'out', 'cards'),
+    out: OUT,
+    sites: path.join(OUT, 'sites'),
+    reports: path.join(OUT, 'reports'),
+    cards: path.join(OUT, 'cards'),
     data: DATA, // saved builds, conversations, leads, uploaded themes
     public: path.join(ROOT, 'public'),
     fixtures: path.join(ROOT, 'fixtures'),

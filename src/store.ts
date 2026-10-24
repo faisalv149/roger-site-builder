@@ -41,6 +41,8 @@ export interface BuildSummary {
   totalMs?: number;
   /** a newer build of the same site replaced these files */
   replaced?: boolean;
+  /** live on Vercel; stale = this build is newer than what's published */
+  published?: { url: string; at: string; stale: boolean };
 }
 
 export interface ConvoMessage {
@@ -112,10 +114,12 @@ export function listBuilds(): BuildSummary[] {
     const x = r.result;
     const replaced = !!x?.slug && seen.has(x.slug);
     if (x?.slug) seen.add(x.slug);
+    const pub = x?.slug ? getPublish(x.slug) : undefined;
     return {
       id: r.id, createdAt: r.createdAt, source: r.source, from: r.from, status: r.status, error: r.error,
       name: x?.business.name, category: x?.business.primaryTypeLabel, address: x?.business.formattedAddress,
       slug: x?.slug, siteUrl: x?.siteUrl, themeId: x?.themeId, auditScore: x?.audit?.score, totalMs: x?.totalMs, replaced,
+      published: pub && !replaced ? { url: pub.url, at: pub.publishedAt, stale: r.createdAt > pub.publishedAt } : undefined,
     };
   });
 }
@@ -138,4 +142,24 @@ export function listConversations() {
     const last = c.messages[c.messages.length - 1];
     return { from: c.from, startedAt: c.startedAt, updatedAt: c.updatedAt, business: c.business, messages: c.messages.length, last: last?.text || last?.title || '', buildIds: c.buildIds };
   });
+}
+
+/** A site published to Vercel (src/publish.ts): data/publishes/<slug>.json */
+export interface PublishRecord {
+  slug: string;
+  project: string;
+  domain: string;
+  url: string;
+  deploymentId: string;
+  publishedAt: string;
+}
+const publishesDir = () => path.join(config.dirs.data, 'publishes');
+fs.mkdirSync(publishesDir(), { recursive: true });
+
+export function savePublish(p: PublishRecord) {
+  writeJson(path.join(publishesDir(), `${p.slug}.json`), p);
+}
+
+export function getPublish(slug: string): PublishRecord | undefined {
+  return /^[a-z0-9-]{1,100}$/.test(slug) ? readJson<PublishRecord>(path.join(publishesDir(), `${slug}.json`)) : undefined;
 }

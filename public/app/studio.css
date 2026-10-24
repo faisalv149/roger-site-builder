@@ -124,3 +124,5 @@ details.convo-in-sum .phone-ui{margin-top:10px;max-height:520px;overflow:auto}
 .eta .say q{font-style:italic}
 .eta.running b{color:var(--accent)}
 .eta.done b{color:var(--ok)}
+.row-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.btn.live{border-color:#86EFAC;color:#166534;background:#F0FDF4}

@@ -1,0 +1,36 @@
+# Render Blueprint for the Roger builder (Studio, API, iMessage page). In Render: New → Blueprint → this repo.
+# Render asks for the values marked `sync: false` (keys and the Studio password) when you create it.
+# Finished sites are published to Vercel from the Studio (VERCEL_TOKEN); the builder itself runs here because it
+# needs an always-on server with a disk.
+services:
+  - type: web
+    name: roger-site-builder
+    runtime: node
+    plan: starter            # a persistent disk needs a paid instance
+    region: oregon
+    buildCommand: npm ci
+    startCommand: node --import tsx src/server.ts
+    healthCheckPath: /api/health
+    disk:
+      name: roger-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # builds, conversations, leads and generated sites live on the disk so they survive deploys and restarts
+      - key: DATA_DIR
+        value: /var/data/data
+      - key: OUT_DIR
+        value: /var/data/out
+      # PUBLIC_BASE_URL defaults to Render's own URL (RENDER_EXTERNAL_URL); set it if you add a custom domain
+      - key: STUDIO_PASSWORD
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: VERCEL_TOKEN
+        sync: false
+      - key: VERCEL_TEAM_ID
+        sync: false

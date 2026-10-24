@@ -184,7 +184,7 @@ function renderResult(r, ms, rec) {
       ${r.audit ? `<dt>Old site score</dt><dd>${r.audit.score}/100 (${r.audit.issues.length} issues)</dd>` : ''}
     </dl>
     ${r.warnings.length ? `<ul class="warns">${r.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
-    <div class="row"><a class="btn primary" href="${esc(r.siteUrl)}" target="_blank" rel="noopener">Open site ↗</a><button class="btn ghost" type="button" onclick="showTab('preview')">Preview here</button>${r.audit ? `<a class="btn ghost" href="${esc(r.audit.reportUrl)}" target="_blank" rel="noopener">Audit report ↗</a>` : ''}</div>
+    <div class="row"><a class="btn primary" href="${esc(r.siteUrl)}" target="_blank" rel="noopener">Open site ↗</a><button class="btn ghost" type="button" onclick="showTab('preview')">Preview here</button>${r.audit ? `<a class="btn ghost" href="${esc(r.audit.reportUrl)}" target="_blank" rel="noopener">Audit report ↗</a>` : ''}${state.health?.publish ? `<button class="btn ghost" type="button" data-publish="${esc(r.slug)}">Publish to Vercel</button>` : ''}</div>
   </div>`;
   $('#frame').src = `${r.siteUrl}?t=${Date.now()}`;
   $('#openSite').href = r.siteUrl;
@@ -283,8 +283,33 @@ function siteRow(b) {
   const thumb = b.siteUrl ? `<img src="${esc(b.siteUrl)}preview.jpg" alt="" loading="lazy" onerror="this.onerror=null;this.src='${esc(b.siteUrl)}og.jpg'">` : '<img alt="">';
   const meta = ok ? [b.themeId && `<code>${esc(b.themeId)}</code>`, b.auditScore != null && `old site ${b.auditScore}/100`, esc(ago(b.createdAt)), b.replaced && 'replaced by a newer build'].filter(Boolean).join(' · ') : esc(b.error || 'Build failed');
   const badge = ok ? `<span class="src ${esc(b.source)}">${esc(SRC[b.source] || b.source)}</span>` : '<span class="src failed">Failed</span>';
-  return `<div class="site-row${sites.openId === b.id ? ' sel' : ''}"><button type="button" class="site-main" data-build="${esc(b.id)}">${thumb}<span><b>${esc(b.name || 'Build failed')}</b><span class="line">${esc([b.category, b.address].filter(Boolean).join(' · '))}</span><span class="line">${badge}${meta}</span></span></button>${ok && b.siteUrl ? `<a class="btn ghost sm" href="${esc(b.siteUrl)}" target="_blank" rel="noopener">Open site ↗</a>` : ''}</div>`;
+  return `<div class="site-row${sites.openId === b.id ? ' sel' : ''}"><button type="button" class="site-main" data-build="${esc(b.id)}">${thumb}<span><b>${esc(b.name || 'Build failed')}</b><span class="line">${esc([b.category, b.address].filter(Boolean).join(' · '))}</span><span class="line">${badge}${meta}</span></span></button>${ok && b.siteUrl ? `<div class="row-actions">${publishControls(b)}<a class="btn ghost sm" href="${esc(b.siteUrl)}" target="_blank" rel="noopener">Open site ↗</a></div>` : ''}</div>`;
 }
+
+// Vercel: "Live ↗" once published, "Publish" / "Republish" (a newer build than what's live) when VERCEL_TOKEN is set
+function publishControls(b) {
+  const p = b.published;
+  const live = p ? `<a class="btn ghost sm live" href="${esc(p.url)}" target="_blank" rel="noopener" title="Published ${esc(ago(p.at))}">Live ↗</a>` : '';
+  const canPublish = state.health?.publish && !b.replaced && (!p || p.stale);
+  return live + (canPublish ? `<button class="btn ghost sm" type="button" data-publish="${esc(b.slug)}">${p ? 'Republish' : 'Publish'}</button>` : '');
+}
+
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-publish]');
+  if (!btn || btn.disabled) return;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Publishing…';
+  try {
+    const p = await postJson(`/api/sites/${encodeURIComponent(btn.dataset.publish)}/publish`, {});
+    btn.outerHTML = `<a class="btn ghost sm live" href="${esc(p.url)}" target="_blank" rel="noopener">Live ↗</a>`;
+    $('#sitesMsg').innerHTML = `<span class="okk">Published: <a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a></span>`;
+    sites.sig = ''; loadSites();
+  } catch (err) {
+    btn.disabled = false; btn.textContent = label;
+    $('#sitesMsg').innerHTML = `<span class="err">Publish failed: ${esc(err.message)}</span>`;
+    showTab('sites');
+  }
+});
 
 function convoRow(c) {
   const sitesN = c.buildIds.length ? `${c.buildIds.length} site${c.buildIds.length > 1 ? 's' : ''}` : 'no site yet';

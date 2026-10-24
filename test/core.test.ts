@@ -9,10 +9,11 @@ import { loadThemes, validateTheme } from '../src/theme/load.js';
 import { fillPlaceholders } from '../src/util/text.js';
 import { compactHours } from '../src/content/model.js';
 import { is24h } from '../src/sources/places.js';
-import { ROOT } from '../src/config.js';
+import { ROOT, config } from '../src/config.js';
 import { selectTheme } from '../src/theme/select.js';
 import { pickServices } from '../src/content/services.js';
 import { friendlyDuration } from '../src/estimate.js';
+import { projectName, rewriteForPublish } from '../src/publish.js';
 
 const theme = () => structuredClone(loadThemes().get('roofing-urgent')!.theme);
 
@@ -112,4 +113,16 @@ test('build-time estimates read naturally and round up', () => {
   assert.deepEqual(friendlyDuration(75), { seconds: 60, label: 'about a minute' });
   assert.deepEqual(friendlyDuration(130), { seconds: 120, label: 'about 2 minutes' });
   assert.deepEqual(friendlyDuration(160), { seconds: 180, label: 'about 3 minutes' });
+});
+
+test('publishing to Vercel: valid project names, self-links rewritten, lead form left on the builder', () => {
+  assert.equal(projectName('baked-lahore'), 'roger-baked-lahore');
+  assert.equal(projectName('a---b'), 'roger-a--b'); // Vercel rejects "---"
+  assert.ok(projectName('x'.repeat(150)).length <= 100);
+  const base = config.publicBaseUrl;
+  const html = `<link rel="canonical" href="${base}/sites/baked-lahore/"><meta property="og:image" content="${base}/sites/baked-lahore/preview.jpg"><form action="${base}/api/leads/baked-lahore">`;
+  const out = rewriteForPublish(html, 'baked-lahore', 'roger-baked-lahore.vercel.app');
+  assert.ok(out.includes('href="https://roger-baked-lahore.vercel.app/"'));
+  assert.ok(out.includes('content="https://roger-baked-lahore.vercel.app/preview.jpg"'));
+  assert.ok(out.includes(`action="${base}/api/leads/baked-lahore"`));
 });
