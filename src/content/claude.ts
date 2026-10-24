@@ -21,15 +21,22 @@ function cliAvailable() {
 export const claudeVia = (): 'api' | 'cli' | null => (config.anthropicKey ? 'api' : config.claudeCli && cliAvailable() ? 'cli' : null);
 export const claudeEnabled = () => claudeVia() !== null;
 
-let keyCheck: Promise<'ok' | 'invalid key' | 'unknown model' | 'unreachable'> | null = null;
-/** API key works and the model exists? One free model-info call per server instance (no tokens). For /api/health. */
-export function claudeKeyStatus() {
+let keyCheck: Promise<string> | null = null;
+/**
+ * API key works and the model exists? One free model-info call per server instance (no tokens). For /api/health:
+ * "ok", or Anthropic's status and error type (e.g. "401 authentication_error"), never the key itself.
+ */
+export function claudeKeyStatus(): Promise<string> {
+  const k = config.anthropicKey;
+  const shape = !k.startsWith('sk-ant-') ? ' (key does not start with sk-ant-)' : /\s|["']/.test(k) ? ' (key contains spaces or quotes)' : '';
   keyCheck ||= fetch(`https://api.anthropic.com/v1/models/${encodeURIComponent(config.anthropicModel)}`, {
-    headers: { 'x-api-key': config.anthropicKey, 'anthropic-version': '2023-06-01' },
+    headers: { 'x-api-key': k, 'anthropic-version': '2023-06-01' },
     signal: AbortSignal.timeout(10_000),
-  }).then((r) => (r.ok ? 'ok' as const : r.status === 401 || r.status === 403 ? 'invalid key' as const : r.status === 404 ? 'unknown model' as const : 'unreachable' as const))
-    .catch(() => 'unreachable' as const)
-    .then((s) => { if (s === 'unreachable') keyCheck = null; return s; }); // retry next time if it was the network
+  }).then(async (r) => {
+    if (r.ok) return 'ok';
+    const j = (await r.json().catch(() => ({}))) as { error?: { type?: string } };
+    return `${r.status} ${j.error?.type || 'error'}${shape}`;
+  }).catch(() => { keyCheck = null; return 'unreachable'; }); // retry next time if it was the network
   return keyCheck;
 }
 
