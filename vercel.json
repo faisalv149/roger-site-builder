@@ -1,3 +1,19 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "roger-site-builder": {
+      "root": ".",
+      "buildCommand": "npm ci",
+      "entrypoint": "src/server.ts"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "roger-site-builder"
+      }
+    }
+  ]
 }
