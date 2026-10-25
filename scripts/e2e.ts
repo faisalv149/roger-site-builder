@@ -23,7 +23,7 @@ await page.click('[data-tab="preview"]'); await page.waitForTimeout(1500);
 await page.screenshot({ path: `${out}-preview.png` });
 await page.click('[data-tab="audit"]'); await page.screenshot({ path: `${out}-audit.png` });
 await page.click('[data-tab="imessage"]'); await page.waitForTimeout(500); await page.screenshot({ path: `${out}-cards.png` });
-await page.click('[data-tab="sim"]'); await page.waitForSelector('.sim-log .bub.in');
+await page.click('[data-tab="sim"]'); await page.click('#simQuick button'); await page.waitForSelector('.sim-log .bub.in'); // the simulator waits for the first text
 for (const t of ['Summit Peak Roofing 78704', "Yes, that's me", 'Show me the new site']) {
   await page.fill('#simText', t); await page.click('#simForm button');
   await page.waitForFunction(() => !document.getElementById('typing'), null, { timeout: 30000 });

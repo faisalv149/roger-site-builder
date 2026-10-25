@@ -5,128 +5,206 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Roger Site Studio</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F172A'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-family='Arial' font-weight='700' font-size='32' fill='%23fff'%3ER%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/app/studio.css">
 </head>
 <body>
+<!-- icons (Lucide, ISC) used as <svg class="i"><use href="#i-name"/></svg> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.83-.44-1.12-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.97 6.01 17.46 2 12 2z"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-steps" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-tablet" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 18h.01"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-msgs" viewBox="0 0 24 24"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></symbol>
+  <symbol id="i-braces" viewBox="0 0 24 24"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+  <symbol id="i-cloud-off" viewBox="0 0 24 24"><path d="m2 2 20 20M5.78 5.78A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.31-.19M21.53 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7 7 0 0 0 10 5.07"/></symbol>
+  <symbol id="i-cloud-up" viewBox="0 0 24 24"><path d="M4 14.9A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.24M12 12v9M16 16l-4-4-4 4"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+</svg>
+
 <header class="top">
-  <div class="brand"><span class="logo">R</span><div><b>Roger Site Studio</b><span class="sub">Google Business + theme.json → website in minutes</span></div></div>
-  <div class="mode" id="mode">checking…</div>
+  <a class="brand" href="/app/"><span class="logo">R</span><span><b>Roger Site Studio</b><span class="sub">Google Business profile → website in minutes</span></span></a>
+  <div class="top-acts">
+    <a class="btn ghost sm" href="/imessage/" target="_blank" rel="noopener" title="The iPhone-style page owners text Roger on"><svg class="i" aria-hidden="true"><use href="#i-msg"/></svg><span class="hide-sm">iMessage demo</span></a>
+    <button class="status" id="mode" type="button" popovertarget="statusPop" aria-label="System status"><span class="dot"></span><span class="status-txt">Checking…</span><svg class="i" aria-hidden="true"><use href="#i-chevron"/></svg></button>
+    <div id="statusPop" class="pop" popover><h3>System status</h3><ul id="statusList"></ul></div>
+  </div>
 </header>
 
 <div class="shell">
-  <aside class="panel">
-    <section class="step">
-      <h2><span class="num">1</span>Find the business</h2>
-      <label class="lbl" for="q">Google Maps link, place ID, or name + ZIP</label>
-      <div class="row">
-        <input id="q" placeholder="Summit Peak Roofing 78704" autocomplete="off">
-        <button class="btn ghost" id="findBtn" type="button">Find</button>
-      </div>
-      <div id="candidates" class="cands"></div>
-    </section>
+  <aside class="panel" aria-label="New site">
+    <div class="panel-head"><h2>New site</h2><p>Find a business, add its website if it has one, and build.</p></div>
+    <div class="panel-body">
+      <section class="step">
+        <h3><span class="num">1</span>Find the business</h3>
+        <label class="lbl" for="q">Google Maps link, place ID, or name + ZIP</label>
+        <div class="row">
+          <div class="field-ic"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><input id="q" placeholder="Summit Peak Roofing 78704" autocomplete="off"></div>
+          <button class="btn ghost" id="findBtn" type="button">Find</button>
+        </div>
+        <div id="candidates" class="cands"></div>
+      </section>
 
-    <section class="step">
-      <h2><span class="num">2</span>Existing website <span class="opt">optional</span></h2>
-      <label class="lbl" for="website">If they have one, we audit it and pull logo, colors and fonts</label>
-      <div class="row">
-        <input id="website" placeholder="https://example.com" autocomplete="off">
-        <button class="btn ghost" id="auditBtn" type="button">Audit only</button>
-      </div>
-    </section>
+      <section class="step">
+        <h3><span class="num">2</span>Current website <span class="opt">optional</span></h3>
+        <label class="lbl" for="website">We audit it and reuse its logo, colors and fonts</label>
+        <div class="row">
+          <div class="field-ic"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg><input id="website" placeholder="https://example.com" autocomplete="off" inputmode="url"></div>
+          <button class="btn ghost" id="auditBtn" type="button">Audit only</button>
+        </div>
+      </section>
 
-    <section class="step">
-      <h2><span class="num">3</span>Theme</h2>
-      <div class="seg" role="tablist">
-        <button type="button" class="on" data-tmode="library">From library</button>
-        <button type="button" data-tmode="upload">Upload theme.json</button>
-      </div>
-      <div data-tpane="library">
-        <label class="lbl" for="themeSel">Pick one, or let Roger choose from the Google category and profile</label>
-        <select id="themeSel"><option value="">Auto-pick (recommended)</option></select>
-        <div id="themeInfo" class="hint"></div>
-      </div>
-      <div data-tpane="upload" hidden>
-        <label class="drop" id="drop" for="themeFile">
-          <input type="file" id="themeFile" accept=".json,application/json" hidden>
-          <b>Drop a theme.json here</b><span>or click to choose a file</span>
-        </label>
-        <div id="themeCheck" class="hint"></div>
-        <label class="check"><input type="checkbox" id="saveTheme"> Also save it to the theme library</label>
-      </div>
-    </section>
+      <section class="step">
+        <h3><span class="num">3</span>Theme</h3>
+        <div class="seg" role="radiogroup" aria-label="Theme source">
+          <button type="button" class="on" role="radio" aria-checked="true" data-tmode="library">From library</button>
+          <button type="button" role="radio" aria-checked="false" data-tmode="upload">Upload theme.json</button>
+        </div>
+        <div data-tpane="library">
+          <label class="lbl" for="themeSel">Pick one, or let Roger choose from the Google profile</label>
+          <select id="themeSel"><option value="">Auto-pick (recommended)</option></select>
+          <div id="themeInfo" class="hint"></div>
+        </div>
+        <div data-tpane="upload" hidden>
+          <label class="drop" id="drop" for="themeFile">
+            <input type="file" id="themeFile" accept=".json,application/json" hidden>
+            <svg class="i" aria-hidden="true"><use href="#i-upload"/></svg>
+            <b>Drop a theme.json here</b><span>or click to choose a file</span>
+          </label>
+          <div id="themeCheck" class="hint"></div>
+          <label class="check"><input type="checkbox" id="saveTheme"> Also save it to the theme library</label>
+        </div>
+      </section>
 
-    <section class="step">
-      <h2><span class="num">4</span>Options</h2>
-      <label class="check"><input type="checkbox" id="optFonts"> Use the business website's Google Font for headings</label>
-      <label class="check"><input type="checkbox" id="optColorOn"> Force brand color <input type="color" id="optColor" value="#1D4ED8"></label>
-      <label class="check"><input type="checkbox" id="optPreview" checked> Preview mode (banner + noindex)</label>
-    </section>
-
-    <div class="eta" id="eta" aria-live="polite" hidden></div>
-    <button class="btn primary big" id="buildBtn" type="button">Build website</button>
-    <p class="fine">Mock mode uses sample businesses in <code>fixtures/places</code>. Add a Google key in <code>.env</code> for live data.</p>
+      <details class="adv">
+        <summary><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>Advanced options<svg class="i chev" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+        <label class="check"><input type="checkbox" id="optFonts"> Use the business website's Google Font for headings</label>
+        <label class="check"><input type="checkbox" id="optColorOn"> Force brand color <input type="color" id="optColor" value="#1D4ED8" aria-label="Brand color"></label>
+        <label class="check"><input type="checkbox" id="optPreview" checked> Preview mode (banner + noindex)</label>
+      </details>
+    </div>
+    <div class="panel-foot">
+      <div class="eta" id="eta" aria-live="polite" hidden></div>
+      <button class="btn primary big" id="buildBtn" type="button"><svg class="i" aria-hidden="true"><use href="#i-sparkles"/></svg><span>Build website</span></button>
+      <p class="fine" id="fineNote">Mock mode: sample businesses only</p>
+    </div>
   </aside>
 
   <main class="work">
-    <nav class="tabs" role="tablist">
-      <button type="button" data-tab="sites">Sites <span class="count" id="sitesCount" hidden></span></button>
-      <button type="button" class="on" data-tab="progress">Progress</button>
-      <button type="button" data-tab="preview">Preview</button>
-      <button type="button" data-tab="audit">Audit</button>
-      <button type="button" data-tab="imessage">iMessage cards</button>
-      <button type="button" data-tab="sim">Conversation simulator</button>
-      <button type="button" data-tab="data">Data</button>
+    <nav class="tabs" role="tablist" aria-label="Studio">
+      <button type="button" role="tab" data-tab="sites"><svg class="i" aria-hidden="true"><use href="#i-grid"/></svg>Sites <span class="count" id="sitesCount" hidden></span></button>
+      <button type="button" role="tab" class="on" data-tab="progress"><svg class="i" aria-hidden="true"><use href="#i-steps"/></svg>Build</button>
+      <button type="button" role="tab" data-tab="preview"><svg class="i" aria-hidden="true"><use href="#i-monitor"/></svg>Preview</button>
+      <button type="button" role="tab" data-tab="audit"><svg class="i" aria-hidden="true"><use href="#i-gauge"/></svg>Audit</button>
+      <button type="button" role="tab" data-tab="imessage"><svg class="i" aria-hidden="true"><use href="#i-msg"/></svg>Messages</button>
+      <button type="button" role="tab" data-tab="sim"><svg class="i" aria-hidden="true"><use href="#i-msgs"/></svg>Simulator</button>
+      <button type="button" role="tab" data-tab="data"><svg class="i" aria-hidden="true"><use href="#i-braces"/></svg>JSON</button>
     </nav>
 
-    <section class="tab" data-pane="sites" hidden>
-      <p class="hint" style="margin-top:0">Every site built from the Studio, the iMessage page or the API, saved in <code>data/builds/</code>. Updates on its own; click a site to open it here.</p>
-      <p class="hint" id="sitesMsg" aria-live="polite"></p>
-      <div id="sitesList" class="sites"><p class="hint">Loading…</p></div>
-      <h3 class="sub-h">Conversations</h3>
-      <p class="hint" style="margin-top:0">iMessage conversations with Roger, saved in <code>data/conversations/</code>.</p>
-      <div id="convosList" class="sites"></div>
-      <div id="convoView"></div>
-    </section>
-
-    <section class="tab" data-pane="progress">
-      <div id="empty" class="empty">
-        <h3>Build a site in three clicks</h3>
-        <ol><li>Find the business on Google</li><li>Optional: add their current website</li><li>Pick or upload a theme, then <b>Build website</b></li></ol>
-        <p>Try one of the sample businesses:</p>
-        <div class="chips" id="samples"></div>
+    <section class="tab" role="tabpanel" data-pane="sites" hidden>
+      <div class="pane-head">
+        <div><h2>Sites</h2><p>Every site built here, on the iMessage page or through the API. Click one to open it.</p></div>
+        <div class="tools">
+          <div class="field-ic sm"><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><input id="siteFilter" type="search" placeholder="Search sites" aria-label="Search sites" autocomplete="off"></div>
+          <label class="check slim"><input type="checkbox" id="showOld"> Older builds</label>
+        </div>
       </div>
-      <ol id="log" class="log"></ol>
-      <div id="summary"></div>
+      <div id="sitesList" class="site-grid"><p class="hint">Loading…</p></div>
+      <div class="pane-head sub"><div><h2>Conversations</h2><p>What owners texted Roger, and what Roger sent back.</p></div></div>
+      <div id="convosList" class="convos"></div>
     </section>
 
-    <section class="tab" data-pane="preview" hidden>
+    <section class="tab" role="tabpanel" data-pane="progress">
+      <div id="empty" class="empty-state">
+        <span class="es-ic"><svg class="i" aria-hidden="true"><use href="#i-sparkles"/></svg></span>
+        <h2>Build a site in three steps</h2>
+        <ol><li>Find the business on Google</li><li>Optional: add its current website</li><li>Pick a theme (or let Roger choose), then <b>Build website</b></li></ol>
+        <div id="samplesWrap"><p>Try a sample business:</p><div class="chips" id="samples"></div></div>
+      </div>
+      <div id="summary"></div>
+      <details id="steps" class="steps" open hidden>
+        <summary><span id="stepsLabel">Build steps</span><svg class="i chev" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+        <ol id="log" class="log"></ol>
+      </details>
+    </section>
+
+    <section class="tab" role="tabpanel" data-pane="preview" hidden>
       <div class="toolbar">
-        <div class="seg small"><button type="button" class="on" data-dev="desktop">Desktop</button><button type="button" data-dev="phone">Phone</button></div>
-        <a id="openSite" class="btn ghost sm" target="_blank" rel="noopener">Open in new tab ↗</a>
+        <div class="seg small" role="radiogroup" aria-label="Device">
+          <button type="button" class="on" role="radio" aria-checked="true" data-dev="desktop" title="Desktop"><svg class="i" aria-hidden="true"><use href="#i-monitor"/></svg><span class="hide-sm">Desktop</span></button>
+          <button type="button" role="radio" aria-checked="false" data-dev="tablet" title="Tablet"><svg class="i" aria-hidden="true"><use href="#i-tablet"/></svg><span class="hide-sm">Tablet</span></button>
+          <button type="button" role="radio" aria-checked="false" data-dev="phone" title="Phone"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg><span class="hide-sm">Phone</span></button>
+        </div>
+        <div class="urlbar" id="urlbar" title="">No site open</div>
+        <button class="btn ghost sm icon" id="reloadFrame" type="button" aria-label="Reload preview" title="Reload"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></button>
+        <a id="openSite" class="btn ghost sm" target="_blank" rel="noopener"><svg class="i" aria-hidden="true"><use href="#i-ext"/></svg><span class="hide-sm">Open</span></a>
       </div>
       <div class="frame-wrap"><iframe id="frame" title="Site preview"></iframe></div>
     </section>
 
-    <section class="tab" data-pane="audit" hidden><div id="auditOut" class="empty"><p>No audit yet. Add a website and build, or use <b>Audit only</b>.</p></div></section>
+    <section class="tab" role="tabpanel" data-pane="audit" hidden><div id="auditOut" class="empty-state small"><span class="es-ic"><svg class="i" aria-hidden="true"><use href="#i-gauge"/></svg></span><h2>No audit yet</h2><p>Add the business's website and build, or use <b>Audit only</b>.</p></div></section>
 
-    <section class="tab" data-pane="imessage" hidden>
-      <p class="hint">What Roger sends. iMessage draws each card from the link's <code>og:image</code>, so every card below is a text plus a URL with a purpose-made 1200×630 image.</p>
-      <div id="cardsOut" class="phone-ui"><p class="hint" style="margin:0">No cards yet. Open a site in the <b>Sites</b> tab, find a business, or build one, and the messages Roger sends for it show up here.</p></div>
-    </section>
-
-    <section class="tab" data-pane="sim" hidden>
-      <p class="hint">Reference conversation flow (<code>POST /api/imessage/inbound</code>). Point your iMessage gateway at it, or use it as the spec.</p>
-      <div class="phone-ui sim">
-        <div id="simLog" class="sim-log"></div>
-        <div id="simQuick" class="quick"></div>
-        <form id="simForm" class="sim-input"><input id="simText" placeholder="Text Roger…" autocomplete="off"><button class="btn primary sm" type="submit">Send</button></form>
+    <section class="tab" role="tabpanel" data-pane="imessage" hidden>
+      <div class="pane-head"><div><h2>Messages</h2><p>What Roger texts the owner. iMessage draws each card from the link's <code>og:image</code>, so every card is a text plus a link with a 1200×630 image.</p></div></div>
+      <div class="phone-ui">
+        <div class="phone-head"><span class="av">R</span><b>Roger</b></div>
+        <div id="cardsOut" class="phone-body"><p class="hint center">No messages yet. Open a site, find a business, or build one.</p></div>
       </div>
-      <button class="btn ghost sm" id="simReset" type="button">Restart conversation</button>
     </section>
 
-    <section class="tab" data-pane="data" hidden><pre id="dataOut" class="code">Build something first.</pre></section>
+    <section class="tab" role="tabpanel" data-pane="sim" hidden>
+      <div class="pane-head"><div><h2>Simulator</h2><p>Text Roger the way an owner would. Same flow as <code>POST /api/imessage/inbound</code>, the endpoint an iMessage gateway calls.</p></div></div>
+      <div class="phone-ui sim">
+        <div class="phone-head"><span class="av">R</span><b>Roger</b><button class="btn ghost sm icon" id="simReset" type="button" aria-label="Restart conversation" title="Restart conversation"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg></button></div>
+        <div id="simLog" class="sim-log phone-body" role="log" aria-live="polite"></div>
+        <div id="simQuick" class="quick"></div>
+        <form id="simForm" class="sim-input"><input id="simText" placeholder="Text Roger…" autocomplete="off" aria-label="Message"><button class="btn primary sm icon" type="submit" aria-label="Send"><svg class="i" aria-hidden="true"><use href="#i-send"/></svg></button></form>
+      </div>
+    </section>
+
+    <section class="tab" role="tabpanel" data-pane="data" hidden>
+      <div class="pane-head"><div><h2>Build JSON</h2><p>Everything the last build produced, as the API returns it.</p></div><div class="tools"><button class="btn ghost sm" id="copyJson" type="button"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>Copy</button></div></div>
+      <pre id="dataOut" class="code">Build something first.</pre>
+    </section>
   </main>
 </div>
+
+<dialog id="confirmDlg" class="dlg" aria-labelledby="cTitle">
+  <form method="dialog">
+    <div class="dlg-ic"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg></div>
+    <h2 id="cTitle"></h2>
+    <p id="cBody"></p>
+    <div class="dlg-acts"><button class="btn ghost" value="cancel" autofocus>Cancel</button><button class="btn danger" value="ok" id="cOk">Delete</button></div>
+  </form>
+</dialog>
+
+<dialog id="convoDlg" class="dlg wide" aria-labelledby="convoTitle">
+  <div class="dlg-head"><h2 id="convoTitle">Conversation</h2><button class="btn ghost sm icon" type="button" data-close aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div id="convoView"></div>
+</dialog>
+
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 <script src="/app/studio.js"></script>
 </body>
 </html>

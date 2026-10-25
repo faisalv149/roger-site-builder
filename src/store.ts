@@ -203,3 +203,12 @@ export async function deleteBuildsForSlug(slug: string): Promise<number> {
   timings = null;
   return recs.length;
 }
+
+/** Remove a failed build from the history (a finished one goes with its site: deleteBuildsForSlug). */
+export async function deleteFailedBuild(id: string): Promise<'deleted' | 'missing' | 'finished'> {
+  const rec = await docs.get<BuildRecord>('builds', id);
+  if (!rec) return 'missing';
+  if (rec.status === 'done') return 'finished';
+  await docs.del('builds', id);
+  return 'deleted';
+}

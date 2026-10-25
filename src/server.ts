@@ -12,7 +12,7 @@ import { searchCandidates } from './sources/places.js';
 import { confirmBusinessCard } from './imessage/cards.js';
 import { runAudit, type BuildInput } from './pipeline.js';
 import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
-import { deleteBuildsForSlug, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead } from './store.js';
+import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead } from './store.js';
 import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { screenshotsAvailable } from './render/og.js';
@@ -233,6 +233,15 @@ app.delete('/api/sites/:slug', wrap(async (req, res) => {
   const files = (await deleteOut(`sites/${slug}`)) + (await deleteOut(`reports/${slug}`));
   if (!builds && !files && !unpublished) return res.status(404).json({ error: `No site "${slug}"` });
   res.json({ slug, builds, files, unpublished });
+}));
+// remove a failed build from the Sites list (finished builds are removed with their site: DELETE /api/sites/:slug)
+app.delete('/api/builds/:id', wrap(async (req, res) => {
+  const id = String(req.params.id);
+  if (!/^[\w-]{1,120}$/.test(id)) return res.status(400).json({ error: 'bad build id' }); // ids name files in data/builds
+  const r = await deleteFailedBuild(id);
+  if (r === 'missing') return res.status(404).json({ error: 'No such build' });
+  if (r === 'finished') return res.status(400).json({ error: 'This build made a site: delete the site instead' });
+  res.json({ deleted: true });
 }));
 app.get('/api/builds/:id', wrap(async (req, res) => {
   const b = await getBuild(String(req.params.id));
