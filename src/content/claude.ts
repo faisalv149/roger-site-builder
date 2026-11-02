@@ -40,6 +40,34 @@ export function claudeKeyStatus(): Promise<string> {
   return keyCheck;
 }
 
+/**
+ * Some models (the newest ones) refuse a forced tool call ("tool_choice: type tool ... not supported for this model").
+ * Learn that from the first refusal, remember it per model, and ask the model to call the tool on its own instead.
+ */
+const forcedToolUnsupported = new Set<string>();
+export const claudeToolMode = (): 'forced' | 'auto' => (forcedToolUnsupported.has(config.anthropicModel) ? 'auto' : 'forced');
+const refusesForcedTool = (e: unknown) => /tool_choice/i.test((e as Error)?.message ?? '') && /not supported|unsupported|invalid/i.test((e as Error)?.message ?? '');
+
+/** One request that returns the tool call, with the forced-tool fallback. */
+async function toolRequest(opts: { system: string; toolName: string; toolDescription: string; schema: Record<string, unknown>; maxTokens: number; content: unknown; requestOpts?: { timeout?: number; maxRetries?: number } }) {
+  const make = (forced: boolean) => getClient().messages.create({
+    model: config.anthropicModel,
+    max_tokens: opts.maxTokens,
+    system: forced ? opts.system : `${opts.system}\n\nRespond only by calling the ${opts.toolName} tool, with no other text.`,
+    tools: [{ name: opts.toolName, description: opts.toolDescription, input_schema: opts.schema as any }],
+    tool_choice: forced ? { type: 'tool', name: opts.toolName } : { type: 'auto' },
+    messages: [{ role: 'user', content: opts.content as any }],
+  }, opts.requestOpts);
+  if (!forcedToolUnsupported.has(config.anthropicModel)) {
+    try { return await make(true); } catch (e) {
+      if (!refusesForcedTool(e)) throw e;
+      forcedToolUnsupported.add(config.anthropicModel);
+      console.warn(`[claude] ${config.anthropicModel} doesn't accept a forced tool call; asking it to call the tool itself`);
+    }
+  }
+  return make(false);
+}
+
 function getClient() {
   if (!client) client = new Anthropic({ apiKey: config.anthropicKey, timeout: 60_000, maxRetries: 1 });
   return client;
@@ -69,14 +97,7 @@ export async function claudeJsonDetailed<T>(opts: {
 Answer with: ${opts.toolDescription}`, opts.prompt, opts.schema)) as T;
       return { ok: true, data, ms: Date.now() - started, via };
     }
-    const res = await getClient().messages.create({
-      model: config.anthropicModel,
-      max_tokens: opts.maxTokens ?? 2000,
-      system: opts.system,
-      tools: [{ name: opts.toolName, description: opts.toolDescription, input_schema: opts.schema as any }],
-      tool_choice: { type: 'tool', name: opts.toolName },
-      messages: [{ role: 'user', content: opts.prompt }],
-    });
+    const res = await toolRequest({ system: opts.system, toolName: opts.toolName, toolDescription: opts.toolDescription, schema: opts.schema, maxTokens: opts.maxTokens ?? 2000, content: opts.prompt });
     const block = res.content.find((c) => c.type === 'tool_use');
     if (!block || block.type !== 'tool_use') return { ok: false, ms: Date.now() - started, via, error: `Claude answered without the ${opts.toolName} tool call (stop reason: ${res.stop_reason})` };
     return { ok: true, data: block.input as T, ms: Date.now() - started, via };
@@ -116,14 +137,7 @@ export async function claudeVisionJson<T>(opts: {
       ]),
       { type: 'text' as const, text: opts.prompt },
     ];
-    const res = await getClient().messages.create({
-      model: config.anthropicModel,
-      max_tokens: 1000,
-      system: opts.system,
-      tools: [{ name: opts.toolName, description: opts.toolDescription, input_schema: opts.schema as any }],
-      tool_choice: { type: 'tool', name: opts.toolName },
-      messages: [{ role: 'user', content }],
-    }, { timeout: opts.timeoutMs ?? 20_000, maxRetries: 0 });
+    const res = await toolRequest({ system: opts.system, toolName: opts.toolName, toolDescription: opts.toolDescription, schema: opts.schema, maxTokens: 1000, content, requestOpts: { timeout: opts.timeoutMs ?? 20_000, maxRetries: 0 } });
     const block = res.content.find((c) => c.type === 'tool_use');
     if (!block || block.type !== 'tool_use') return null;
     return { data: block.input as T, ms: Date.now() - started };
