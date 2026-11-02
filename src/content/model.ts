@@ -4,6 +4,18 @@ import type { SiteImage } from '../brand/photos.js';
 import { digits, fillPlaceholders, titleCase, truncateWords } from '../util/text.js';
 import type { DesignModel } from '../design/compose.js';
 
+/** What the business's own website contributes beyond Google: its booking page, story and videos, with how well each was read. */
+export interface SourceBundle {
+  /** the website everything here was read from */
+  website?: string;
+  booking?: { url: string; label: string; platform?: string; kind: 'online' | 'phone' | 'email' | 'page' };
+  story?: { heading: string; text: string };
+  videos: { title?: string; duration?: string; kind: 'file' | 'hls' | 'youtube' | 'vimeo' | 'embed'; url: string; pageUrl: string; poster?: { publicPath: string; width: number; height: number }; note?: string }[];
+  /** the extractors' results and the pre-delivery checks (kept with the draft, not rendered) */
+  extraction?: import('./extraction.js').ExtractionReport;
+  review?: import('./validate.js').BuildReview;
+}
+
 export interface SiteModel {
   slug: string;
   themeId: string;
@@ -50,6 +62,8 @@ export interface SiteModel {
   warnings: string[];
   /** personalisation pilot: the design plan and what its renderers need (src/design/compose.ts) */
   design?: DesignModel;
+  /** the website's booking page, story and videos (src/sources/site-content.ts) */
+  source?: SourceBundle;
 }
 
 export interface ModelInputs {

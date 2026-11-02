@@ -45,25 +45,29 @@ function getClient() {
   return client;
 }
 
+export type ClaudeOutcome<T> = { ok: true; data: T; ms: number; via: 'api' | 'cli' } | { ok: false; ms: number; via: 'api' | 'cli' | null; error: string };
+
 /**
- * Ask Claude for structured JSON by forcing a single tool call.
- * Returns null (never throws) so every caller can fall back to deterministic templates.
+ * Ask Claude for structured JSON by forcing a single tool call, and say what happened: the answer, or why there
+ * isn't one (no key, the request failed, the answer wasn't a tool call). Never throws.
  */
-export async function claudeJson<T>(opts: {
+export async function claudeJsonDetailed<T>(opts: {
   system: string;
   prompt: string;
   toolName: string;
   toolDescription: string;
   schema: Record<string, unknown>;
   maxTokens?: number;
-}): Promise<{ data: T; ms: number } | null> {
+}): Promise<ClaudeOutcome<T>> {
   const via = claudeVia();
-  if (!via) return null;
+  if (!via) return { ok: false, ms: 0, via: null, error: config.anthropicKey ? 'Claude is unavailable' : 'no ANTHROPIC_API_KEY, and the local Claude CLI is off' };
   const started = Date.now();
   try {
     if (via === 'cli') {
-      const data = (await cliJson(`${opts.system}\n\nAnswer with: ${opts.toolDescription}`, opts.prompt, opts.schema)) as T;
-      return { data, ms: Date.now() - started };
+      const data = (await cliJson(`${opts.system}
+
+Answer with: ${opts.toolDescription}`, opts.prompt, opts.schema)) as T;
+      return { ok: true, data, ms: Date.now() - started, via };
     }
     const res = await getClient().messages.create({
       model: config.anthropicModel,
@@ -74,12 +78,19 @@ export async function claudeJson<T>(opts: {
       messages: [{ role: 'user', content: opts.prompt }],
     });
     const block = res.content.find((c) => c.type === 'tool_use');
-    if (!block || block.type !== 'tool_use') return null;
-    return { data: block.input as T, ms: Date.now() - started };
+    if (!block || block.type !== 'tool_use') return { ok: false, ms: Date.now() - started, via, error: `Claude answered without the ${opts.toolName} tool call (stop reason: ${res.stop_reason})` };
+    return { ok: true, data: block.input as T, ms: Date.now() - started, via };
   } catch (e) {
-    console.warn(`[claude ${via}] ${opts.toolName} failed: ${(e as Error).message}`);
-    return null;
+    const error = (e as Error).message.replace(/sk-ant-[w-]+/g, 'sk-ant-…').slice(0, 240);
+    console.warn(`[claude ${via}] ${opts.toolName} failed: ${error}`);
+    return { ok: false, ms: Date.now() - started, via, error };
   }
+}
+
+/** The same call for callers that only want the answer or null (every caller can fall back to templates). */
+export async function claudeJson<T>(opts: Parameters<typeof claudeJsonDetailed<T>>[0]): Promise<{ data: T; ms: number } | null> {
+  const r = await claudeJsonDetailed<T>(opts);
+  return r.ok ? { data: r.data, ms: r.ms } : null;
 }
 
 /**

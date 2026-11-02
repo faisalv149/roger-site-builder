@@ -8,7 +8,8 @@ import type { SiteImage } from './brand/photos.js';
 import type { LogoPick } from './brand/logo.js';
 import { cloneTheme } from './theme/load.js';
 import { resolveBrand, brandTextOnSurface } from './brand/brand.js';
-import { buildModel, type SiteModel } from './content/model.js';
+import { buildModel, type SiteModel, type SourceBundle } from './content/model.js';
+import { brandCss } from './sources/brand-profile.js';
 import { renderPage } from './render/page.js';
 import { isFamilyV2, renderFamilyPage } from './render/families.js';
 import { previewContext, renderSiteFiles, sitePlanFor, writeSiteFiles } from './site-render.js';
@@ -63,6 +64,10 @@ export interface DraftBase {
   evidence: Evidence;
   advice?: DesignAdvice;
   currency: string;
+  /** from the business's own website: booking page, story, videos, and how well they were read */
+  source?: SourceBundle;
+  /** the business's brand as its website shows it: colour roles, button style, typefaces (src/sources/brand-profile.ts) */
+  brandProfile?: import('./sources/brand-profile.js').BrandProfile;
 }
 
 export interface DraftRecord {
@@ -196,6 +201,7 @@ export async function composeModel(base: DraftBase, plan0: DesignPlan, opts: { a
     email: base.email, baseUrl: config.publicBaseUrl, preview: base.preview,
   });
   if (base.heroIsStock) model.images.heroIsStock = true;
+  if (base.source) model.source = { website: base.source.website, booking: base.source.booking, story: base.source.story, videos: base.source.videos };
   if (opts.publishing) {
     // Google's review text and rating stay with Google: a published page links to them instead
     model.proof = { ...model.proof, quotes: [], reviews: [], showRating: false, stats: model.proof.stats.filter((s) => !/★|review/i.test(`${s.value} ${s.label}`)) };
@@ -212,6 +218,16 @@ export async function composeModel(base: DraftBase, plan0: DesignPlan, opts: { a
     media: new Map((opts.content?.media ?? []).map((m) => [m.key, { focal: m.focal, alt: m.alt }])),
     reviewsLink: opts.publishing && base.business.mapsUrl && (base.business.reviewCount ?? 0) > 0 ? base.business.mapsUrl : undefined,
   });
+  // the business's own brand: its colours in their roles and its typeface (or one named substitute), unless the owner chose their own
+  if (base.brandProfile && base.brandProfile.method !== 'none') {
+    const bc = brandCss(base.brandProfile, { logoColors: base.brandProfile.logo?.colors });
+    if (bc.css) {
+      model.design.brandCss = bc.css;
+      model.design.brandNotes = bc.notes;
+      model.brand = { ...model.brand, brand: bc.tokens['--brand'], brandInk: bc.tokens['--brand-ink'] };
+      if (bc.fonts && !opts.appearance?.font) model.fonts = { heading: bc.fonts.heading, body: bc.fonts.body, faces: [{ family: 'Brand', url: bc.fonts.url }] };
+    }
+  }
   // a typography-led hero shows no photo, so the stock placeholder warning doesn't apply
   if (plan.hero.variant === 'type-led') model.warnings = model.warnings.filter((w) => !w.startsWith('No usable Google photo for the hero'));
   return model;

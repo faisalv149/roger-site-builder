@@ -352,3 +352,7 @@ All `/api/owner/*` routes need `Authorization: Bearer <owner key>`. Full paramet
 - Three versioned page families (`src/render/families.ts`, `family-css.ts`), pinned per plan, with an explicit upgrade; v1 renderers kept so existing sites don't change. See `docs/page-families.md`.
 - SitePlan (single or multi-page), central SEO config (`src/seo.ts`), owner fact/media review (`src/design/content.ts`, `media.ts`, `uploads.ts`), server-side publish gate and primary-origin domain change (`src/publish.ts`), revision-bound background scores (`src/rescore.ts`). See `docs/seo-and-publishing.md`.
 - QA: `npm run qa:release`, `qa:owner`, `qa:seo-examples`; tests `test/release.test.ts`, `test/publish-seo.test.ts` (57 tests total).
+
+## Identity and website extraction (3 November 2026)
+
+- Geographic Google results are rejected; identity is checked against the website (`src/sources/identity.ts`, `resolve.ts`); website-only fallback (`website-business.ts`); extraction of services, booking, story, photos and videos (`site-content.ts`, `site-images.ts`); extraction report and delivery checks (`content/extraction.ts`, `validate.ts`, `summary.ts`); audit basis labels (`audit/audit.ts`); `repair.ts` re-resolves invalid saved sites. See `docs/identity-and-extraction.md`.

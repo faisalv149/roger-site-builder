@@ -37,6 +37,7 @@ export const absolute = (ctx: SeoContext, route: string) => `${ctx.base}/${route
 
 /** Most specific schema.org type the Google category supports; a truthful LocalBusiness otherwise. */
 const TYPE_MAP: [RegExp, string][] = [
+  [/^(dentist|dental_clinic|orthodontist)$/, 'Dentist'], [/^pharmacy$/, 'Pharmacy'], [/^veterinary_care$/, 'VeterinaryCare'], [/^(chiropractor|doctor|medical_clinic|physiotherapist|physical_therapist|health|optometrist|acupuncturist|podiatrist|dermatologist|psychologist)$/, 'MedicalBusiness'],
   [/^plumber$/, 'Plumber'], [/^electrician$/, 'Electrician'], [/^roofing_contractor$/, 'RoofingContractor'], [/^(hvac_contractor|air_conditioning_contractor)$/, 'HVACBusiness'],
   [/^general_contractor$/, 'GeneralContractor'], [/^locksmith$/, 'Locksmith'], [/^painter$/, 'HousePainter'], [/^moving_company$/, 'MovingCompany'],
   [/^(hair_salon|hair_care|barber_shop)$/, 'HairSalon'], [/^nail_salon$/, 'NailSalon'], [/^(beauty_salon|beautician|makeup_artist)$/, 'BeautySalon'], [/^spa$/, 'DaySpa'],

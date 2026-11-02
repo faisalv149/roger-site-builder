@@ -5,14 +5,23 @@ import { fetchJson, fetchRaw } from '../util/http.js';
 import { digits } from '../util/text.js';
 import { claudeJson } from '../content/claude.js';
 import { pageSpeed, type PageSpeedResult, type PsiFinding, type PsiReport } from './pagespeed.js';
+import { measurePage } from '../sources/render-page.js';
 
 export type Category = 'security' | 'speed' | 'mobile' | 'seo' | 'accessibility' | 'conversion' | 'trust';
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
+
+/**
+ * How sure the audit is. measured: observed directly (a request, a browser, Google's test). heuristic: a risk inferred from
+ * the page source that wasn't confirmed by a test, so it is worded as "may" and counts half. suggestion: advice, not a fault, and
+ * doesn't change the score. What couldn't be determined at all goes in AuditResult.unknowns, never in the issues.
+ */
+export type Basis = 'measured' | 'heuristic' | 'suggestion';
 
 export interface AuditIssue {
   id: string;
   category: Category;
   severity: Severity;
+  basis: Basis;
   title: string; // owner-friendly, short
   detail: string; // evidence
   fix: string; // what Roger will do
@@ -27,7 +36,9 @@ export interface AuditResult {
   categories: Record<Category, number>;
   issues: AuditIssue[];
   passed: string[];
-  metrics: { ttfbMs: number; htmlKb: number; imageKb: number; pageKb: number; images: number; requestsSampled: number; pagespeed?: PageSpeed };
+  /** what the audit could not determine, and why */
+  unknowns: { id: string; title: string; detail: string }[];
+  metrics: { ttfbMs: number; htmlKb: number; imageKb: number; pageKb: number; images: number; requestsSampled: number; /** images downloaded for the weight figure, of images found */ imagesMeasured?: number; /** the page was opened in a phone-sized browser */ measuredInBrowser?: boolean; pagespeed?: PageSpeed };
   summary: { headline: string; bullets: string[]; pitch: string; source: 'claude' | 'template' };
   generatedAt: string;
 }
@@ -36,20 +47,24 @@ export interface AuditResult {
 export type PageSpeed = Partial<PageSpeedResult> & { performance?: number; lcp?: string; cls?: string; tbt?: string; fcp?: string };
 
 const PENALTY: Record<Severity, number> = { critical: 25, high: 12, medium: 6, low: 2 };
+/** a risk that wasn't tested counts half; advice counts nothing */
+const WEIGHT: Record<Basis, number> = { measured: 1, heuristic: 0.5, suggestion: 0 };
 const CATS: Category[] = ['security', 'speed', 'mobile', 'seo', 'accessibility', 'conversion', 'trust'];
 
-async function imageWeight(scan: WebsiteScan): Promise<{ kb: number; sampled: number; biggest?: { src: string; kb: number } }> {
+async function imageWeight(scan: WebsiteScan): Promise<{ kb: number; sampled: number; fetched: number; biggest?: { src: string; kb: number } }> {
   const srcs = [...new Set(scan.images.map((i) => i.src).filter((s) => s && !s.startsWith('data:')))].slice(0, 10);
   let total = 0;
+  let fetched = 0;
   let biggest: { src: string; kb: number } | undefined;
   await Promise.all(srcs.map(async (src) => {
     const r = await fetchRaw(src, { timeoutMs: 8000, maxBytes: 12_000_000 }).catch(() => null);
     if (!r?.ok) return;
     const kb = Math.round(r.body.length / 1024);
+    fetched++;
     total += kb;
     if (!biggest || kb > biggest.kb) biggest = { src, kb };
   }));
-  return { kb: total, sampled: srcs.length, biggest };
+  return { kb: total, sampled: srcs.length, fetched, biggest };
 }
 
 const FREE_EMAIL = /@(yahoo|gmail|aol|hotmail|outlook|msn|comcast|sbcglobal|att|icloud)\./i;
@@ -65,20 +80,26 @@ export interface AuditOptions {
   preview?: boolean;
   /** the owner-facing summary (Claude); off for internal comparisons */
   summarize?: boolean;
+  /** open the page in a phone-sized browser to measure layout (default: yes, when a browser is available) */
+  measure?: boolean;
 }
 
 export async function auditWebsite(scan: WebsiteScan, b?: Business, opts: AuditOptions = {}): Promise<AuditResult> {
   const issues: AuditIssue[] = [];
   const passed: string[] = [];
-  const add = (i: AuditIssue) => issues.push(i);
+  const unknowns: AuditResult['unknowns'] = [];
+  const add = (i: Omit<AuditIssue, 'basis'> & { basis?: Basis }) => issues.push({ basis: 'measured', ...i });
   const ok = (s: string) => passed.push(s);
+  const unknown = (id: string, title: string, detail: string) => unknowns.push({ id, title, detail });
 
   // Google's Lighthouse run takes 10-40 s, so it starts first and runs alongside the checks below
   const psP: Promise<PageSpeed | undefined> = scan.ok ? (opts.scores ? opts.scores(scan.finalUrl) : pageSpeed(scan.finalUrl)) : Promise.resolve(undefined);
+  // and the page is opened in a phone-sized browser, so layout facts are measured where a browser is available
+  const measureP = scan.ok && opts.measure !== false ? measurePage(scan.finalUrl).catch(() => undefined) : Promise.resolve(undefined);
 
   if (!scan.ok) {
     add({ id: 'down', category: 'security', severity: 'critical', title: 'Your website is not loading', detail: `${scan.url} returned ${scan.status || scan.error || 'no response'}.`, fix: 'We will put a fast, reliable site live on secure hosting.' });
-    return finalize(scan, issues, passed, { ttfbMs: 0, htmlKb: 0, imageKb: 0, pageKb: 0, images: 0, requestsSampled: 0 }, b, opts.summarize);
+    return finalize(scan, issues, passed, unknowns, { ttfbMs: 0, htmlKb: 0, imageKb: 0, pageKb: 0, images: 0, requestsSampled: 0 }, b, opts.summarize);
   }
 
   const $ = cheerio.load(scan.html);
@@ -104,29 +125,43 @@ export async function auditWebsite(scan: WebsiteScan, b?: Business, opts: AuditO
   // responsive sites are built, so neither counts (they made live sites look broken).
   const unscopedCss = html.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/gi, '');
   const fixedWidth = fixedTables > 0 || /(?<![-\w])width\s*:\s*(9\d\d|1[0-2]\d\d)px/i.test(unscopedCss);
-  if (fixedWidth) add({ id: 'fixed-layout', category: 'mobile', severity: 'high', title: 'Layout is fixed-width', detail: fixedTables ? `${fixedTables} fixed-width tables used for layout.` : 'Content is locked to a desktop width.', fix: 'Responsive grid that fits any screen.' });
+  const measured = await measureP;
+  if (measured) {
+    // a phone-sized browser says whether the page really scrolls sideways
+    if (measured.scrollWidth > measured.innerWidth + 8) add({ id: 'fixed-layout', category: 'mobile', severity: 'high', title: 'The page scrolls sideways on a phone', detail: `Opened at phone width (${measured.innerWidth}px), the page is ${measured.scrollWidth}px wide.`, fix: 'Responsive grid that fits any screen.' });
+    else ok(`Fits a phone-sized screen without sideways scrolling (${measured.innerWidth}px)`);
+  } else if (fixedWidth) add({ id: 'fixed-layout', category: 'mobile', severity: 'medium', basis: 'heuristic', title: 'The layout may be locked to a desktop width', detail: fixedTables ? `${fixedTables} fixed-width tables are used for layout. This was read from the page source, not tested on a phone.` : 'The page CSS sets a fixed desktop width. This was read from the page source, not tested on a phone.', fix: 'Responsive grid that fits any screen.' });
 
   // ── speed ──
   const img = await imageWeight(scan);
   const htmlKb = Math.round(scan.bytes / 1024);
   const pageKb = htmlKb + img.kb;
+  const distinctImages = new Set(scan.images.map((i) => i.src).filter((s) => s && !s.startsWith('data:'))).size;
+  const partial = img.sampled < distinctImages || img.fetched < img.sampled;
   if (scan.timing.ttfbMs > 1800) add({ id: 'ttfb', category: 'speed', severity: 'high', title: 'Server is slow to respond', detail: `First byte took ${(scan.timing.ttfbMs / 1000).toFixed(1)}s.`, fix: 'Fast CDN hosting (pages load in under a second).' });
   else if (scan.timing.ttfbMs > 800) add({ id: 'ttfb', category: 'speed', severity: 'medium', title: 'Server is a bit slow', detail: `First byte took ${scan.timing.ttfbMs}ms.`, fix: 'Fast CDN hosting.' });
-  if (pageKb > 3000) add({ id: 'weight', category: 'speed', severity: 'high', title: 'Page is very heavy', detail: `About ${(pageKb / 1024).toFixed(1)} MB to download${img.biggest ? `; the largest image alone is ${(img.biggest.kb / 1024).toFixed(1)} MB` : ''}.`, fix: 'Compressed, right-sized images (each under 250 KB).' });
-  else if (pageKb > 1500) add({ id: 'weight', category: 'speed', severity: 'medium', title: 'Page is heavier than it should be', detail: `About ${(pageKb / 1024).toFixed(1)} MB to download.`, fix: 'Compressed, right-sized images.' });
-  else ok(`Page weight is reasonable (${pageKb} KB sampled)`);
+  // the figure counts the HTML plus the images that were downloaded: scripts, styles and fonts, and any image not sampled, are not in it.
+  // So a total is only claimed as "at least", and the verdict rests on what was actually counted.
+  const counted = `${htmlKb >= 1024 ? `${(htmlKb / 1024).toFixed(1)} MB` : `${htmlKb} KB`} of HTML${img.fetched ? ` plus ${img.kb} KB from ${img.fetched} of ${distinctImages} images` : ''}`;
+  if (htmlKb > 1000) add({ id: 'html-weight', category: 'speed', severity: 'medium', title: 'The page itself is unusually large', detail: `The page's HTML alone is ${(htmlKb / 1024).toFixed(1)} MB (most pages are under 100 KB), before any pictures or scripts load.`, fix: 'Lean pages with only the code each page needs.' });
+  if (img.biggest && img.biggest.kb > 1500) add({ id: 'weight', category: 'speed', severity: 'medium', title: 'A photo is much larger than it needs to be', detail: `The largest image measured is ${(img.biggest.kb / 1024).toFixed(1)} MB (${img.biggest.src.split('/').pop()?.slice(0, 40)}).`, fix: 'Compressed, right-sized images (each under 250 KB).' });
+  else if (pageKb > 3000) add({ id: 'weight', category: 'speed', severity: 'medium', title: 'The page downloads a lot of data', detail: `At least ${(pageKb / 1024).toFixed(1)} MB: ${counted}.${partial ? ' This is a lower bound.' : ''}`, fix: 'Compressed, right-sized images (each under 250 KB).' });
+  else if (htmlKb <= 1000) ok(`${counted} (page weight is not fully measured)`);
+  if (partial) unknown('page-weight', 'Total download size', `Not measured in full: only ${counted} were counted. Scripts, styles, fonts and ${Math.max(0, distinctImages - img.fetched)} image${distinctImages - img.fetched === 1 ? '' : 's'} were not. Google's PageSpeed result is the measure of total weight.`);
   const noDims = scan.images.filter((i) => !i.width || !i.height).length;
-  if (noDims >= 2) add({ id: 'img-dims', category: 'speed', severity: 'low', title: 'Content jumps while loading', detail: `${noDims} images have no size set.`, fix: 'Reserved image space, no layout shift.' });
+  // missing size attributes are a risk for layout shift, not layout shift: it is reported only if Google's test didn't measure it
+  const dimsRisk = noDims >= 2 ? { id: 'img-dims', category: 'speed' as const, severity: 'low' as const, basis: 'heuristic' as const, title: 'Photos may shift the page as they load', detail: `${noDims} images don't declare their size, which can cause layout shift. Actual layout shift wasn't measured.`, fix: 'Reserved image space, no layout shift.' } : undefined;
 
   // ── SEO ──
   const titleTxt = (scan.title || '').trim();
   if (!titleTxt || /^(home|welcome|untitled|index|homepage)\b/i.test(titleTxt)) add({ id: 'title', category: 'seo', severity: 'high', title: 'Google sees a generic page title', detail: titleTxt ? `Title is just "${titleTxt}".` : 'The page has no title.', fix: `Title like "${b?.name || 'Business'} | ${b?.primaryTypeLabel || 'Service'} in ${b?.city || 'your city'}".` });
-  else if (titleTxt.length > 65) add({ id: 'title-long', category: 'seo', severity: 'low', title: 'Page title gets cut off in Google', detail: `${titleTxt.length} characters.`, fix: 'Tight 50-60 character title.' });
+  else if (titleTxt.length > 65) add({ id: 'title-long', category: 'seo', severity: 'low', basis: 'suggestion', title: 'A shorter page title may display better in Google', detail: `The title is ${titleTxt.length} characters; Google usually shows about 60 and may rewrite longer ones. This is advice, not an error.`, fix: 'A title of about 50-60 characters.' });
   else ok('Has a descriptive title');
   if (!scan.description) add({ id: 'meta-desc', category: 'seo', severity: 'medium', title: 'No description for Google results', detail: 'Missing meta description, so Google picks random text.', fix: 'A clear one-line description with your city and services.' });
   else ok('Has a meta description');
   const h1s = $('h1');
-  if (!h1s.length) add({ id: 'h1', category: 'seo', severity: 'medium', title: 'No main headline', detail: 'The page has no H1.', fix: 'One clear headline that says what you do and where.' });
+  const h1Count = measured ? measured.h1 : h1s.length;
+  if (!h1Count) add({ id: 'h1', category: 'seo', severity: 'medium', basis: measured ? 'measured' : 'heuristic', title: 'No main headline', detail: measured ? 'The page has no H1, even after its scripts ran.' : 'No H1 in the page source; if scripts add one after loading, this may not apply.', fix: 'One clear headline that says what you do and where.' });
   else if (/^welcome\b/i.test(h1s.first().text().trim())) add({ id: 'h1-generic', category: 'seo', severity: 'low', title: 'Headline doesn\'t say what you do', detail: `Headline is "${h1s.first().text().trim().slice(0, 60)}".`, fix: 'Headline with your service and city.' });
   const city = b?.city;
   if (city && !new RegExp(`\\b${city}\\b`, 'i').test(`${titleTxt} ${h1s.text()}`)) add({ id: 'local-seo', category: 'seo', severity: 'medium', title: `Google can't tell you work in ${city}`, detail: `"${city}" isn't in the title or headline.`, fix: `${city} in the title, headline and service-area section.` });
@@ -141,8 +176,11 @@ export async function auditWebsite(scan: WebsiteScan, b?: Business, opts: AuditO
     : await Promise.all([fetchRaw(`${origin}/robots.txt`, { timeoutMs: 5000, maxBytes: 50_000 }), fetchRaw(`${origin}/sitemap.xml`, { timeoutMs: 5000, maxBytes: 200_000 })]);
   if (!sitemap.ok || !/<urlset|<sitemapindex/i.test(sitemap.body.toString('utf8'))) add({ id: 'sitemap', category: 'seo', severity: 'low', title: 'No sitemap for Google', detail: '/sitemap.xml not found.', fix: 'Auto-generated sitemap.' });
   if (!robots.ok) add({ id: 'robots', category: 'seo', severity: 'low', title: 'No robots.txt', detail: '/robots.txt not found.', fix: 'Standard robots.txt pointing to the sitemap.' });
-  const missingAlt = scan.images.filter((i) => !i.alt || !i.alt.trim()).length;
-  if (missingAlt >= 2) add({ id: 'alt', category: 'seo', severity: 'low', title: 'Photos are invisible to Google and screen readers', detail: `${missingAlt} of ${scan.images.length} images have no alt text.`, fix: 'Descriptive alt text on every photo.' });
+  // alt="" is how a page marks a decorative picture, and that is correct: only a missing alt attribute is a gap
+  const noAlt = scan.images.filter((i) => i.alt === undefined && i.src && !/^data:/.test(i.src)).length;
+  const decorative = scan.images.filter((i) => i.alt !== undefined && !i.alt.trim()).length;
+  if (noAlt >= 1) add({ id: 'alt', category: 'seo', severity: 'low', title: 'Some photos have no alt text', detail: `${noAlt} of ${scan.images.length} images have no alt attribute at all${decorative ? ` (${decorative} more are marked decorative with an empty alt, which is fine)` : ''}.`, fix: 'Descriptive alt text on every informative photo.' });
+  else if (decorative) ok(`Pictures that carry no information are marked decorative (${decorative} with an empty alt)`);
   const ogImg = $('meta[property="og:image"]').attr('content');
   if (!ogImg) add({ id: 'og', category: 'seo', severity: 'low', title: 'Links to your site look blank when shared', detail: 'No preview image (og:image) for iMessage, Facebook or texts.', fix: 'A branded share image so links show a rich preview.' });
 
@@ -159,11 +197,14 @@ export async function auditWebsite(scan: WebsiteScan, b?: Business, opts: AuditO
   const ctaRe = /\b(call now|get a (free )?(quote|estimate)|free (quote|estimate|inspection)|request (a )?(quote|estimate|service)|book|schedule)\b/i;
   const ctaEls = $('a, button').filter((_, el) => ctaRe.test($(el).text())).length;
   if (!ctaEls) add({ id: 'cta', category: 'conversion', severity: 'medium', title: 'No clear "call" or "get a quote" button', detail: 'Visitors aren\'t told what to do next.', fix: 'One obvious action button above the fold.' });
-  if (!$('a[href^="sms:"]').length) add({ id: 'sms', category: 'conversion', severity: 'low', title: 'Customers can\'t text you from the site', detail: 'No text/SMS link.', fix: 'A "Text us" button that opens Messages.' });
-  if (!/googletagmanager|gtag\(|google-analytics|analytics\.js|plausible|fbq\(|clarity\.ms/i.test(html)) add({ id: 'analytics', category: 'conversion', severity: 'low', title: 'You can\'t see how many people visit', detail: 'No analytics installed.', fix: 'Simple visitor and call tracking.' });
+  if (!$('a[href^="sms:"]').length) add({ id: 'sms', category: 'conversion', severity: 'low', basis: 'suggestion', title: 'A "Text us" button could make contact easier', detail: 'The page has no text/SMS link. Many customers prefer texting.', fix: 'A "Text us" button that opens Messages.' });
+  // analytics tools often load after the page opens, so not finding one in the HTML is not the same as there being none
+  if (/googletagmanager|gtag\(|google-analytics|analytics\.js|plausible|fbq\(|clarity\.ms/i.test(html) || measured?.analytics) ok('Visitor analytics detected');
+  else unknown('analytics', 'Visitor analytics', measured ? 'No analytics script loaded in a test visit. Some tools only load after a visitor accepts cookies, so this does not prove there is none.' : 'No analytics script was found in the page HTML. Tools that load after the page opens are not visible this way, so this could not be confirmed.');
 
   // ── trust / local consistency (vs Google Business) ──
-  if (b) {
+  // a business known only from its own website has no separate Google record to compare against
+  if (b && b.source !== 'website') {
     const gPhone = digits(b.phone).slice(-10);
     const sitePhones = scan.phones.map((p) => digits(p).slice(-10)).filter((p) => p.length === 10);
     if (gPhone && sitePhones.length && !sitePhones.includes(gPhone)) add({ id: 'nap-phone', category: 'trust', severity: 'high', title: 'Phone number doesn\'t match Google', detail: `Website shows ${scan.phones[0]}, Google shows ${b.phone}. Mismatches confuse customers and hurt local ranking.`, fix: 'Same name, address and phone everywhere.' });
@@ -178,12 +219,16 @@ export async function auditWebsite(scan: WebsiteScan, b?: Business, opts: AuditO
   const lastYear = copy.length ? Math.max(...copy) : undefined;
   if (lastYear && lastYear < year - 1) add({ id: 'stale', category: 'trust', severity: 'medium', title: 'Site looks out of date', detail: `Footer says © ${lastYear}.`, fix: 'Fresh design that stays current automatically.' });
   const freeMail = scan.emails.find((e) => FREE_EMAIL.test(e));
-  if (freeMail) add({ id: 'email', category: 'trust', severity: 'low', title: 'Free email address looks less professional', detail: `Uses ${freeMail}.`, fix: 'Contact form so customers never need your personal email.' });
+  if (freeMail) add({ id: 'email', category: 'trust', severity: 'low', basis: 'suggestion', title: 'A business email address can look more established', detail: `The page shows ${freeMail}. That is common and not an error; some customers read it as less established.`, fix: 'A contact form, so customers never need your personal email.' });
   if (!$('link[rel~="icon"]').length) add({ id: 'favicon', category: 'trust', severity: 'low', title: 'No browser icon', detail: 'Missing favicon.', fix: 'Favicon from your logo.' });
 
   const ps = await psP;
   if (ps?.reportUrl) pageSpeedIssues(ps as PageSpeedResult, add, ok);
-  return finalize(scan, issues, passed, { ttfbMs: scan.timing.ttfbMs, htmlKb, imageKb: img.kb, pageKb, images: scan.images.length, requestsSampled: img.sampled, pagespeed: ps }, b, opts.summarize);
+  const clsMeasured = (ps?.mobile ?? ps?.desktop)?.lab.clsValue;
+  if (dimsRisk && clsMeasured === undefined) add(dimsRisk);
+  else if (dimsRisk && clsMeasured !== undefined && clsMeasured <= 0.1) ok(`Google measured low layout shift (${clsMeasured}) although ${noDims} images don't declare a size`);
+  if (!ps?.mobile && !ps?.desktop) unknown('pagespeed', 'Google speed and accessibility scores', ps?.error?.message || 'Google PageSpeed did not run for this page, so speed and accessibility are not measured here.');
+  return finalize(scan, issues, passed, unknowns, { ttfbMs: scan.timing.ttfbMs, htmlKb, imageKb: img.kb, pageKb, images: scan.images.length, requestsSampled: img.sampled, imagesMeasured: img.fetched, measuredInBrowser: !!measured, pagespeed: ps }, b, opts.summarize);
 }
 
 
@@ -193,7 +238,7 @@ const titles = (fs: PsiFinding[], n = 3) => fs.slice(0, n).map((f) => `${f.title
 const sec = (ms?: number) => (ms ? `${(ms / 1000).toFixed(1)} s` : '');
 
 /** Google's scores and failing checks, as issues in the owner's terms (mobile first: most visitors are on phones). */
-function pageSpeedIssues(ps: PageSpeedResult, add: (i: AuditIssue) => void, ok: (s: string) => void) {
+function pageSpeedIssues(ps: PageSpeedResult, add: (i: Omit<AuditIssue, 'basis'> & { basis?: Basis }) => void, ok: (s: string) => void) {
   const m = ps.mobile;
   const d = ps.desktop;
   if (!m && !d) return;
@@ -245,15 +290,18 @@ function pageSpeedIssues(ps: PageSpeedResult, add: (i: AuditIssue) => void, ok: 
 
 const SEV_ORDER: Severity[] = ['critical', 'high', 'medium', 'low'];
 
-async function finalize(scan: WebsiteScan, issues: AuditIssue[], passed: string[], metrics: AuditResult['metrics'], b?: Business, withSummary = true): Promise<AuditResult> {
-  issues.sort((a, c) => SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(c.severity));
+async function finalize(scan: WebsiteScan, issues: AuditIssue[], passed: string[], unknowns: AuditResult['unknowns'], metrics: AuditResult['metrics'], b?: Business, withSummary = true): Promise<AuditResult> {
+  // measured faults first, then untested risks, then advice
+  const BASIS_ORDER: Basis[] = ['measured', 'heuristic', 'suggestion'];
+  issues.sort((a, c) => BASIS_ORDER.indexOf(a.basis) - BASIS_ORDER.indexOf(c.basis) || SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(c.severity));
   // Exponential decay: a few small issues barely move the score; many serious ones push it down without hitting zero.
-  const pen = (list: AuditIssue[]) => list.reduce((s, i) => s + PENALTY[i.severity], 0);
+  // A risk that wasn't tested counts half, and advice counts nothing.
+  const pen = (list: AuditIssue[]) => list.reduce((s, i) => s + PENALTY[i.severity] * WEIGHT[i.basis], 0);
   const score = Math.max(5, Math.round(100 * Math.exp(-pen(issues) / 110)));
   const categories = Object.fromEntries(CATS.map((c) => [c, Math.round(100 * Math.exp(-pen(issues.filter((i) => i.category === c)) / 40))])) as Record<Category, number>;
   const grade = score >= 90 ? 'A' : score >= 75 ? 'B' : score >= 60 ? 'C' : score >= 40 ? 'D' : 'F';
-  const summary = withSummary ? await summarize(scan, issues, passed, score, b) : { headline: `Scores ${score}/100.`, bullets: issues.slice(0, 3).map((i) => i.title), pitch: '', source: 'template' as const };
-  return { url: scan.url, finalUrl: scan.finalUrl, reachable: scan.ok, score, grade, categories, issues, passed, metrics, summary, generatedAt: new Date().toISOString() };
+  const summary = withSummary ? await summarize(scan, issues, passed, score, b) : { headline: `Scores ${score}/100.`, bullets: issues.filter((i) => i.basis !== 'suggestion').slice(0, 3).map((i) => i.title), pitch: '', source: 'template' as const };
+  return { url: scan.url, finalUrl: scan.finalUrl, reachable: scan.ok, score, grade, categories, issues, passed, unknowns, metrics, summary, generatedAt: new Date().toISOString() };
 }
 
 function domainOf(u: string) {
@@ -261,13 +309,17 @@ function domainOf(u: string) {
 }
 
 async function summarize(scan: WebsiteScan, issues: AuditIssue[], passed: string[], score: number, b?: Business): Promise<AuditResult['summary']> {
-  const top = issues.slice(0, 3);
+  // advice isn't a finding: the message talks about measured faults and flagged risks only
+  const found = issues.filter((i) => i.basis !== 'suggestion');
+  const top = found.slice(0, 3);
+  const built = b?.source === 'website' ? 'from your website' : 'from your Google profile and website';
   const ai = await claudeJson<{ headline: string; bullets: string[]; pitch: string }>({
     system:
       'You are Roger, a friendly assistant texting a small home-services business owner over iMessage. ' +
       'Write like a helpful person, not a marketer: short, specific, plain words, no jargon (say "tap-to-call" not "tel: link"), no emojis, no exclamation marks. ' +
-      'Only mention problems present in the issues list. Never invent numbers.',
-    prompt: JSON.stringify({ business: b?.name, website: domainOf(scan.finalUrl), score, issues: issues.slice(0, 8).map((i) => ({ title: i.title, detail: i.detail, severity: i.severity, fix: i.fix })), passed }),
+      'Only mention problems present in the issues list. Never invent numbers. An issue with basis "heuristic" was not tested: say it "may" be a problem, never that it is one. Never mention suggestions. ' +
+      'The offer to build a preview says it is built from the sources given in builtFrom, nothing else.',
+    prompt: JSON.stringify({ business: b?.name, website: domainOf(scan.finalUrl), score, builtFrom: built, issues: found.slice(0, 8).map((i) => ({ title: i.title, detail: i.detail, severity: i.severity, basis: i.basis, fix: i.fix })), passed }),
     toolName: 'imessage_audit',
     toolDescription: 'The audit summary Roger will send in iMessage.',
     schema: {
@@ -286,8 +338,8 @@ async function summarize(scan: WebsiteScan, issues: AuditIssue[], passed: string
   const dom = domainOf(scan.finalUrl);
   return {
     headline: scan.ok ? `I checked ${dom}. It scores ${score}/100.` : `I tried to open ${dom}, but it isn't loading right now.`,
-    bullets: top.map((i) => i.title),
-    pitch: top.length ? `We can fix ${top.length > 1 ? 'all of this' : 'that'} with a fast new site built from your Google profile. Want to see a free preview?` : 'Your site is in good shape. Want a free preview of a refreshed version anyway?',
+    bullets: top.map((i) => (i.basis === 'heuristic' ? `${i.title} (not tested)` : i.title)),
+    pitch: top.length ? `We can fix ${top.length > 1 ? 'all of this' : 'that'} with a fast new site built ${built}. Want to see a free preview?` : 'Your site is in good shape. Want a free preview of a refreshed version anyway?',
     source: 'template',
   };
 }

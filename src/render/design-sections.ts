@@ -35,7 +35,7 @@ export function ctas(m: SiteModel, cls = ''): string {
   const req = (primary: boolean) => `<a class="btn ${primary ? 'btn-primary' : 'btn-secondary'}" href="#quote" data-ev="${reqEv(m)}">${esc(d.actionLabel)}</a>`;
   return `<div class="btn-row ${cls}">${goal(m) === 'call' && phone ? call(true) + req(false) : req(true) + call(false)}</div>`;
 }
-export const apptNote = (m: SiteModel) => (goal(m) === 'appointment' ? `<p class="d-note">${icon('info', { size: 16 })}<span>Appointment requests are confirmed by ${esc(m.business.name)} before anything is booked.</span></p>` : '');
+export const apptNote = (m: SiteModel) => (goal(m) === 'appointment' && !m.source?.booking ? `<p class="d-note">${icon('info', { size: 16 })}<span>Appointment requests are confirmed by ${esc(m.business.name)} before anything is booked.</span></p>` : '');
 
 /* ───────────── hero: split · photo-led · type-led · carousel ───────────── */
 export function hero({ m, l }: Ctx): string {

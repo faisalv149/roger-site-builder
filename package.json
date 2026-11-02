@@ -20,6 +20,7 @@
     "qa:categories": "tsx scripts/category-qa.ts",
     "qa:owner": "tsx scripts/owner-journey.ts",
     "qa:release": "tsx scripts/release-qa.ts",
+    "repair:identity": "tsx scripts/repair-identity.ts",
     "qa:seo-examples": "tsx scripts/seo-examples.ts",
     "fixtures:categories": "tsx scripts/make-category-fixtures.ts"
   },

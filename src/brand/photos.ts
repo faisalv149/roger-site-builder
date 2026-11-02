@@ -12,7 +12,7 @@ export interface SiteImage {
   alt: string;
   /** the photographer's credit; Google requires it on every Places photo, the business's own included */
   credit?: string;
-  source: 'google' | 'stock' | 'owner';
+  source: 'google' | 'stock' | 'owner' | 'website';
   kb?: number;
 }
 
@@ -96,9 +96,10 @@ export async function processPhotos(
       publicPath: `${opts.publicPrefix}/${name}`,
       width: enc.width,
       height: enc.height,
-      alt: isHero ? `${b.name} at work` : `Project photo from ${b.name}`,
-      credit: g.p.authors[0]?.name ? `Photo: ${g.p.authors[0].name} via Google` : 'Photo via Google',
-      source: 'google',
+      alt: g.p.source === 'website' ? (g.p.origin?.alt || `${b.name}${b.city ? `, ${b.city}` : ''}: photo ${isHero ? 1 : n + 1}`) : isHero ? `${b.name} at work` : `Project photo from ${b.name}`,
+      // the business's own website photos are its own; Google requires a credit on every Places photo
+      credit: g.p.source === 'website' ? undefined : g.p.authors[0]?.name ? `Photo: ${g.p.authors[0].name} via Google` : 'Photo via Google',
+      source: g.p.source === 'website' ? 'website' : 'google',
       kb: Math.round(enc.data.length / 1024),
     };
     if (isHero) hero = img; else images.push(img);

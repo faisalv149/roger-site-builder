@@ -4,6 +4,8 @@ import { config } from '../config.js';
 import type { Business, BusinessCandidate, OpeningPeriod, Photo } from '../types.js';
 import { fetchJson, fetchRaw } from '../util/http.js';
 import { resolveLookupInput, type LookupIntent } from './maps-url.js';
+import { geographicReason } from './identity.js';
+import { takePrefetched } from './site-images.js';
 
 // Google Places API (New) — https://developers.google.com/maps/documentation/places/web-service
 // Note what Places does NOT return: a logo, brand colors, fonts, or a services list.
@@ -13,7 +15,7 @@ const BASE = 'https://places.googleapis.com/v1';
 
 const SEARCH_FIELDS = [
   'places.id', 'places.displayName', 'places.formattedAddress', 'places.rating', 'places.userRatingCount',
-  'places.primaryTypeDisplayName', 'places.websiteUri', 'places.googleMapsUri', 'places.photos',
+  'places.primaryTypeDisplayName', 'places.primaryType', 'places.types', 'places.nationalPhoneNumber', 'places.websiteUri', 'places.googleMapsUri', 'places.photos',
 ].join(',');
 
 const DETAIL_FIELDS = [
@@ -45,11 +47,30 @@ function score(b: Business, q: string): number {
 }
 const toCandidate = (b: Business): BusinessCandidate => ({
   placeId: b.placeId, name: b.name, address: b.formattedAddress, rating: b.rating, reviewCount: b.reviewCount,
-  primaryTypeLabel: b.primaryTypeLabel, website: b.website, mapsUrl: b.mapsUrl, photoRef: b.photos[0]?.ref,
+  primaryTypeLabel: b.primaryTypeLabel, primaryType: b.primaryType, types: b.types, phone: b.phone, googleWebsite: b.website, website: b.website, mapsUrl: b.mapsUrl, photoRef: b.photos[0]?.ref,
 });
 
 // ───────────────────────── search ─────────────────────────
-export async function searchCandidates(input: string, opts: { zip?: string; limit?: number } = {}): Promise<{ intent: LookupIntent; candidates: BusinessCandidate[] }> {
+export interface SearchResult {
+  intent: LookupIntent;
+  /** businesses only: places that are just a postal code, a town or a street are left out */
+  candidates: BusinessCandidate[];
+  /** results that were turned down, and why */
+  rejected: { placeId: string; name: string; reason: string }[];
+}
+
+/** Keep businesses; set aside the postal codes, towns and streets Google also returns for a name or ZIP. */
+function onlyBusinesses(all: BusinessCandidate[]): Pick<SearchResult, 'candidates' | 'rejected'> {
+  const candidates: BusinessCandidate[] = [];
+  const rejected: SearchResult['rejected'] = [];
+  for (const c of all) {
+    const why = geographicReason({ name: c.name, types: c.types, primaryType: c.primaryType, primaryTypeLabel: c.primaryTypeLabel, address: c.address });
+    if (why) rejected.push({ placeId: c.placeId, name: c.name, reason: why }); else candidates.push(c);
+  }
+  return { candidates, rejected };
+}
+
+export async function searchCandidates(input: string, opts: { zip?: string; limit?: number } = {}): Promise<SearchResult> {
   const intent = await resolveLookupInput(input);
   const limit = opts.limit ?? 5;
 
@@ -57,16 +78,16 @@ export async function searchCandidates(input: string, opts: { zip?: string; limi
     const all = mockBusinesses();
     if (intent.kind === 'placeId') {
       const hit = all.find((b) => b.placeId === intent.placeId);
-      return { intent, candidates: hit ? [toCandidate(hit)] : [] };
+      return { intent, ...onlyBusinesses(hit ? [toCandidate(hit)] : []) };
     }
     const q = intent.kind === 'text' ? `${intent.query} ${opts.zip || ''}` : input;
     const ranked = all.map((b) => ({ b, s: score(b, q) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s);
-    return { intent, candidates: ranked.slice(0, limit).map((x) => toCandidate(x.b)) };
+    return { intent, ...onlyBusinesses(ranked.slice(0, limit).map((x) => toCandidate(x.b))) };
   }
 
   if (intent.kind === 'placeId') {
     const b = await getBusiness(intent.placeId, { skipTowns: true });
-    return { intent, candidates: [toCandidate(b)] };
+    return { intent, ...onlyBusinesses([toCandidate(b)]) };
   }
   if (intent.kind !== 'text') throw new Error('Unresolved short link');
   const textQuery = [intent.query, opts.zip].filter(Boolean).join(' ').trim();
@@ -76,7 +97,7 @@ export async function searchCandidates(input: string, opts: { zip?: string; limi
     body.locationBias = { circle: { center: { latitude: intent.lat, longitude: intent.lng }, radius: 2000 } };
   }
   const res = await fetchJson<{ places?: any[] }>(`${BASE}/places:searchText`, { method: 'POST', headers: headers(SEARCH_FIELDS), body: JSON.stringify(body) });
-  const candidates = (res.places || []).map(
+  const all = (res.places || []).map(
     (p): BusinessCandidate => ({
       placeId: p.id,
       name: p.displayName?.text,
@@ -84,12 +105,16 @@ export async function searchCandidates(input: string, opts: { zip?: string; limi
       rating: p.rating,
       reviewCount: p.userRatingCount,
       primaryTypeLabel: p.primaryTypeDisplayName?.text,
+      primaryType: p.primaryType,
+      types: p.types || [],
+      phone: p.nationalPhoneNumber,
+      googleWebsite: p.websiteUri,
       website: p.websiteUri,
       mapsUrl: p.googleMapsUri,
       photoRef: p.photos?.[0]?.name,
     }),
   );
-  return { intent, candidates };
+  return { intent, ...onlyBusinesses(all) };
 }
 
 // ───────────────────────── details ─────────────────────────
@@ -188,6 +213,8 @@ export async function nearbyTowns(lat: number, lng: number, radiusM = 25000): Pr
 
 /** Download a photo (Places media endpoint, local fixture, or plain URL). */
 export async function downloadPhoto(ref: string, maxWidthPx = 1600): Promise<Buffer> {
+  const already = takePrefetched(ref); // a website photo that was already fetched and measured
+  if (already) return already;
   if (ref.startsWith('file:')) return fs.readFileSync(path.resolve(config.dirs.fixtures, '..', ref.slice(5)));
   const url = /^https?:/.test(ref) ? ref : `${BASE}/${ref}/media?maxWidthPx=${maxWidthPx}&key=${encodeURIComponent(config.googleKey)}`;
   const res = await fetchRaw(url, { timeoutMs: 15000, maxBytes: 15_000_000 });

@@ -8,7 +8,7 @@ import multer from 'multer';
 import { config } from './config.js';
 import { loadThemes, saveCustomTheme, validateTheme, getTheme } from './theme/load.js';
 import { SUPPORTED_VARIANTS } from './theme/schema.js';
-import { searchCandidates } from './sources/places.js';
+import { lookupCandidates } from './sources/resolve.js';
 import { confirmBusinessCard } from './imessage/cards.js';
 import { runAudit, type BuildInput } from './pipeline.js';
 import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
@@ -127,9 +127,10 @@ app.post('/api/themes', themeUpload, (req, res) => {
 app.post('/api/lookup', wrap(async (req, res) => {
   const input = String(req.body.input || req.body.query || '').trim();
   if (!input) return res.status(400).json({ error: 'input is required (business name + ZIP, Google Maps link, or place ID)' });
-  const { intent, candidates } = await searchCandidates(input, { zip: req.body.zip, limit: Number(req.body.limit) || 5 });
+  // a website, when given, is read first so a ZIP code or a name can't be matched to the wrong place
+  const { intent, candidates, rejected, notes } = await lookupCandidates(input, { website: req.body.website || undefined, zip: req.body.zip, limit: Number(req.body.limit) || 5 });
   const card = candidates[0] ? await confirmBusinessCard(candidates[0]) : null;
-  res.json({ intent, candidates, card });
+  res.json({ intent, candidates, card, rejected, notes });
 }));
 
 // ── Roger step 2a: audit an existing website ──
@@ -161,7 +162,7 @@ app.post('/api/build', themeUpload, wrap(async (req, res) => {
   if (file) {
     try { input.theme = JSON.parse(file.buffer.toString('utf8')); } catch (e) { return res.status(400).json({ error: `theme.json is not valid JSON: ${(e as Error).message}` }); }
   } else if (body.theme && typeof body.theme === 'object') input.theme = body.theme;
-  if (!input.google && !input.placeId) return res.status(400).json({ error: 'google (link, place ID, or name + ZIP) or placeId is required' });
+  if (!input.google && !input.placeId && !input.website) return res.status(400).json({ error: 'google (link, place ID, or name + ZIP), placeId or website is required' });
   const job = startBuild(input, { source: body.source === 'studio' ? 'studio' : 'api' });
   if (req.query.wait === '1' || body.wait === true) {
     await waitForJob(job);
@@ -232,6 +233,13 @@ app.post('/api/sites/:slug/publish', wrap(async (req, res) => {
   res.json(await publishSite(String(req.params.slug)));
 }));
 // what stops this site being published (Studio): reviewed facts, sample content, unconfirmed prices
+// Re-resolve a site whose saved business identity isn't a business (a postal code, a town) and rebuild its pages in place
+app.post('/api/sites/:slug/re-resolve', wrap(async (req, res) => {
+  const { repairIdentity } = await import('./repair.js');
+  const r = await repairIdentity({ slug: req.params.slug }, { force: req.body?.force === true });
+  res.status(r.repaired || !r.problem ? 200 : 422).json({ slug: r.slug, problem: r.problem, repaired: r.repaired, message: r.message, siteUrl: r.build?.siteUrl, business: r.build?.business, review: r.build?.review });
+}));
+
 app.get('/api/sites/:slug/readiness', wrap(async (req, res) => {
   const d = await findDraft({ slug: String(req.params.slug) });
   if (!d) return res.json({ ready: false, items: [{ key: 'content', level: 'blocker', message: 'This site was built before business details could be reviewed. Rebuild it to publish.' }] });

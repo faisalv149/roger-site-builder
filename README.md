@@ -147,6 +147,10 @@ Unknown keys are accepted and reported as warnings (the old uploader rejected th
 
 Generated sites use three versioned page families (Editorial Showcase, Warm Local, Bold Practical), each pinned in the design plan with an explicit upgrade. Sites are one or several pages by content. Owners review business details and photos before anything is published; the server enforces it. See [docs/page-families.md](docs/page-families.md) and [docs/seo-and-publishing.md](docs/seo-and-publishing.md). Visual comparison: Studio → a draft → Compare (`/app/compare.html`).
 
+## Identity, extraction and checks
+
+A Google result is used as the business only when it checks out against the business's own website (never a postal code or town); otherwise the build goes on from the website. Every build reports what each extractor found and runs content checks before delivery. See [docs/identity-and-extraction.md](docs/identity-and-extraction.md). To rebuild a site saved with a wrong identity: `npm run repair:identity -- --scan` then `npm run repair:identity -- <slug>`.
+
 ## Layout
 
 ```

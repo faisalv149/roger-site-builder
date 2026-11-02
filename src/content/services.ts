@@ -28,14 +28,15 @@ export function pickServices(
   scan: WebsiteScan | undefined,
   mentioned: string[] = [],
   blurbs: Record<string, string> = {},
-  opts: { emergencyOk?: boolean; own?: { name: string; description: string; icon: string }[] } = {},
+  opts: { emergencyOk?: boolean; own?: { name: string; description: string; icon: string }[]; ownFromWebsite?: boolean } = {},
 ): { items: ServiceItem[]; matched: number; overflow: boolean; hidden: boolean; source: 'business' | 'theme' } {
   const rules = (theme.sectionRules.services || {}) as { min?: number; max?: number };
   const max = rules.max ?? 6;
   const min = rules.min ?? 3;
 
   const own = opts.own || [];
-  if (own.length >= min) {
+  // services the business's own website lists are kept even when there are fewer than the theme's minimum: dropping them would hide what it offers
+  if (own.length >= min || (opts.ownFromWebsite && own.length > 0)) {
     const ids = new Set<string>();
     const items: ServiceItem[] = own.slice(0, max).map((s) => {
       let id = slugify(s.name) || 'service';

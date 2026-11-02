@@ -43,6 +43,7 @@ export const OFFERINGS_ROUTE: Record<Category, { route: string; label: string; i
   trades: { route: 'services', label: 'Services', itemPages: true },
   professional: { route: 'services', label: 'Services', itemPages: true },
   general: { route: 'services', label: 'Services', itemPages: true },
+  health: { route: 'services', label: 'Services', itemPages: true },
   salon: { route: 'treatments', label: 'Treatments', itemPages: true },
   food: { route: 'menu', label: 'Menu', itemPages: false },
   fitness: { route: 'memberships', label: 'Memberships', itemPages: false },
@@ -61,13 +62,14 @@ export interface SitePlanInput {
 }
 
 /** an offering earns its own page with a real description (not just a name and a price) */
-export const MIN_OFFERING_TEXT = 60;
+export const MIN_OFFERING_TEXT = 100;
 
 export function buildSitePlan(i: SitePlanInput): SitePlan {
   const o = OFFERINGS_ROUTE[i.category];
   const offerings = i.offerings.filter((x) => !x.omitted);
   const itemPages = o.itemPages ? offerings.filter((x) => (x.description?.length ?? 0) >= MIN_OFFERING_TEXT).slice(0, 8) : [];
-  const aboutUseful = !!i.about.intro && i.about.intro.length >= 80 && (i.about.team || !!i.about.years || i.about.trust > 0 || i.about.reviews >= 2);
+  // an About page must say more than the home page already does: people or facts, or a story long enough to need its own page
+  const aboutUseful = !!i.about.intro && i.about.intro.length >= 80 && (i.about.team || !!i.about.years || i.about.trust > 0 || (i.about.reviews >= 2 && i.about.intro.length >= 600));
   const contactUseful = i.contact.address || i.contact.hours;
   // enough distinct content for more than one page: a real offerings list plus somewhere to visit or more to say
   const autoMulti = offerings.length >= 4 && contactUseful && (itemPages.length >= 2 || aboutUseful || offerings.length >= 6);

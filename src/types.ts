@@ -12,6 +12,10 @@ export interface Photo {
   localPath?: string;
   publicPath?: string;
   isOwner?: boolean;
+  /** where the image came from: Google's photos, or the business's own website (its own images) */
+  source?: 'google' | 'website';
+  /** website photos: the page it was found on and what the page said it shows */
+  origin?: { pageUrl?: string; alt?: string; role?: string };
   /**
    * What the photo shows. Live photos get this from the vision step (src/design/photos.ts); sample fixtures carry
    * it pre-filled as a stand-in for that step, the same way they stand in for the Places API.
@@ -67,7 +71,22 @@ export interface Business {
   offerings?: { name: string; description?: string; duration?: string; price?: { kind: string; amount?: number; max?: number; unit?: string; currency?: string }; source?: 'sample' | 'business' }[];
   /** ISO currency for prices (sample fixtures; otherwise from the country) */
   currency?: string;
-  source: 'places' | 'mock';
+  source: 'places' | 'mock' | 'website';
+  /** how this identity was established, and what it was checked against (src/sources/identity.ts) */
+  identity?: IdentityRecord;
+}
+
+/** Evidence behind the business identity. A website the user supplied is never counted as Google confirming it. */
+export interface IdentityRecord {
+  source: 'google' | 'website' | 'mock';
+  status: 'verified' | 'probable' | 'website-only' | 'unverified';
+  evidence: string[];
+  /** Google candidates that were looked at and turned down, with why */
+  rejected: { placeId: string; name: string; reason: string }[];
+  /** the website the identity was read from */
+  websiteDomain?: string;
+  /** whether the website is the one Google itself lists for the business */
+  googleListsWebsite?: boolean;
 }
 
 export interface BusinessCandidate {
@@ -80,6 +99,16 @@ export interface BusinessCandidate {
   website?: string;
   mapsUrl?: string;
   photoRef?: string;
+  /** Google's place types: a postal code or a town is not a business */
+  types?: string[];
+  primaryType?: string;
+  phone?: string;
+  /** the website Google lists for the place (never a URL the user supplied) */
+  googleWebsite?: string;
+  /** how well the candidate matches the website the user gave, when there is one */
+  match?: { score: number; verdict: 'verified' | 'probable' | 'rejected'; evidence: string[]; reason?: string };
+  /** no Google listing was matched: the identity comes from the website alone */
+  fromWebsite?: boolean;
 }
 
 export interface WebsiteScan {
@@ -104,6 +133,12 @@ export interface WebsiteScan {
   emails: string[];
   socials: { network: string; url: string }[];
   images: { src: string; alt?: string; width?: string; height?: string }[];
+  /** what the page says about the business: identity, services, booking, story, media (src/sources/site-content.ts) */
+  content?: import('./sources/site-content.js').SiteContent;
+  /** the content was read after running the page's scripts in a browser */
+  rendered?: boolean;
+  /** how the page is styled when rendered: colours by use, buttons, typefaces (src/sources/brand-profile.ts) */
+  brandRaw?: import('./sources/brand-profile.js').RawBrand;
 }
 
 export interface BrandResult {

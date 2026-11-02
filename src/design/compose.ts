@@ -12,7 +12,7 @@ import { formatPrice, hasSamplePrices, toServiceItems, type Offering } from './o
 import { appearanceCss, resolveAppearance, type ResolvedAppearance } from './appearance.js';
 
 /** One offering as the page shows it: escaped at render time like all text. */
-export interface OfferingView { id: string; name: string; description?: string; duration?: string; price: string; priced: boolean; sample: boolean; icon: string; unit?: string; /** the price itself, for structured data */ priceData?: { kind: string; amount?: number; max?: number; currency: string; unit?: string } }
+export interface OfferingView { id: string; name: string; description?: string; duration?: string; /** a condition the source states ("By appointment only") */ note?: string; /** a booking or contact destination for this offering alone */ contact?: { kind: string; url: string; label: string }; /** the picture on this offering's own card */ image?: import('./offerings.js').ServiceImage; price: string; priced: boolean; sample: boolean; icon: string; unit?: string; /** the price itself, for structured data */ priceData?: { kind: string; amount?: number; max?: number; currency: string; unit?: string } }
 
 /** What the design renderers (src/render/design-sections.ts) need beyond the regular site model. */
 export interface DesignModel {
@@ -43,6 +43,10 @@ export interface DesignModel {
   /** the owner's saved appearance, as CSS variables (empty when nothing was customised) */
   appearance?: ResolvedAppearance;
   appearanceCss: string;
+  /** the business's own colour roles and type, from its website (loaded before the owner's appearance, which wins) */
+  brandCss?: string;
+  /** what was adjusted or substituted when the brand was applied, and why */
+  brandNotes?: string[];
   motion: 'off' | 'subtle' | 'expressive';
 }
 
@@ -79,8 +83,9 @@ export function processSteps(goal: Goal, name: string, phone: string | undefined
   return p.process(name);
 }
 
-/** A short introduction from verified data only: Google's own summary, or what and where the business is. */
-function introText(b: Business, f: Facts, p: CategoryProfile): string | undefined {
+/** A short introduction from verified data only: the business's own story from its website, Google's own summary, or what and where the business is. */
+function introText(b: Business, f: Facts, p: CategoryProfile, story?: string): string | undefined {
+  if (story) return story;
   if (b.editorialSummary) return b.editorialSummary;
   const kind = b.primaryTypeLabel && !/establishment|point of interest/i.test(b.primaryTypeLabel) ? b.primaryTypeLabel.toLowerCase() : p.label.toLowerCase();
   const where = f.city ? ` in ${f.city}` : '';
@@ -128,7 +133,7 @@ export async function finishModel(m: SiteModel, plan: DesignPlan, opts: FinishOp
   const offerings: OfferingView[] = opts.offerings
     .slice()
     .sort((a, c) => rank(a.id) - rank(c.id))
-    .map((o) => ({ id: o.id, name: o.name, description: o.description, duration: o.duration, price: formatPrice(o.price, plan.category), priced: o.price.kind !== 'quote', sample: o.source === 'sample', icon: o.icon || 'circle-check', unit: o.price.unit, priceData: o.price.kind !== 'quote' ? o.price : undefined }));
+    .map((o) => ({ id: o.id, name: o.name, description: o.description, duration: o.duration, note: o.note, contact: o.contact, image: o.image, price: formatPrice(o.price, plan.category), priced: o.price.kind !== 'quote', sample: o.source === 'sample', icon: o.icon || 'circle-check', unit: o.price.unit, priceData: o.price.kind !== 'quote' ? o.price : undefined }));
 
   const byKey = new Map(opts.photos.map((p) => [p.key, p]));
   const crop = async (key: string | null, use: Parameters<typeof cropSpec>[0], name: string, alt: string) => {
@@ -169,13 +174,14 @@ export async function finishModel(m: SiteModel, plan: DesignPlan, opts: FinishOp
     others,
     offerings,
     samplePrices: hasSamplePrices(opts.offerings),
-    intro: introText(b, f, profile),
+    intro: introText(b, f, profile, m.source?.story?.text),
     steps: processSteps(plan.goal, b.name, phoneOk ? m.contact.phone : undefined, profile),
     band: DIRECTION_PRESETS[plan.direction].band,
     phoneOk,
     emergencyLine,
-    headerLabel: plan.goal === 'call' ? 'Send a request' : profile.actions[plan.goal].replace(/^Request an? /, 'Request '),
-    actionLabel: profile.actions[plan.goal === 'call' ? (profile.goals.find((g) => g !== 'call') ?? 'enquiry') : plan.goal],
+    // the business's own online booking page, when its website has one, is what the main action opens
+    headerLabel: m.source?.booking && plan.goal === 'appointment' ? m.source.booking.label : plan.goal === 'call' ? 'Send a request' : profile.actions[plan.goal].replace(/^Request an? /, 'Request '),
+    actionLabel: m.source?.booking && plan.goal === 'appointment' ? m.source.booking.label : profile.actions[plan.goal === 'call' ? (profile.goals.find((g) => g !== 'call') ?? 'enquiry') : plan.goal],
     appearance,
     appearanceCss: appearance ? appearanceCss(appearance) : '',
     motion: appearance?.motion ?? opts.appearance?.motion ?? 'subtle',

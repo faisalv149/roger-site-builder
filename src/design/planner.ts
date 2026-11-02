@@ -50,6 +50,8 @@ export interface PlanInput {
   /** owner layout choices from the preview (each one locks its dimension) */
   layout?: LayoutChoice;
   advice?: DesignAdvice;
+  /** the business's own story, read from its website: it always gets a section, whatever the arrangement */
+  story?: boolean;
   /** brand tokens for a direction (the brand colour resolved against that direction's surfaces) */
   tokens: (direction: Direction, typography: TypePreset) => DesignPlan['tokens'];
   now?: string;
@@ -206,6 +208,8 @@ function recommendDirection(i: PlanInput, emergencyVerified: boolean, roles: Pho
     case 'professional':
       if (strongPhotos) return { d: 'modern-premium', why: 'professional services with strong photos: an editorial look' };
       return roles.hero ? { d: 'local-trusted', why: 'professional services where the people matter: warm and credible' } : { d: 'bold-direct', why: 'professional services without photos: a clear, type-led page' };
+    case 'health':
+      return { d: 'local-trusted', why: 'a health clinic: warm, clear and reassuring, with booking up front' };
     case 'shop':
       return strongPhotos ? { d: 'modern-premium', why: 'a shop with strong product photos' } : { d: 'local-trusted', why: 'a local shop: welcoming, with hours and location up front' };
     case 'general':
@@ -431,6 +435,11 @@ function planOnce(i: PlanInput, gen?: { seed: string; variation: number; generat
       : [S('hero', heroVariant), intro, services, gallery, proof, team, process, quote, area, S('footer', 'minimal')];
   }
   const list = sections.filter(Boolean) as DesignPlan['sections'];
+  // the business's own words are content to keep: if the arrangement left out the introduction, it goes after the offerings
+  if (i.story && C.sections.intro && !list.some((s) => s.id === 'intro')) {
+    const at = list.findIndex((s) => s.id === 'services' || s.id === 'focus');
+    list.splice(at >= 0 ? at + 1 : 1, 0, S('intro', introVariant));
+  }
   const ids = new Set(list.map((s) => s.id));
   if (!roles.team) reasons.push('No team section: no photo is confirmed to show the team');
   if (!ids.has('gallery')) reasons.push(`No gallery: ${pool.length} photo${pool.length === 1 ? '' : 's'} left for it`);

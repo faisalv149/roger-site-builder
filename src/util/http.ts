@@ -12,10 +12,25 @@ export interface FetchResult {
   error?: string;
 }
 
-/** fetch with timeout, size cap, and a recorded redirect chain. */
+/** Some CDNs (Wix, Squarespace) reset connections from unknown clients; a browser's identity is what a visitor's request looks like. */
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+
+/** fetch with timeout, size cap, and a recorded redirect chain. A connection that is reset is retried once as a browser. */
 export async function fetchRaw(
   url: string,
-  opts: { timeoutMs?: number; maxBytes?: number; method?: string; headers?: Record<string, string>; body?: string } = {},
+  opts: { timeoutMs?: number; maxBytes?: number; method?: string; headers?: Record<string, string>; body?: string; asBrowser?: boolean } = {},
+): Promise<FetchResult> {
+  const first = await fetchOnce(url, opts);
+  if (first.status === 0 && !opts.asBrowser && !opts.headers?.['user-agent'] && /fetch failed|ECONNRESET|socket|terminated/i.test(first.error || '')) {
+    const again = await fetchOnce(url, { ...opts, asBrowser: true });
+    if (again.ok || again.status) return again;
+  }
+  return first;
+}
+
+async function fetchOnce(
+  url: string,
+  opts: { timeoutMs?: number; maxBytes?: number; method?: string; headers?: Record<string, string>; body?: string; asBrowser?: boolean },
 ): Promise<FetchResult> {
   const timeoutMs = opts.timeoutMs ?? 12000;
   const maxBytes = opts.maxBytes ?? 6_000_000;
@@ -30,7 +45,7 @@ export async function fetchRaw(
         method: opts.method || 'GET',
         redirect: 'manual',
         signal: ctrl.signal,
-        headers: { 'user-agent': config.userAgent, accept: '*/*', 'accept-language': 'en-US,en;q=0.9', ...(opts.headers || {}) },
+        headers: { 'user-agent': opts.asBrowser ? BROWSER_UA : config.userAgent, accept: '*/*', 'accept-language': 'en-US,en;q=0.9', ...(opts.headers || {}) },
         body: opts.body,
       });
       const ttfbMs = Date.now() - started;

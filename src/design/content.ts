@@ -90,7 +90,9 @@ const fresh = (): Review => ({ status: 'unreviewed' });
 
 /** Initial content from what the build found. Sample fixtures mark everything as sample. */
 export function contentFromBuild(b: Business, f: Facts, photos: PhotoMeta[], opts: { description?: string; goal?: Goal; sample: boolean; fetchedAt: string }): SiteContent {
-  const src = (s: FactSource): Provenance => ({ source: opts.sample ? 'sample' : s, ref: s === 'google' ? `place:${b.placeId}` : undefined, fetchedAt: opts.fetchedAt });
+  // a business known only from its own website has no Google record behind its name, phone or address
+  const listed: FactSource = b.source === 'website' ? 'website' : 'google';
+  const src = (s: FactSource): Provenance => ({ source: opts.sample ? 'sample' : s === 'google' ? listed : s, ref: s === 'google' && listed === 'google' ? `place:${b.placeId}` : s === 'google' ? b.website : undefined, fetchedAt: opts.fetchedAt });
   const claim = (s: FactSource, conf: number): Provenance => ({ ...src(s), confidence: conf });
   const fromSite: FactSource = f.source === 'claude' ? 'claude' : 'website';
   const facts: ContentFacts = { name: { value: b.name, provenance: src('google'), review: fresh() } };
@@ -164,6 +166,8 @@ const mediaEditSchema = z.object({
   alt: text(160).optional(),
   focal: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().nullable().optional(),
   order: z.number().int().min(0).max(999).optional(),
+  /** "this photo is mine to publish": only for pictures taken from the owner's current website */
+  ownership: z.literal('mine').optional(),
 }).strict();
 
 export function editMedia(c: SiteContent, raw: unknown): SiteContent {
@@ -176,6 +180,10 @@ export function editMedia(c: SiteContent, raw: unknown): SiteContent {
   if (r.data.alt !== undefined) m.alt = r.data.alt || m.alt;
   if (r.data.focal !== undefined) { if (r.data.focal === null) delete m.focal; else m.focal = r.data.focal; }
   if (r.data.order !== undefined) m.order = r.data.order;
+  if (r.data.ownership === 'mine') {
+    if (m.source !== 'website') throw new ContentError('Only photos taken from your current website can be confirmed this way. Upload your own photo instead.');
+    m.publishable = true;
+  }
   const media = c.media.slice();
   media[i] = m;
   // one hero and one team photo at a time
@@ -251,6 +259,7 @@ export function publishReadiness(c: SiteContent | undefined, offerings: Offering
     else if (o.price.kind !== 'quote' && o.source !== 'owner') out.push({ key: `offering:${o.id}`, level: 'blocker', message: `Confirm the price of "${o.name}" (${o.source === 'website' ? 'from your website' : 'not from you'}).` });
   }
   for (const m of c.media) if (m.source === 'sample' && m.role !== 'omit') out.push({ key: `media:${m.key}`, level: 'warning', message: 'A sample photo will be left out of the published site.' });
+  if (c.media.some((m) => m.source === 'website' && !m.publishable && m.role !== 'omit')) out.push({ key: 'media-website', level: 'warning', message: 'Photos from your current website show in the preview. Confirm they are yours to publish, or upload others.' });
   if (c.media.some((m) => m.source === 'google' && m.role !== 'omit')) out.push({ key: 'media', level: 'warning', message: 'Photos from Google stay in the preview only. Upload your own photos to show them on the published site.' });
   if (!c.media.some((m) => m.publishable && m.role !== 'omit')) out.push({ key: 'media-none', level: 'warning', message: 'No photos of your own yet: the published site will use a text-only design.' });
   return out;
