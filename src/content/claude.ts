@@ -83,6 +83,46 @@ export async function claudeJson<T>(opts: {
 }
 
 /**
+ * Structured JSON about images (small JPEG thumbnails). API only: the local CLI mode runs without tools, so it
+ * can't read images; callers fall back to deterministic rules. Returns null on any failure or timeout.
+ */
+export async function claudeVisionJson<T>(opts: {
+  system: string;
+  prompt: string;
+  images: Buffer[];
+  toolName: string;
+  toolDescription: string;
+  schema: Record<string, unknown>;
+  timeoutMs?: number;
+}): Promise<{ data: T; ms: number } | null> {
+  if (claudeVia() !== 'api' || !opts.images.length) return null;
+  const started = Date.now();
+  try {
+    const content = [
+      ...opts.images.flatMap((b, i) => [
+        { type: 'text' as const, text: `Photo ${i}:` },
+        { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/jpeg' as const, data: b.toString('base64') } },
+      ]),
+      { type: 'text' as const, text: opts.prompt },
+    ];
+    const res = await getClient().messages.create({
+      model: config.anthropicModel,
+      max_tokens: 1000,
+      system: opts.system,
+      tools: [{ name: opts.toolName, description: opts.toolDescription, input_schema: opts.schema as any }],
+      tool_choice: { type: 'tool', name: opts.toolName },
+      messages: [{ role: 'user', content }],
+    }, { timeout: opts.timeoutMs ?? 20_000, maxRetries: 0 });
+    const block = res.content.find((c) => c.type === 'tool_use');
+    if (!block || block.type !== 'tool_use') return null;
+    return { data: block.input as T, ms: Date.now() - started };
+  } catch (e) {
+    console.warn(`[claude api] ${opts.toolName} failed: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/**
  * One `claude -p` run with schema-validated output. Prompts carry scraped website text and reviews, so the
  * CLI gets no tools, no MCP servers and no user settings (hooks), and runs in an empty temp folder.
  */

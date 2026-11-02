@@ -55,12 +55,12 @@ export function lightbox(m: SiteModel): string {
 }
 
 /* ───────────── Roger widget ───────────── */
-const DEMO_PHONE = { display: '(555) 010-0199', tel: 'tel:+15550100199' }; // 555-01xx is reserved for fiction
 
 export function rogerWidget(m: SiteModel): string {
   if (m.theme.roger.widget === false) return '';
   const name = esc(m.business.name);
-  const phone = m.contact.phone ? { display: m.contact.phone, tel: m.contact.tel! } : DEMO_PHONE;
+  // no phone on Google: no number is invented; the call panel offers a call back instead
+  const phone = m.contact.phone && m.contact.tel ? { display: m.contact.phone, tel: m.contact.tel } : undefined;
   const field = (id: string, label: string, type: string, auto: string) => `<label class="rw-f" for="${id}">${label}<input id="${id}" name="${type === 'tel' ? 'phone' : 'name'}" type="${type}" autocomplete="${auto}" required${type === 'tel' ? ' inputmode="tel"' : ''}></label>`;
   const panelHead = (id: string, title: string, sub = '') => `<header class="rw-ph"><span class="rw-ava" aria-hidden="true">R</span><span class="rw-pt"><b id="${id}">${title}</b>${sub ? `<small>${sub}</small>` : ''}</span><button type="button" class="rw-x" data-rw-close aria-label="Close">${icon('x', { size: 20 })}</button></header>`;
   return `<div class="rw" data-rw data-state="closed">
@@ -86,11 +86,11 @@ export function rogerWidget(m: SiteModel): string {
   <section class="rw-panel" data-panel="call" role="dialog" aria-labelledby="rw-call-h" hidden>
     ${panelHead('rw-call-h', `Call ${name}`)}
     <div class="rw-pb rw-call">
-      <a class="rw-num" href="${esc(phone.tel)}" data-ev="call">${icon('phone-call', { size: 22 })}${esc(phone.display)}</a>
+      ${phone ? `<a class="rw-num" href="${esc(phone.tel)}" data-ev="call">${icon('phone-call', { size: 22 })}${esc(phone.display)}</a>
       <p class="rw-status" data-rw-status></p>
-      <a class="rw-cta" href="${esc(phone.tel)}" data-ev="call">${icon('phone', { size: 18 })} Call now</a>
+      <a class="rw-cta" href="${esc(phone.tel)}" data-ev="call">${icon('phone', { size: 18 })} Call now</a>` : `<p class="rw-status">Leave your number and ${name} will call you back.</p>`}
       ${m.contact.sms ? `<a class="rw-cta ghost" href="${esc(m.contact.sms)}" data-ev="text">${icon('message-square', { size: 18 })} Text instead</a>` : ''}
-      <details class="rw-cb"><summary>Prefer a call back?</summary>
+      <details class="rw-cb"${phone ? '' : ' open'}><summary>${phone ? 'Prefer a call back?' : 'Request a call back'}</summary>
         <form class="rw-form" data-rw-form="callback">${field('rw-cn', 'Your name', 'text', 'name')}${field('rw-cp', 'Mobile phone', 'tel', 'tel')}<button class="rw-cta" type="submit">Call me back</button></form>
         <div class="rw-ok" data-rw-ok hidden>${icon('circle-check', { size: 36 })}<b>Got it</b><span>${name} will call you back shortly.</span></div>
       </details>
@@ -99,7 +99,7 @@ export function rogerWidget(m: SiteModel): string {
   <div class="rw-dock" role="toolbar" aria-label="Contact ${name}">
     <button type="button" class="rw-btn" data-open="book" aria-expanded="false">${icon('calendar-days', { size: 24 })}<span>Book</span></button>
     <button type="button" class="rw-btn" data-open="chat" aria-expanded="false">${icon('message-circle-more', { size: 24 })}<span>Chat</span><i class="rw-dot" aria-hidden="true"></i></button>
-    <button type="button" class="rw-btn" data-open="call" aria-expanded="false">${icon('phone-call', { size: 24 })}<span>Call</span></button>
+    <button type="button" class="rw-btn" data-open="call" aria-expanded="false">${icon('phone-call', { size: 24 })}<span>${phone ? 'Call' : 'Call back'}</span></button>
     <button type="button" class="rw-min" data-rw-min aria-label="Minimize">${icon('minus', { size: 16 })}</button>
   </div>
   <button type="button" class="rw-launch" data-rw-max aria-label="Book, chat or call ${name}">${icon('message-circle-more', { size: 26 })}<i class="rw-dot" aria-hidden="true"></i></button>
@@ -250,7 +250,7 @@ html.lb-lock{overflow:hidden}
 
 /* ───────────── JS ───────────── */
 export const WIDGETS_JS = (m: SiteModel) => {
-  const phone = m.contact.phone || DEMO_PHONE.display;
+  const phone = m.contact.phone || '';
   const cfg = {
     name: m.business.name,
     phone,
@@ -345,7 +345,7 @@ export const WIDGETS_JS = (m: SiteModel) => {
     form.addEventListener('submit',function(ev){ev.preventDefault();var fd=new FormData(form),btn=form.querySelector('button[type=submit]');btn.disabled=true;
       send(kind,{name:fd.get('name'),phone:fd.get('phone')},typeof extra==='function'?extra():extra)
         .then(function(){onOk(fd.get('name'))})
-        .catch(function(){btn.disabled=false;btn.textContent='Could not send. Call '+C.phone})});
+        .catch(function(){btn.disabled=false;btn.textContent=C.phone?'Could not send. Call '+C.phone:'Could not send. Please try again'})});
   }
 
   /* open now (shared with the hours section) */
@@ -380,10 +380,10 @@ export const WIDGETS_JS = (m: SiteModel) => {
       msgs.appendChild(f);msgs.scrollTop=1e9;f.querySelector('input').focus();
       wire(f,'Chat',function(){return talk.join('\\n')},function(n){f.remove();bubble('Sent','u');roger('Thanks '+String(n).split(' ')[0]+'! '+C.name+' has your message and will reach out soon.')})})}
   function userSays(t){bubble(t,'u');var s=t.toLowerCase();
-    if(/hour|open|close/.test(s)) roger(C.hours.length?'Our hours:\\n'+C.hours.join('\\n'):'Call us at '+C.phone+' and we will let you know.',function(){chips(['Book a visit','Get a quote','Call me back'])});
+    if(/hour|open|close/.test(s)) roger(C.hours.length?'Our hours:\\n'+C.hours.join('\\n'):C.phone?'Call us at '+C.phone+' and we will let you know.':'Leave your number and we will let you know.',function(){chips(['Book a visit','Get a quote','Call me back'])});
     else if(/book|visit|appoint|schedul/.test(s)) roger('Sure. Pick a day and time and we will confirm by text.',function(){setTimeout(function(){open('book')},500)});
     else if(/quote|price|cost|estimate/.test(s)&&!asked) roger('Happy to help. What do you need?',function(){chips(C.services.concat(['Something else']))});
-    else if(/call|phone|ring/.test(s)) roger('You can call us at '+C.phone+', or I can have someone call you back.',askContact);
+    else if(/call|phone|ring/.test(s)) roger(C.phone?'You can call us at '+C.phone+', or I can have someone call you back.':'Leave your number and someone will call you back.',askContact);
     else askContact();
   }
   function chatStart(){ if(chatReady) return; chatReady=true;

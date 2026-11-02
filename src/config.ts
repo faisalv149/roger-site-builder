@@ -76,6 +76,10 @@ export const config = {
   vercelApi: (process.env.VERCEL_API_URL || 'https://api.vercel.com').replace(/\/$/, ''), // overridable for tests
   googleKey,
   pagespeedKey: process.env.PAGESPEED_API_KEY || googleKey,
+  /** Google PageSpeed Insights in website audits (src/audit/pagespeed.ts). PAGESPEED=0 turns it off. */
+  pagespeed: process.env.PAGESPEED !== '0',
+  /** Google's Lighthouse run usually takes 10-40 s; a very slow site can take longer */
+  pagespeedTimeoutMs: Number(process.env.PAGESPEED_TIMEOUT_MS || 110_000),
   anthropicKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
   /** Local demos without an API key: answer through the signed-in Claude Code CLI (`claude -p`). An API key wins. */
@@ -84,7 +88,21 @@ export const config = {
   /** Your iMessage gateway's send endpoint: messages Roger sends later (the preview after "On it") are POSTed here as { from, replies } */
   imessageOutboundUrl: process.env.IMESSAGE_OUTBOUND_URL || '',
   mock: process.env.MOCK === '1' || !googleKey,
+  /** Personalisation pilot (src/design): automatic plumbing builds get a design plan. DESIGN_PILOT=0 turns it off. */
+  designPilot: process.env.DESIGN_PILOT !== '0',
   leadWebhook: process.env.LEAD_WEBHOOK_URL || '',
+  /**
+   * Demo checkout in the owner preview (src/orders.ts): records a demo order, takes no payment, buys no domain and
+   * deploys nothing. The sample package is configurable; it is never the business's own prices.
+   */
+  demoCheckout: process.env.DEMO_CHECKOUT !== '0',
+  demoPackage: {
+    name: process.env.DEMO_PACKAGE_NAME || 'Roger Website',
+    amount: Number(process.env.DEMO_PACKAGE_PRICE || 29),
+    currency: (process.env.DEMO_PACKAGE_CURRENCY || 'USD').toUpperCase(),
+    cadence: (process.env.DEMO_PACKAGE_CADENCE || 'month') as 'month' | 'year' | 'one-time',
+    features: (process.env.DEMO_PACKAGE_FEATURES || 'Your saved design, hosted and kept online|Connect your own domain, with HTTPS|Customer requests sent to you by text|Edit colours, fonts and prices any time').split('|'),
+  },
   /** Roger's iMessage address (phone or Apple ID email). Used for "Claim this site" links on previews. */
   rogerImessage: process.env.ROGER_IMESSAGE_ADDRESS || '',
   chromiumPath: detectChromium(),
@@ -95,6 +113,7 @@ export const config = {
     sites: path.join(OUT, 'sites'),
     reports: path.join(OUT, 'reports'),
     cards: path.join(OUT, 'cards'),
+    orders: path.join(OUT, 'orders'),
     data: DATA, // saved builds, conversations, leads, uploaded themes
     public: path.join(ROOT, 'public'),
     fixtures: path.join(ROOT, 'fixtures'),

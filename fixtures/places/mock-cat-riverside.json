@@ -1,0 +1,199 @@
+{
+  "placeId": "mock-cat-riverside",
+  "name": "Riverside Heating, Cooling & Indoor Air Quality Specialists",
+  "primaryType": "hvac_contractor",
+  "primaryTypeLabel": "HVAC contractor",
+  "types": [
+    "hvac_contractor",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "1415 L St, Sacramento, CA 95814, USA",
+  "shortAddress": "1415 L St, Sacramento",
+  "street": "1415 L St",
+  "city": "Sacramento",
+  "state": "CA",
+  "zip": "95814",
+  "country": "US",
+  "phone": "(916) 555-0174",
+  "phoneE164": "+19165550174",
+  "mapsUrl": "https://maps.google.com/?q=Riverside%20Heating%2C%20Cooling%20%26%20Indoor%20Air%20Quality%20Specialists",
+  "rating": 4.4,
+  "reviewCount": 23,
+  "reviews": [
+    {
+      "author": "Gabe Ortiz",
+      "rating": 5,
+      "text": "Replaced our furnace quickly and walked us through the thermostat.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Mina Shah",
+      "rating": 4,
+      "text": "Good AC tune-up, arrived in the window they gave.",
+      "relativeTime": "2 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-riverside-0.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Riverside Heating, Cooling & Indoor Air Quality Specialists"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "vehicle"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-riverside-1.jpg",
+      "width": 1400,
+      "height": 933,
+      "authors": [
+        {
+          "name": "Riverside Heating, Cooling & Indoor Air Quality Specialists"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 18,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 7:00 AM – 6:00 PM",
+      "Tuesday: 7:00 AM – 6:00 PM",
+      "Wednesday: 7:00 AM – 6:00 PM",
+      "Thursday: 7:00 AM – 6:00 PM",
+      "Friday: 7:00 AM – 6:00 PM",
+      "Saturday: 7:00 AM – 6:00 PM",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Sacramento",
+    "West Sacramento",
+    "Elk Grove",
+    "Roseville",
+    "Folsom",
+    "Davis"
+  ],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Furnace repair and replacement",
+      "description": "Gas and electric furnaces, same-day diagnosis where possible.",
+      "source": "business"
+    },
+    {
+      "name": "Air conditioning service",
+      "source": "business"
+    },
+    {
+      "name": "Heat pumps",
+      "source": "business"
+    },
+    {
+      "name": "Indoor air quality testing",
+      "source": "business"
+    },
+    {
+      "name": "Duct cleaning and sealing",
+      "source": "business"
+    },
+    {
+      "name": "Thermostats and zoning",
+      "source": "business"
+    },
+    {
+      "name": "Maintenance plans",
+      "source": "business"
+    },
+    {
+      "name": "Commercial HVAC",
+      "source": "business"
+    }
+  ],
+  "qaNote": "long business name, many offerings without prices, modest photos, wide service area"
+}

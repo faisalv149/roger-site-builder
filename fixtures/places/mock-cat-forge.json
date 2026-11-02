@@ -1,0 +1,261 @@
+{
+  "placeId": "mock-cat-forge",
+  "name": "Forge Strength Club",
+  "primaryType": "gym",
+  "primaryTypeLabel": "Gym",
+  "types": [
+    "gym",
+    "fitness_center",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "2901 Larimer St, Denver, CO 80205, USA",
+  "shortAddress": "2901 Larimer St, Denver",
+  "street": "2901 Larimer St",
+  "city": "Denver",
+  "state": "CO",
+  "zip": "80205",
+  "country": "US",
+  "phone": "(720) 555-0163",
+  "phoneE164": "+17205550163",
+  "mapsUrl": "https://maps.google.com/?q=Forge%20Strength%20Club",
+  "rating": 4.9,
+  "reviewCount": 96,
+  "reviews": [
+    {
+      "author": "Chris Vega",
+      "rating": 5,
+      "text": "Coaches actually watch your form. Strongest I have been.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Dana Wu",
+      "rating": 5,
+      "text": "Classes are tough but welcoming for beginners.",
+      "relativeTime": "2 months ago"
+    },
+    {
+      "author": "Eli Ford",
+      "rating": 5,
+      "text": "Clean, well-equipped, never too crowded at 6am.",
+      "relativeTime": "3 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-forge-0.jpg",
+      "width": 2400,
+      "height": 1600,
+      "authors": [
+        {
+          "name": "Forge Strength Club"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-forge-1.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Forge Strength Club"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-forge-2.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Forge Strength Club"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "team"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-forge-3.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Forge Strength Club"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-forge-4.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Forge Strength Club"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "storefront"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 0,
+          "hour": 5,
+          "minute": 0
+        },
+        "close": {
+          "day": 0,
+          "hour": 21,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 1,
+          "hour": 5,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 21,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 5,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 21,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 5,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 21,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 5,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 21,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 5,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 21,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 5,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 21,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 5:00 AM – 9:00 PM",
+      "Tuesday: 5:00 AM – 9:00 PM",
+      "Wednesday: 5:00 AM – 9:00 PM",
+      "Thursday: 5:00 AM – 9:00 PM",
+      "Friday: 5:00 AM – 9:00 PM",
+      "Saturday: 5:00 AM – 9:00 PM",
+      "Sunday: 5:00 AM – 9:00 PM"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Monthly membership",
+      "price": {
+        "kind": "unit",
+        "amount": 59,
+        "unit": "month",
+        "currency": "USD"
+      },
+      "source": "sample",
+      "description": "Open gym, all equipment, 5am to 9pm."
+    },
+    {
+      "name": "Class pack",
+      "price": {
+        "kind": "fixed",
+        "amount": 150,
+        "currency": "USD"
+      },
+      "source": "sample",
+      "description": "Ten coached classes, use within three months."
+    },
+    {
+      "name": "Drop-in",
+      "price": {
+        "kind": "unit",
+        "amount": 20,
+        "unit": "session",
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Personal training",
+      "price": {
+        "kind": "from",
+        "amount": 65,
+        "currency": "USD"
+      },
+      "source": "sample",
+      "description": "One-to-one coaching sessions."
+    }
+  ],
+  "qaNote": "gym: memberships and classes with billing cadence (no trial offered, so none shown)"
+}

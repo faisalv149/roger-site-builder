@@ -4,11 +4,16 @@ import { esc } from '../util/text.js';
 import { buildCss } from './css.js';
 import { icon } from './icons.js';
 import { RENDERERS, type Ctx } from './sections.js';
+import { CAROUSEL_JS, DESIGN_RENDERERS } from './design-sections.js';
 import { WIDGETS_JS, lightbox, rogerWidget } from './widgets.js';
 
 const NAV: Record<string, [string, string]> = {
   services: ['#services', 'Services'],
+  focus: ['#services', 'Services'],
   gallery: ['#work', 'Our work'],
+  projects: ['#work', 'Our work'],
+  team: ['#team', 'Team'],
+  process: ['#process', 'How it works'],
   proof: ['#reviews', 'Reviews'],
   area: ['#area', 'Service area'],
   quote: ['#quote', 'Get a quote'],
@@ -44,10 +49,21 @@ function jsonLd(m: SiteModel) {
 }
 
 function fontLinks(m: SiteModel) {
-  return m.fonts.faces.map((f) => `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="${esc(f.url)}">`).join('');
+  if (!m.fonts.faces.length) return '';
+  // loaded without blocking the first paint: text shows in the fallback font, then swaps (display=swap)
+  return `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>${m.fonts.faces.map((f) => `<link rel="preload" as="style" href="${esc(f.url)}"><link rel="stylesheet" href="${esc(f.url)}" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="${esc(f.url)}"></noscript>`).join('')}`;
 }
 
-const CLIENT_JS = (m: SiteModel) => `
+/** Design builds preload the hero crop each screen size actually shows; typography-led heroes have no photo to preload. */
+function heroPreload(m: SiteModel) {
+  const d = m.design;
+  if (!d) return `<link rel="preload" as="image" href="${esc(m.images.hero.publicPath)}" fetchpriority="high">`;
+  const lead = d.heroImages || d.slides[0];
+  if (!lead) return '';
+  return `<link rel="preload" as="image" href="${esc(lead.mobile.publicPath)}" media="(max-width: 899px)" fetchpriority="high"><link rel="preload" as="image" href="${esc(lead.desktop.publicPath)}" media="(min-width: 900px)" fetchpriority="high">`;
+}
+
+export const CLIENT_JS = (m: SiteModel) => `
 document.documentElement.classList.add('js');
 (function(){
   // reveal on scroll
@@ -69,6 +85,9 @@ document.documentElement.classList.add('js');
     var names=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
     [].forEach.call(document.querySelectorAll('tr[data-day]'),function(tr){if(tr.getAttribute('data-day')===names[d]) tr.classList.add('today')});
   }
+  // appointment requests: no past dates
+  var today=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+  [].forEach.call(document.querySelectorAll('input[data-min-today]'),function(i){i.min=today});
   // lead forms → JSON POST
   [].forEach.call(document.querySelectorAll('form.lead-form'),function(f){
     f.addEventListener('submit',function(ev){
@@ -83,9 +102,11 @@ document.documentElement.classList.add('js');
 
 export function renderPage(m: SiteModel): string {
   const t = m.theme;
-  const order = t.sections.filter((s) => m.visible[s] !== false && RENDERERS[s]);
+  // personalised plumbing builds draw their sections with the direction renderers; every other theme as before
+  const R = m.design ? DESIGN_RENDERERS : RENDERERS;
+  const order = t.sections.filter((s) => m.visible[s] !== false && R[s]);
   // Real photos deserve a gallery: themes without one get a carousel before the quote form (or the area/footer)
-  const autoGallery = !t.sections.includes('gallery') && m.images.gallery.length >= 4;
+  const autoGallery = !m.design && !t.sections.includes('gallery') && m.images.gallery.length >= 4;
   if (autoGallery) { const at = ['quote', 'area', 'footer'].map((s) => order.indexOf(s)).find((i) => i >= 0) ?? order.length; order.splice(at, 0, 'gallery'); }
   const sidebar = t.grid.system === 'sidebar-12' && t.grid.sidebar ? t.grid.sidebar : undefined;
   const held = sidebar?.holds && order.includes(sidebar.holds) ? sidebar.holds : undefined;
@@ -93,14 +114,14 @@ export function renderPage(m: SiteModel): string {
   // Alternate plain section backgrounds for rhythm (bands like urgent/tint keep their own).
   let alt = false;
   const bgFor = (s: string): Ctx['bg'] => {
-    if (['hero', 'urgent', 'footer', 'maintenance'].includes(s)) return '';
-    if (s === 'proof' && t.sectionLayout.proof?.variant === 'pull-quote-band') { alt = false; return ''; }
+    if (['hero', 'urgent', 'footer', 'maintenance', 'actions'].includes(s)) return '';
+    if (s === 'proof' && ['pull-quote-band', 'stat-band'].includes(t.sectionLayout.proof?.variant || '')) { alt = false; return ''; }
     alt = !alt;
     return alt ? '' : 'alt';
   };
   const render = (s: string, inSidebarMain = false, bgOverride?: Ctx['bg']) => {
     const l = t.sectionLayout[s] || (s === 'gallery' ? ({ variant: 'carousel', perView: { phone: 1.15, desktop: 3 } } as Ctx['l']) : { variant: '' });
-    return RENDERERS[s]({ m, l, bg: bgOverride ?? bgFor(s), inSidebarMain });
+    return R[s]({ m, l, bg: bgOverride ?? bgFor(s), inSidebarMain });
   };
 
   let body = '';
@@ -124,18 +145,22 @@ export function renderPage(m: SiteModel): string {
     body = order.map((s) => render(s)).join('');
   }
 
-  const nav = order.filter((s) => NAV[s] && s !== 'quote').map((s) => `<a href="${NAV[s][0]}">${NAV[s][1]}</a>`).join('');
+  // design builds name sections in the category's words ("Menu", "Treatments and prices", "Visit us")
+  const p = m.design?.profile;
+  const navLabel = (s: string) => (!p ? NAV[s][1] : s === 'services' || s === 'focus' ? (p.offeringsTitle.length > 14 ? p.offeringsTitle.split(' ')[0] : p.offeringsTitle) : s === 'gallery' ? 'Photos' : s === 'area' ? (p.hoursFirst ? 'Visit' : 'Service area') : NAV[s][1]);
+  const nav = order.filter((s) => NAV[s] && s !== 'quote').map((s) => `<a href="${NAV[s][0]}">${esc(navLabel(s))}</a>`).join('');
+  const quoteBtn = m.design ? m.design.headerLabel : m.copy.quoteTitle;
   const logo = m.brand.logo
     ? `<img src="${esc(m.brand.logo.publicPath)}" alt="${esc(m.business.name)}" width="${m.brand.logo.width}" height="${m.brand.logo.height}">`
     : `<span class="wordmark${m.copy.wordmark.length > 22 ? ' long' : ''}">${esc(m.copy.wordmark)}</span>`;
   const callBtn = t.roger.headerCallButton && m.contact.tel
     ? `<a class="btn btn-primary hdr-call" href="${m.contact.tel}" data-ev="call" aria-label="Call ${esc(m.contact.phone)}">${icon('phone', { size: 18 })}<span class="num">${esc(m.contact.phone)}</span></a>`
-    : `<a class="btn btn-primary hdr-call" href="#quote">${esc(m.copy.quoteTitle)}</a>`;
+    : `<a class="btn btn-primary hdr-call" href="#quote">${esc(quoteBtn)}</a>`;
   const claim = config.rogerImessage
     ? ` <a href="sms:${esc(config.rogerImessage)}&body=${encodeURIComponent(`Claim my site: ${m.slug}`)}">Claim it</a>`
     : '';
   const preview = m.preview && t.roger.previewBanner
-    ? `<div class="preview">Preview: a free website draft Roger made for ${esc(m.business.name)}.${claim}</div>` : '';
+    ? `<div class="preview">Preview: a free website draft Roger made for ${esc(m.business.name.replace(/\.$/, ''))}.${claim}</div>` : '';
 
   // the Roger widget (Book / Chat / Call) replaces the sticky bar and the text bubble
   const widget = t.roger.widget !== false;
@@ -170,11 +195,12 @@ ${m.preview ? '<meta name="robots" content="noindex">' : `<link rel="canonical" 
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 ${fontLinks(m)}
-<link rel="preload" as="image" href="${esc(m.images.hero.publicPath)}" fetchpriority="high">
+${heroPreload(m)}
 <style>${buildCss(m)}</style>
+${m.design ? `<style id="rg-appearance">${m.design.appearanceCss}</style>` : ''}
 <script type="application/ld+json">${jsonLd(m)}</script>
 </head>
-<body class="${widget ? 'has-rw' : t.roger.stickyBar ? 'has-bar' : ''}" data-theme="${esc(m.themeId)}">
+<body class="${widget ? 'has-rw' : t.roger.stickyBar ? 'has-bar' : ''}" data-theme="${esc(m.themeId)}"${m.design ? ` data-direction="${esc(m.design.plan.direction)}" data-category="${esc(m.design.plan.category)}" data-motion="${esc(m.design.motion)}" data-plan="${esc(m.design.plan.id)}"` : ''}>
 <a class="skip" href="#main">Skip to content</a>
 ${preview}
 <header class="site-header"><div class="wrap hdr">
@@ -187,7 +213,7 @@ ${body.replace(/<footer[\s\S]*<\/footer>/, '')}
 </main>
 ${(body.match(/<footer[\s\S]*<\/footer>/) || [''])[0]}
 ${sticky}${bubble}${widget ? rogerWidget(m) : ''}${lightbox(m)}
-<script>${CLIENT_JS(m)}${WIDGETS_JS(m)}</script>
+<script>${CLIENT_JS(m)}${WIDGETS_JS(m)}${m.design?.slides.length ? CAROUSEL_JS : ''}</script>
 </body>
 </html>`;
 }

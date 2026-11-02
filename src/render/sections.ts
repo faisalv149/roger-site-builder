@@ -296,7 +296,7 @@ export function maintenance({ m, l }: Ctx): string {
 export function footer({ m, l }: Ctx): string {
   const year = new Date().getFullYear();
   const brandBlock = m.brand.logo
-    ? `<a class="logo-chip" href="#top"><img src="${esc(m.brand.logo.publicPath)}" alt="${esc(m.business.name)}" height="36"></a>`
+    ? `<a class="logo-chip" href="#top"><img src="${esc(m.brand.logo.publicPath)}" alt="${esc(m.business.name)}" width="${Math.round((m.brand.logo.width / Math.max(1, m.brand.logo.height)) * 36)}" height="36"></a>`
     : `<a class="wordmark" href="#top" style="text-decoration:none">${esc(m.copy.wordmark)}</a>`;
   const contact = `<ul>
     ${m.contact.tel ? `<li><a href="${m.contact.tel}">${icon('phone', { size: 16 })} ${esc(m.contact.phone)}</a></li>` : ''}

@@ -98,9 +98,92 @@ export function sceneSvg(vertical: string, index: number, w = 1600, h = 1000, la
 </svg>`;
 }
 
+/**
+ * Plumbing pilot fixtures: stand-ins for a crew photo, a water heater, a bathroom and a work van, so the design
+ * plan's photo roles (team / projects / hero) are visibly different in screenshots. Illustrations, not photos.
+ */
+export function plumbingSceneSvg(kind: 'team' | 'heater' | 'bath' | 'van' | 'pipes', seed: number, w = 1600, h = 1066): string {
+  const tones = [['#C9D7E2', '#EEF3F7', '#1F4E79', '#F2B33D'], ['#E6DCCF', '#F7F2EA', '#2F5D50', '#E8742B'], ['#D5DEE6', '#F4F7F9', '#7A2E2E', '#3D8BD9']][seed % 3];
+  const [wall, light, uniform, accent] = tones;
+  const bg = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light}"/><stop offset="1" stop-color="${wall}"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/>`;
+  const floor = `<rect y="${h * 0.78}" width="${w}" height="${h * 0.22}" fill="#9AA6AE" opacity=".55"/>`;
+  let body = '';
+  if (kind === 'team') {
+    const n = 3 + (seed % 2);
+    body = Array.from({ length: n }, (_, i) => {
+      const cx = w * ((i + 1) / (n + 1)), s = h * (0.19 + ((i + seed) % 2) * 0.02), top = h * 0.3 + ((i + seed) % 2) * h * 0.03;
+      return `<circle cx="${cx}" cy="${top}" r="${s * 0.32}" fill="#C69C7B"/><path d="M${cx - s * 0.36} ${top - s * 0.12} Q ${cx} ${top - s * 0.62} ${cx + s * 0.36} ${top - s * 0.12} Z" fill="${uniform}"/>
+        <rect x="${cx - s * 0.62}" y="${top + s * 0.38}" width="${s * 1.24}" height="${h * 0.78 - top - s * 0.38}" rx="${s * 0.4}" fill="${uniform}"/><rect x="${cx - s * 0.22}" y="${top + s * 0.6}" width="${s * 0.44}" height="${s * 0.12}" fill="${accent}"/>`;
+    }).join('');
+  } else if (kind === 'heater') {
+    const x = w * 0.42, tw = w * 0.16, th = h * 0.56;
+    body = `<rect x="${x}" y="${h * 0.22}" width="${tw}" height="${th}" rx="${tw * 0.18}" fill="#E7ECEF" stroke="#8A979F" stroke-width="${w / 400}"/>
+      <rect x="${x + tw * 0.3}" y="${h * 0.62}" width="${tw * 0.4}" height="${h * 0.06}" rx="6" fill="#56636B"/><path d="M${x + tw * 0.3} ${h * 0.22} V${h * 0.08} M${x + tw * 0.7} ${h * 0.22} V${h * 0.08}" stroke="#B07D4F" stroke-width="${w / 90}"/>
+      <path d="M${x + tw} ${h * 0.4} H${w * 0.82}" stroke="${accent}" stroke-width="${w / 120}"/>`;
+  } else if (kind === 'bath') {
+    body = `${Array.from({ length: 10 }, (_, i) => `<line x1="0" y1="${h * 0.08 * (i + 1)}" x2="${w}" y2="${h * 0.08 * (i + 1)}" stroke="#fff" stroke-opacity=".6" stroke-width="2"/>`).join('')}
+      <rect x="${w * 0.12}" y="${h * 0.5}" width="${w * 0.5}" height="${h * 0.24}" rx="${h * 0.08}" fill="#FBFCFD" stroke="#A9B4BA" stroke-width="${w / 500}"/>
+      <path d="M${w * 0.55} ${h * 0.5} V${h * 0.3} H${w * 0.5}" stroke="#7D8A92" stroke-width="${w / 160}" fill="none"/>
+      <rect x="${w * 0.7}" y="${h * 0.42}" width="${w * 0.16}" height="${h * 0.06}" rx="10" fill="#FBFCFD" stroke="#A9B4BA" stroke-width="3"/><rect x="${w * 0.74}" y="${h * 0.48}" width="${w * 0.08}" height="${h * 0.3}" fill="#E5EAED"/>`;
+  } else if (kind === 'van') {
+    const x = w * 0.18, y = h * 0.4, vw = w * 0.6, vh = h * 0.32;
+    body = `<rect x="${x}" y="${y}" width="${vw}" height="${vh}" rx="${vh * 0.12}" fill="#F8FAFB"/><path d="M${x + vw} ${y + vh * 0.25} h${vw * 0.16} l${vw * 0.08} ${vh * 0.35} v${vh * 0.4} h-${vw * 0.24} Z" fill="#F8FAFB"/>
+      <rect x="${x}" y="${y + vh * 0.45}" width="${vw * 1.2}" height="${vh * 0.12}" fill="${uniform}"/><circle cx="${x + vw * 0.22}" cy="${y + vh}" r="${vh * 0.18}" fill="#2B3237"/><circle cx="${x + vw * 0.95}" cy="${y + vh}" r="${vh * 0.18}" fill="#2B3237"/>`;
+  } else {
+    return sceneSvg('plumbing', seed, w, h);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${bg}${floor}${body}</svg>`;
+}
+
 /** A busy flyer-style graphic: used to exercise images.rejectTextHeavy. */
 export function flyerSvg(w = 1200, h = 1200): string {
   const lines = Array.from({ length: 14 }, (_, i) => `<rect x="80" y="${260 + i * 62}" width="${1040 - (i % 4) * 160}" height="26" fill="#111"/>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="#fff"/>
   <rect x="60" y="60" width="1080" height="140" fill="#E11D48"/><text x="600" y="160" text-anchor="middle" font-family="Arial" font-weight="700" font-size="96" fill="#fff">SPRING SALE 20% OFF</text>${lines}</svg>`;
+}
+
+/**
+ * Category fixtures (salon, café, restaurant, gym, office, shop, electrician): simple illustrated scenes so each
+ * category's photo roles are visibly different in screenshots. Illustrations, not photos.
+ */
+export type CategoryScene = 'salon' | 'cafe' | 'plate' | 'gym' | 'office' | 'shop' | 'electric' | 'storefront' | 'team';
+export function categorySceneSvg(kind: CategoryScene, seed: number, w = 1600, h = 1066): string {
+  const tones = [['#E9DED3', '#F8F3EE', '#7B3F52', '#D9A441'], ['#D7E3E0', '#F3F7F6', '#22543D', '#E07A5F'], ['#E3DCEB', '#F7F4FA', '#3B3355', '#F2A541'], ['#DCE4EE', '#F5F8FB', '#1D3557', '#E63946']][seed % 4];
+  const [wall, light, deep, accent] = tones;
+  const bg = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light}"/><stop offset="1" stop-color="${wall}"/></linearGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/>`;
+  const floor = `<rect y="${h * 0.8}" width="${w}" height="${h * 0.2}" fill="${deep}" opacity=".18"/>`;
+  const sw = w / 300;
+  let body = '';
+  if (kind === 'salon') {
+    body = [0.22, 0.52, 0.82].map((x, i) => `<rect x="${w * x - w * 0.09}" y="${h * 0.12}" width="${w * 0.18}" height="${h * 0.34}" rx="${w * 0.09}" fill="#fff" stroke="${deep}" stroke-width="${sw}" opacity=".9"/>
+      <rect x="${w * x - w * 0.07}" y="${h * 0.5}" width="${w * 0.14}" height="${h * 0.16}" rx="${w * 0.03}" fill="${i % 2 ? accent : deep}"/><rect x="${w * x - w * 0.01}" y="${h * 0.66}" width="${w * 0.02}" height="${h * 0.14}" fill="#555"/>`).join('');
+  } else if (kind === 'cafe') {
+    body = `<rect x="${w * 0.08}" y="${h * 0.6}" width="${w * 0.84}" height="${h * 0.05}" rx="8" fill="${deep}"/>` + [0.25, 0.48, 0.7].map((x, i) =>
+      `<path d="M${w * x - w * 0.06} ${h * 0.42} h${w * 0.12} l-${w * 0.015} ${h * 0.18} h-${w * 0.09} Z" fill="#fff" stroke="${deep}" stroke-width="${sw}"/><path d="M${w * x + w * 0.055} ${h * 0.46} q${w * 0.04} 0 ${w * 0.03} ${h * 0.06} q-${w * 0.005} ${h * 0.03} -${w * 0.04} ${h * 0.03}" fill="none" stroke="${deep}" stroke-width="${sw}"/>
+      <path d="M${w * x - w * 0.02} ${h * 0.38} q${w * 0.01} -${h * 0.05} 0 -${h * 0.1} M${w * x + w * 0.015} ${h * 0.38} q${w * 0.01} -${h * 0.05} 0 -${h * 0.1}" stroke="${i === 1 ? accent : '#bbb'}" stroke-width="${sw * 0.8}" fill="none"/>`).join('');
+  } else if (kind === 'plate') {
+    body = `<ellipse cx="${w * 0.5}" cy="${h * 0.55}" rx="${w * 0.3}" ry="${h * 0.26}" fill="#fff" stroke="#ccc" stroke-width="${sw}"/><ellipse cx="${w * 0.5}" cy="${h * 0.55}" rx="${w * 0.2}" ry="${h * 0.16}" fill="${accent}" opacity=".85"/>
+      <circle cx="${w * 0.44}" cy="${h * 0.5}" r="${h * 0.05}" fill="${deep}" opacity=".7"/><circle cx="${w * 0.56}" cy="${h * 0.58}" r="${h * 0.04}" fill="#5a8f3c"/><circle cx="${w * 0.53}" cy="${h * 0.47}" r="${h * 0.03}" fill="#5a8f3c"/>
+      <rect x="${w * 0.12}" y="${h * 0.3}" width="${w * 0.015}" height="${h * 0.5}" rx="6" fill="#999"/><rect x="${w * 0.86}" y="${h * 0.3}" width="${w * 0.015}" height="${h * 0.5}" rx="6" fill="#999"/>`;
+  } else if (kind === 'gym') {
+    const bar = (y: number, s: number) => `<rect x="${w * 0.15}" y="${y}" width="${w * 0.7}" height="${h * 0.02}" fill="#444"/>${[0.17, 0.22, 0.78, 0.83].map((x) => `<rect x="${w * x - w * 0.02 * s}" y="${y - h * 0.09 * s}" width="${w * 0.04 * s}" height="${h * 0.2 * s}" rx="8" fill="${deep}"/>`).join('')}`;
+    body = `${bar(h * 0.45, 1)}<rect x="${w * 0.12}" y="${h * 0.7}" width="${w * 0.76}" height="${h * 0.04}" fill="${accent}" opacity=".8"/>`;
+  } else if (kind === 'office') {
+    body = `<rect x="${w * 0.15}" y="${h * 0.58}" width="${w * 0.7}" height="${h * 0.04}" fill="${deep}"/><rect x="${w * 0.2}" y="${h * 0.62}" width="${w * 0.02}" height="${h * 0.18}" fill="${deep}"/><rect x="${w * 0.78}" y="${h * 0.62}" width="${w * 0.02}" height="${h * 0.18}" fill="${deep}"/>
+      <rect x="${w * 0.38}" y="${h * 0.32}" width="${w * 0.24}" height="${h * 0.24}" rx="10" fill="#2b2f36"/><rect x="${w * 0.4}" y="${h * 0.34}" width="${w * 0.2}" height="${h * 0.19}" fill="${accent}" opacity=".5"/>
+      <rect x="${w * 0.7}" y="${h * 0.12}" width="${w * 0.18}" height="${h * 0.26}" fill="#fff" stroke="${deep}" stroke-width="${sw}"/><path d="M${w * 0.72} ${h * 0.32} l${w * 0.04} -${h * 0.08} l${w * 0.04} ${h * 0.04} l${w * 0.05} -${h * 0.1}" stroke="${accent}" stroke-width="${sw}" fill="none"/>`;
+  } else if (kind === 'shop') {
+    body = [0.3, 0.5, 0.7].map((y) => `<rect x="${w * 0.1}" y="${h * y}" width="${w * 0.8}" height="${h * 0.02}" fill="${deep}"/>`).join('') +
+      Array.from({ length: 18 }, (_, i) => { const row = Math.floor(i / 6), x = 0.13 + (i % 6) * 0.125; const c = [accent, deep, '#6aa', '#c66', '#da5', '#8a6'][(i + seed) % 6]; return `<rect x="${w * x}" y="${h * (0.14 + row * 0.2)}" width="${w * 0.1}" height="${h * 0.16}" rx="8" fill="${c}" opacity=".85"/>`; }).join('');
+  } else if (kind === 'electric') {
+    body = `<rect x="${w * 0.36}" y="${h * 0.16}" width="${w * 0.28}" height="${h * 0.6}" rx="12" fill="#e8ecef" stroke="#7d8a92" stroke-width="${sw}"/>${Array.from({ length: 10 }, (_, i) => `<rect x="${w * (0.39 + (i % 2) * 0.12)}" y="${h * (0.22 + Math.floor(i / 2) * 0.1)}" width="${w * 0.1}" height="${h * 0.06}" rx="4" fill="${i === 3 ? accent : '#4b5560'}"/>`).join('')}
+      <path d="M${w * 0.5} ${h * 0.76} V${h * 0.9}" stroke="#333" stroke-width="${sw * 2}"/><circle cx="${w * 0.18}" cy="${h * 0.3}" r="${h * 0.08}" fill="${accent}" opacity=".7"/>`;
+  } else if (kind === 'storefront') {
+    body = `<rect x="${w * 0.12}" y="${h * 0.25}" width="${w * 0.76}" height="${h * 0.55}" fill="#fff" stroke="${deep}" stroke-width="${sw}"/><rect x="${w * 0.12}" y="${h * 0.18}" width="${w * 0.76}" height="${h * 0.1}" fill="${deep}"/>
+      <rect x="${w * 0.18}" y="${h * 0.36}" width="${w * 0.3}" height="${h * 0.3}" fill="${light}" stroke="${deep}" stroke-width="${sw * 0.6}"/><rect x="${w * 0.58}" y="${h * 0.36}" width="${w * 0.22}" height="${h * 0.44}" fill="${accent}" opacity=".7"/>
+      ${Array.from({ length: 8 }, (_, i) => `<path d="M${w * (0.12 + i * 0.095)} ${h * 0.28} h${w * 0.095} l-${w * 0.02} ${h * 0.06} h-${w * 0.055} Z" fill="${i % 2 ? '#fff' : accent}"/>`).join('')}`;
+  } else {
+    return plumbingSceneSvg('team', seed, w, h);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${bg}${floor}${body}</svg>`;
 }

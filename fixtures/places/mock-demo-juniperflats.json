@@ -1,0 +1,122 @@
+{
+  "placeId": "mock-demo-juniperflats",
+  "name": "Juniper Flats Plumbing",
+  "primaryType": "plumber",
+  "primaryTypeLabel": "Plumber",
+  "types": [
+    "plumber",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "2 N Leroux St, Flagstaff, AZ 86001, USA",
+  "shortAddress": "2 N Leroux St, Flagstaff",
+  "street": "2 N Leroux St",
+  "city": "Flagstaff",
+  "state": "AZ",
+  "zip": "86001",
+  "country": "US",
+  "lat": 35.198,
+  "lng": -111.651,
+  "phone": "(928) 555-0104",
+  "phoneE164": "+19285550104",
+  "mapsUrl": "https://maps.google.com/?q=Juniper%20Flats%20Plumbing",
+  "rating": 4.8,
+  "reviewCount": 15,
+  "reviews": [
+    {
+      "author": "Hannah Yazzie",
+      "rating": 5,
+      "text": "Frozen pipe repair in January. They thawed and replaced the cracked section and insulated the rest.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Liam O'Rourke",
+      "rating": 5,
+      "text": "Leak under the kitchen sink fixed quickly. Fair price and a friendly tech.",
+      "relativeTime": "2 months ago"
+    }
+  ],
+  "photos": [],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 16,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 16,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 16,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 16,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 16,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 8:00 AM – 4:00 PM",
+      "Tuesday: 8:00 AM – 4:00 PM",
+      "Wednesday: 8:00 AM – 4:00 PM",
+      "Thursday: 8:00 AM – 4:00 PM",
+      "Friday: 8:00 AM – 4:00 PM",
+      "Saturday: Closed",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -360,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Flagstaff",
+    "Sedona",
+    "Williams"
+  ],
+  "source": "mock",
+  "qaNote": "no photos at all → typography-led hero, no projects/team sections"
+}

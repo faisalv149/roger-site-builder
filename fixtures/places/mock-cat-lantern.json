@@ -1,0 +1,186 @@
+{
+  "placeId": "mock-cat-lantern",
+  "name": "The Lantern Barber",
+  "primaryType": "barber_shop",
+  "primaryTypeLabel": "Barber shop",
+  "types": [
+    "barber_shop",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "9 Park Row, Bristol BS1 5DS, UK",
+  "shortAddress": "9 Park Row, Bristol",
+  "street": "9 Park Row",
+  "city": "Bristol",
+  "zip": "BS1 5DS",
+  "country": "GB",
+  "phone": "0117 496 0123",
+  "phoneE164": "+441174960123",
+  "mapsUrl": "https://maps.google.com/?q=The%20Lantern%20Barber",
+  "rating": 4.6,
+  "reviewCount": 41,
+  "reviews": [
+    {
+      "author": "Tom Hughes",
+      "rating": 5,
+      "text": "Sharp skin fade and a proper hot towel shave.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Ade Okon",
+      "rating": 4,
+      "text": "Good cut, worth the short wait.",
+      "relativeTime": "2 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-lantern-0.jpg",
+      "width": 900,
+      "height": 600,
+      "authors": [
+        {
+          "name": "The Lantern Barber"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-lantern-1.jpg",
+      "width": 900,
+      "height": 600,
+      "authors": [
+        {
+          "name": "The Lantern Barber"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "storefront"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 2,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 18,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: Closed",
+      "Tuesday: 9:00 AM – 6:00 PM",
+      "Wednesday: 9:00 AM – 6:00 PM",
+      "Thursday: 9:00 AM – 6:00 PM",
+      "Friday: 9:00 AM – 6:00 PM",
+      "Saturday: 9:00 AM – 6:00 PM",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": 0,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Skin fade",
+      "price": {
+        "kind": "fixed",
+        "amount": 22,
+        "currency": "GBP"
+      },
+      "source": "sample",
+      "duration": "40 min"
+    },
+    {
+      "name": "Beard trim",
+      "price": {
+        "kind": "fixed",
+        "amount": 12,
+        "currency": "GBP"
+      },
+      "source": "sample",
+      "duration": "20 min"
+    },
+    {
+      "name": "Hot towel shave",
+      "price": {
+        "kind": "fixed",
+        "amount": 28,
+        "currency": "GBP"
+      },
+      "source": "sample",
+      "duration": "45 min"
+    },
+    {
+      "name": "Kids' cut",
+      "price": {
+        "kind": "fixed",
+        "amount": 15,
+        "currency": "GBP"
+      },
+      "source": "sample"
+    }
+  ],
+  "currency": "GBP",
+  "qaNote": "UK barber: GBP prices, weak photos (900px)"
+}

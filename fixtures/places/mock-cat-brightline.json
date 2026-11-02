@@ -1,0 +1,212 @@
+{
+  "placeId": "mock-cat-brightline",
+  "name": "Brightline Electric",
+  "primaryType": "electrician",
+  "primaryTypeLabel": "Electrician",
+  "types": [
+    "electrician",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "501 E Kennedy Blvd, Tampa, FL 33602, USA",
+  "shortAddress": "501 E Kennedy Blvd, Tampa",
+  "street": "501 E Kennedy Blvd",
+  "city": "Tampa",
+  "state": "FL",
+  "zip": "33602",
+  "country": "US",
+  "phone": "(813) 555-0136",
+  "phoneE164": "+18135550136",
+  "mapsUrl": "https://maps.google.com/?q=Brightline%20Electric",
+  "rating": 4.7,
+  "reviewCount": 58,
+  "reviews": [
+    {
+      "author": "Rob Klein",
+      "rating": 5,
+      "text": "Upgraded our panel cleanly and explained the permit process.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Lia Gomez",
+      "rating": 4,
+      "text": "EV charger installed in a day. Good communication.",
+      "relativeTime": "2 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-brightline-0.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Brightline Electric"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-brightline-1.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Brightline Electric"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "team"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-brightline-2.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Brightline Electric"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-brightline-3.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Brightline Electric"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "vehicle"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 7:00 AM – 5:00 PM",
+      "Tuesday: 7:00 AM – 5:00 PM",
+      "Wednesday: 7:00 AM – 5:00 PM",
+      "Thursday: 7:00 AM – 5:00 PM",
+      "Friday: 7:00 AM – 5:00 PM",
+      "Saturday: Closed",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Tampa",
+    "Brandon",
+    "Clearwater",
+    "St. Petersburg"
+  ],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Service call",
+      "price": {
+        "kind": "fixed",
+        "amount": 89,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Panel upgrades",
+      "price": {
+        "kind": "range",
+        "amount": 1800,
+        "max": 3200,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "EV charger installation",
+      "price": {
+        "kind": "from",
+        "amount": 650,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Lighting and fixtures",
+      "source": "sample"
+    }
+  ],
+  "qaNote": "trades: sample prices, team photo, service area"
+}

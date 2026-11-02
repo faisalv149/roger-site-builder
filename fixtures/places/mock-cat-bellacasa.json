@@ -1,0 +1,236 @@
+{
+  "placeId": "mock-cat-bellacasa",
+  "name": "Osteria Bellacasa",
+  "primaryType": "italian_restaurant",
+  "primaryTypeLabel": "Italian restaurant",
+  "types": [
+    "italian_restaurant",
+    "restaurant",
+    "food",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "310 Atwells Ave, Providence, RI 02903, USA",
+  "shortAddress": "310 Atwells Ave, Providence",
+  "street": "310 Atwells Ave",
+  "city": "Providence",
+  "state": "RI",
+  "zip": "02903",
+  "country": "US",
+  "phone": "(401) 555-0129",
+  "phoneE164": "+14015550129",
+  "mapsUrl": "https://maps.google.com/?q=Osteria%20Bellacasa",
+  "rating": 4.6,
+  "reviewCount": 158,
+  "reviews": [
+    {
+      "author": "Gina Russo",
+      "rating": 5,
+      "text": "Handmade pasta, attentive service. The cacio e pepe is a must.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Mark Ellis",
+      "rating": 4,
+      "text": "Lovely evening, a little loud on Saturday.",
+      "relativeTime": "2 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-bellacasa-0.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Osteria Bellacasa"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-bellacasa-1.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Osteria Bellacasa"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-bellacasa-2.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Osteria Bellacasa"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "storefront"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-bellacasa-3.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Osteria Bellacasa"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 22,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 22,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 22,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 22,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 17,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 22,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 0,
+          "hour": 17,
+          "minute": 0
+        },
+        "close": {
+          "day": 0,
+          "hour": 22,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: Closed",
+      "Tuesday: 5:00 PM – 10:00 PM",
+      "Wednesday: 5:00 PM – 10:00 PM",
+      "Thursday: 5:00 PM – 10:00 PM",
+      "Friday: 5:00 PM – 10:00 PM",
+      "Saturday: 5:00 PM – 10:00 PM",
+      "Sunday: 5:00 PM – 10:00 PM"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Cacio e pepe",
+      "price": {
+        "kind": "fixed",
+        "amount": 19,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Tagliatelle al ragù",
+      "price": {
+        "kind": "fixed",
+        "amount": 24,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Margherita",
+      "price": {
+        "kind": "fixed",
+        "amount": 16,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Tasting menu",
+      "price": {
+        "kind": "unit",
+        "amount": 65,
+        "unit": "person",
+        "currency": "USD"
+      },
+      "source": "sample",
+      "description": "Five courses, the kitchen's choice."
+    },
+    {
+      "name": "Tiramisu",
+      "price": {
+        "kind": "fixed",
+        "amount": 9,
+        "currency": "USD"
+      },
+      "source": "sample"
+    }
+  ],
+  "qaNote": "restaurant: menu with a per-person tasting price, evening hours"
+}

@@ -6,7 +6,7 @@ const ic = (name, cls = '') => `<svg class="i${cls ? ` ${cls}` : ''}" aria-hidde
 const api = async (path, opts = {}) => {
   const r = await fetch(path, opts);
   const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
-  if (!r.ok) throw new Error(j.error || (j.errors || []).join('; ') || `HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(j.error || (j.errors || []).join('; ') || `HTTP ${r.status}`), { blockers: j.blockers });
   return j;
 };
 const postJson = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -21,7 +21,7 @@ function toast(kind, html, ms = kind === 'err' ? 9000 : 5000) {
   const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 200); };
   el.querySelector('button').addEventListener('click', close);
   $('#toasts').appendChild(el);
-  $('#toasts .toast:not(.out)').slice(0, -3).forEach((t) => t.querySelector('button').click()); // at most 3 on screen
+  $$('#toasts .toast:not(.out)').slice(0, -3).forEach((t) => t.querySelector('button').click()); // at most 3 on screen
   setTimeout(close, ms);
 }
 
@@ -277,17 +277,8 @@ $('#buildBtn').addEventListener('click', async () => {
       return;
     }
     const { jobId } = await postJson('/api/build', body);
-    sites.openId = jobId; // the job id is also the saved build's id
-    await new Promise((resolve, reject) => {
-      const es = new EventSource(`/api/jobs/${jobId}/events`);
-      es.addEventListener('step', (m) => logStep(JSON.parse(m.data)));
-      es.addEventListener('end', (m) => {
-        es.close();
-        const d = JSON.parse(m.data);
-        if (d.status === 'done') { built = true; renderResult(d.result, performance.now() - t0); resolve(); } else reject(new Error(d.error || 'Build failed'));
-      });
-      es.onerror = () => { es.close(); reject(new Error('Lost connection to the build')); };
-    });
+    await followJob(jobId, t0);
+    built = true;
   } catch (e) {
     logStep({ step: 'Build failed', status: 'error', note: e.message });
     $('#stepsLabel').textContent = 'Build failed';
@@ -295,11 +286,27 @@ $('#buildBtn').addEventListener('click', async () => {
   } finally { btn.disabled = false; btn.innerHTML = BUILD_LABEL; etaStop(built); loadSites(); }
 });
 
+/** Live steps of a running build (server-sent events), then its result in the tabs. The job id is also the saved build's id. */
+function followJob(jobId, t0) {
+  sites.openId = jobId;
+  return new Promise((resolve, reject) => {
+    const es = new EventSource(`/api/jobs/${jobId}/events`);
+    es.addEventListener('step', (m) => logStep(JSON.parse(m.data)));
+    es.addEventListener('end', (m) => {
+      es.close();
+      const d = JSON.parse(m.data);
+      if (d.status === 'done') { renderResult({ ...d.result, jobId }, performance.now() - t0); resolve(d.result); } else reject(new Error(d.error || 'Build failed'));
+    });
+    es.onerror = () => { es.close(); reject(new Error('Lost connection to the build')); };
+  });
+}
+
 const fileName = (u) => { const f = String(u).split('/').pop() || ''; try { return decodeURIComponent(f); } catch { return f; } };
 
 /** rec: the saved build record when re-opening one from the Sites tab */
 function renderResult(r, ms, rec) {
   state.last = r;
+  state.buildId = rec?.id || r.jobId || sites.openId;
   const b = r.brand;
   const hidden = Object.entries(r.hiddenSections || {});
   const secs = ms ? ` in ${(ms / 1000).toFixed(1)}s` : '';
@@ -311,10 +318,12 @@ function renderResult(r, ms, rec) {
       <div class="sum-title">
         <h2>${esc(r.business.name)}</h2>
         <p>${esc(when)}</p>
-        <div class="sum-badges"><span id="pubBadge"></span><span class="tag mono">${esc(r.themeId)}</span>${r.audit ? `<span class="tag">Old site ${r.audit.score}/100</span>` : ''}</div>
+        <div class="sum-badges"><span id="pubBadge"></span><span class="tag mono">${esc(r.themeId)}</span>${r.audit ? `<span class="tag">Old site ${r.audit.score}/100</span>` : ''}${r.newSite ? `<span class="tag tag-new" title="The same checks, run on the new site">New site ${r.newSite.score}/100</span>` : ''}</div>
         <div class="sum-actions" id="sumActs" data-slug="${esc(r.slug)}" data-built="${esc(rec?.createdAt || new Date().toISOString())}"></div>
       </div>
     </div>
+    ${scoreCompare(r.audit, r.newSite)}
+    ${designBlock(r)}
     ${r.warnings.length ? `<div class="callout">${ic('alert')}<ul>${r.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
     <dl class="kv">
       <dt>Theme</dt><dd><code>${esc(r.themeId)}</code> · ${esc(r.themeReason)}</dd>
@@ -333,7 +342,8 @@ function renderResult(r, ms, rec) {
   $('#openSite').href = r.siteUrl;
   $('#urlbar').textContent = r.siteUrl; $('#urlbar').title = r.siteUrl;
   $('#dataOut').textContent = JSON.stringify(r, null, 2);
-  if (r.audit) renderAudit(r.audit, r.audit.reportUrl);
+  if (r.audit) renderAudit(r.audit, r.audit.reportUrl, r.newSite);
+  else if (r.newSite) renderAudit(r.newSite, null, null, true);
   else { $('#auditOut').className = 'empty-state small'; $('#auditOut').innerHTML = emptyHtml('gauge', 'No audit for this build', 'The business had no website, or the audit was turned off.'); }
   renderCards(r.cards, 'Steps 2–3 · audit and preview');
   renderSumActs(undefined);
@@ -371,17 +381,204 @@ async function fillPubCtls() {
   } catch { /* leave the buttons without publishing */ }
 }
 
+/* ── personalisation (plumbing pilot): the design plan's summary + three optional questions ── */
+const DIRS = { 'clean-professional': ['Clean professional', 'White and cool greys, crisp cards, fits any business'], 'local-trusted': ['Warm local', 'Warm, reviews and team up front, where to find you'], 'bold-direct': ['Bold practical', 'Strong type, contact first, practical on phones'], 'modern-premium': ['Editorial showcase', 'Whitespace, editorial type, large photos'] };
+const GOALS = { call: 'Call', quote: 'Request a quote', appointment: 'Request an appointment', order: 'Order enquiry', enquiry: 'Send an enquiry' };
+const HEROES = { split: 'split text and photo', 'photo-led': 'photograph-led', 'type-led': 'typography-led', carousel: 'photo carousel' };
+
+function designBlock(r) {
+  const p = r.design;
+  const info = r.personalise;
+  if (!p && !(info?.eligible)) return '';
+  const head = p
+    ? `<div class="dz-line"><span class="tag dz-dir">${esc(DIRS[p.direction]?.[0] || p.direction)}</span><span>${esc(HEROES[p.hero.variant] || p.hero.variant)} hero</span><span>Leads with <b>${esc(p.service.label)}</b></span><span>Main button: <b>${esc(GOALS[p.goal])}</b></span>${p.category ? `<span>${esc(p.category)}</span>` : ''}${p.variation ? `<span>Design ${p.variation + 1}</span>` : ''}</div>
+       <p class="dz-sections">${p.sections.map((s) => `<span>${esc(s.id)}</span>`).join('<i aria-hidden="true">→</i>')}</p>
+       <details class="dz-why"><summary>Why this design</summary><ul>${p.reasons.map((x) => `<li>${esc(x)}</li>`).join('')}</ul><p class="hint">Plan <code>${esc(p.id)}</code> · ${esc(p.planner === 'claude+rules' ? 'Claude + rules' : 'rules only')} · copy from ${esc(p.copy.source)}</p></details>`
+    : `<p class="hint" style="margin:0">${info.manualTheme ? `This site uses a chosen theme (<code>${esc(r.themeId)}</code>). Personalising replaces it with Roger's design.` : 'This site has no design plan yet.'}</p>`;
+  return `<section class="dz" id="dz" aria-labelledby="dz-h">
+    <div class="dz-top"><h3 id="dz-h">${ic('sparkles')}Design</h3>
+      <div class="dz-acts">${info?.eligible ? `<button class="btn ghost sm" type="button" data-pz-open>${ic('sliders')}Personalise this website</button>${p ? `<button class="btn ghost sm" type="button" data-pz-alt title="Same answers, a different composition">${ic('refresh')}Try a different design</button>` : ''}` : ''}${r.draftId ? `<button class="btn ghost sm" type="button" data-owner-link="${esc(r.draftId)}" title="A private link for the owner: customise, save, demo purchase and domain setup">${ic('ext')}Owner editor link</button>` : ''}</div>
+    </div>
+    ${head}
+    <div id="pzWrap"></div>
+    <div id="ownerLinkWrap" aria-live="polite"></div>
+  </section>`;
+}
+
+function pzForm(r) {
+  const info = r.personalise || {};
+  const cur = r.design?.preferences || {};
+  const rec = info.recommended || {};
+  const sugg = info.suggestions || [];
+  const radio = (name, value, label, checked, extra = '') => `<label class="pz-opt"><input type="radio" name="${name}" value="${esc(value)}"${checked ? ' checked' : ''}${extra}><span>${label}</span></label>`;
+  const svcOther = cur.service && !sugg.some((s) => s.toLowerCase() === cur.service.toLowerCase()) ? cur.service : '';
+  return `<form class="pz" id="pzForm" novalidate>
+    <fieldset><legend>Which service should your website focus on?</legend>
+      <div class="pz-opts">${radio('service', '__keep', `Keep recommended${rec.service ? ` <small>(${esc(rec.service)})</small>` : ''}`, !cur.service)}
+        ${sugg.map((s) => radio('service', s, esc(s), cur.service && cur.service.toLowerCase() === s.toLowerCase())).join('')}
+        ${radio('service', '__other', 'Another service', !!svcOther)}</div>
+      <label class="pz-other" for="pzOther">The owner's service<input id="pzOther" maxlength="60" autocomplete="off" placeholder="e.g. Tankless water heaters" value="${esc(svcOther)}"></label>
+    </fieldset>
+    <fieldset><legend>What should visitors do?</legend>
+      <div class="pz-opts">${radio('goal', '__keep', `Keep recommended${rec.goal ? ` <small>(${esc(GOALS[rec.goal])})</small>` : ''}`, !cur.goal)}
+        ${radio('goal', 'call', 'Call', cur.goal === 'call', info.phoneOk ? '' : ' disabled')}
+        ${radio('goal', 'quote', 'Request a quote', cur.goal === 'quote')}
+        ${radio('goal', 'appointment', 'Request an appointment', cur.goal === 'appointment')}
+        ${radio('goal', 'order', 'Order enquiry', cur.goal === 'order')}
+        ${radio('goal', 'enquiry', 'Send an enquiry', cur.goal === 'enquiry')}</div>
+      ${info.phoneOk ? '' : '<p class="hint">Call needs a phone number on the Google profile.</p>'}
+      <p class="hint" data-pz-appt${cur.goal === 'appointment' ? '' : ' hidden'}>There's no live booking calendar yet: visitors send a request and the business confirms the time.</p>
+    </fieldset>
+    <fieldset><legend>How should the business feel?</legend>
+      <div class="pz-opts pz-styles">${radio('style', '__keep', `Keep recommended${rec.style ? ` <small>(${esc(DIRS[rec.style][0])})</small>` : ''}`, !cur.style)}
+        ${Object.entries(DIRS).map(([k, [label, d]]) => radio('style', k, `${esc(label)}<small>${esc(d)}</small>`, cur.style === k)).join('')}</div>
+      ${info.emergencyVerified ? '<p class="hint">The business states 24-hour or emergency service, so the bold style can say so.</p>' : `<label class="check pz-emerg"><input type="checkbox" id="pzEmergency"${cur.emergencyConfirmed ? ' checked' : ''}> The owner confirmed they offer emergency call-outs <span class="hint">(otherwise no emergency messaging)</span></label>`}
+    </fieldset>
+    ${info.manualTheme ? '<label class="check pz-optin"><input type="checkbox" id="pzOptIn"> Replace the chosen theme with Roger\'s design</label>' : ''}
+    <div class="pz-foot"><button class="btn primary" type="submit">${ic('sparkles')}<span>Update preview</span></button><button class="btn ghost" type="button" data-pz-cancel>Cancel</button><span class="hint" id="pzEta"></span></div>
+  </form>`;
+}
+
+function pzValues() {
+  const f = $('#pzForm');
+  const val = (n) => f.querySelector(`input[name="${n}"]:checked`)?.value;
+  const prefs = {};
+  const svc = val('service');
+  if (svc === '__other') { const t = $('#pzOther').value.trim(); if (!t) throw new Error('Type the service, or pick another option.'); prefs.service = t; }
+  else if (svc && svc !== '__keep') prefs.service = svc;
+  const goal = val('goal'); if (goal && goal !== '__keep') prefs.goal = goal;
+  const style = val('style'); if (style && style !== '__keep') prefs.style = style;
+  if ($('#pzEmergency')?.checked) prefs.emergencyConfirmed = true;
+  return prefs;
+}
+
+/** Rebuild the open site with answers (or as an alternative design), showing progress like a build. */
+// the owner's private editor link: issuing one replaces the previous link; revoking turns it off
+async function ownerLink(draftId) {
+  const wrap = $('#ownerLinkWrap');
+  if (!confirm('Create a new owner editor link? Any earlier link for this site stops working.')) return;
+  try {
+    const r = await fetch(`/api/drafts/${encodeURIComponent(draftId)}/owner-link`, { method: 'POST' }).then((x) => x.json().then((j) => (x.ok ? j : Promise.reject(new Error(j.error || x.status)))));
+    wrap.innerHTML = `<div class="hint" style="margin-top:10px">Send this to the owner only. It opens their editor for this site (customise, save, demo purchase, domain setup).<br><input readonly class="input" style="width:100%;margin-top:6px" value="${esc(r.url)}" aria-label="Owner editor link" onfocus="this.select()"> <button class="btn ghost sm" type="button" data-copy="${esc(r.url)}">Copy</button> <a class="btn ghost sm" href="${esc(r.url)}" target="_blank" rel="noopener">Open</a> <button class="btn ghost sm" type="button" data-owner-revoke="${esc(draftId)}">Revoke link</button></div>`;
+    wrap.querySelector('[data-copy]')?.addEventListener('click', (ev) => { navigator.clipboard?.writeText(ev.currentTarget.getAttribute('data-copy')); toast('ok', 'Link copied'); });
+  } catch (err) { toast('err', `Couldn't create the link: ${esc(err.message)}`); }
+}
+async function revokeOwnerLink(draftId) {
+  const r = await fetch(`/api/drafts/${encodeURIComponent(draftId)}/owner-link`, { method: 'DELETE' });
+  $('#ownerLinkWrap').innerHTML = r.ok ? '<p class="hint" style="margin-top:10px">Owner link revoked. It no longer opens the editor.</p>' : '<p class="hint">Nothing to revoke.</p>';
+}
+
+async function runRefine(body) {
+  const r = state.last;
+  const id = state.buildId;
+  if (!r || !id) return toast('err', 'Open a build first.');
+  resetBuildPane('Updating…');
+  $('#steps').hidden = false;
+  showTab('progress');
+  try { eta.studio = await api(`/api/estimate?website=${r.business.website ? 1 : 0}&audit=0`); } catch { /* keep the old estimate */ }
+  const t0 = performance.now();
+  let built = false;
+  etaStart();
+  try {
+    if (state.health?.vercel) {
+      logStep({ step: 'Updating on Vercel (steps appear when it finishes)', status: 'start' });
+      const res = await postJson(`/api/builds/${encodeURIComponent(id)}/personalise?wait=1`, body);
+      $('#log').innerHTML = '';
+      for (const s of res.steps || []) logStep({ step: s.name, status: s.ok ? 'done' : 'error', ms: s.ms, note: s.note });
+      sites.openId = res.jobId;
+      renderResult(res, performance.now() - t0);
+    } else {
+      const { jobId } = await postJson(`/api/builds/${encodeURIComponent(id)}/personalise`, body);
+      await followJob(jobId, t0);
+    }
+    built = true;
+    toast('ok', body.alternative ? 'Here\'s a different design.' : 'Preview updated with the new answers.');
+  } catch (e) {
+    logStep({ step: 'Update failed', status: 'error', note: e.message });
+    $('#stepsLabel').textContent = 'Update failed';
+    toast('err', `Update failed: ${esc(e.message)}`);
+    if (!built && r) renderResult(r); // keep the previous result on screen
+  } finally { etaStop(built); loadSites(); }
+}
+
+document.addEventListener('click', async (e) => {
+  if (e.target.closest('[data-pz-open]')) {
+    const wrap = $('#pzWrap');
+    if (!wrap || !state.last) return;
+    wrap.innerHTML = pzForm(state.last);
+    const est = await api(`/api/estimate?website=${state.last.business.website ? 1 : 0}&audit=0`).catch(() => null);
+    if (est && $('#pzEta')) $('#pzEta').textContent = `Takes ${est.label}`;
+    wrap.querySelector('input:checked, input')?.focus();
+    return;
+  }
+  if (e.target.closest('[data-pz-cancel]')) { $('#pzWrap').innerHTML = ''; return; }
+  const ol = e.target.closest('[data-owner-link]');
+  if (ol) { ownerLink(ol.getAttribute('data-owner-link')); return; }
+  const rv = e.target.closest('[data-owner-revoke]');
+  if (rv) { revokeOwnerLink(rv.getAttribute('data-owner-revoke')); return; }
+  if (e.target.closest('[data-pz-alt]')) runRefine({ preferences: state.last?.design?.preferences || {}, alternative: true });
+});
+document.addEventListener('change', (e) => {
+  if (e.target.matches?.('#pzForm input[name="goal"]')) $('[data-pz-appt]').hidden = e.target.value !== 'appointment';
+  if (e.target.matches?.('#pzOther')) { const o = $('#pzForm input[name="service"][value="__other"]'); if (o) o.checked = true; }
+});
+document.addEventListener('input', (e) => { if (e.target.matches?.('#pzOther') && e.target.value) { const o = $('#pzForm input[name="service"][value="__other"]'); if (o) o.checked = true; } });
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'pzForm') return;
+  e.preventDefault();
+  let prefs;
+  try { prefs = pzValues(); } catch (err) { toast('err', esc(err.message)); $('#pzOther').focus(); return; }
+  if ($('#pzOptIn') && !$('#pzOptIn').checked) { toast('err', 'Tick "Replace the chosen theme" to personalise a site built with a chosen theme.'); $('#pzOptIn').focus(); return; }
+  runRefine({ preferences: prefs, optIn: !!$('#pzOptIn')?.checked });
+});
+
 /* ── audit ── */
-const CAT_LABEL = { security: 'Security', speed: 'Speed', mobile: 'Mobile', seo: 'Google search', conversion: 'Getting leads', trust: 'Trust & accuracy' };
+const CAT_LABEL = { security: 'Security', speed: 'Speed', mobile: 'Mobile', seo: 'Google search', accessibility: 'Accessibility', conversion: 'Getting leads', trust: 'Trust & accuracy' };
+const PSI_LABEL = { performance: 'Performance', accessibility: 'Accessibility', 'best-practices': 'Best practices', seo: 'SEO' };
+const psiColor = (s) => (s >= 90 ? '#0C7A43' : s >= 50 ? '#C33300' : '#CC0F0F');
+/** Google PageSpeed Insights scores for phones and computers, with Core Web Vitals and a link to Google's report. */
+function psiBlock(ps) {
+  if (!ps || !ps.reportUrl) return '';
+  const runs = [ps.mobile, ps.desktop].filter(Boolean);
+  if (!runs.length) return ps.error && !['no-key', 'disabled'].includes(ps.error.code) ? `<p class="hint psi-err">${ic('alert')}Google PageSpeed didn't run: ${esc(ps.error.message)}</p>` : '';
+  const row = (r) => `<div class="psi-row"><span class="psi-dev">${r.strategy === 'mobile' ? 'Phones' : 'Computers'}</span>${Object.entries(PSI_LABEL).map(([k, l]) => (r.scores[k] == null ? '' : `<span class="psi-s" title="${esc(l)}"><b style="color:${psiColor(r.scores[k])}">${r.scores[k]}</b><small>${esc(l)}</small></span>`)).join('')}</div>`;
+  const m = runs[0];
+  const vit = [['LCP', m.lab.lcp], ['TBT', m.lab.tbt], ['CLS', m.lab.cls]].filter(([, v]) => v).map(([k, v]) => `${k} ${esc(v)}`).join(' · ');
+  const field = m.field?.overall ? ` · real visitors: <b>${{ FAST: 'good', AVERAGE: 'needs improvement', SLOW: 'poor' }[m.field.overall]}</b>` : '';
+  const flagged = m.findings.length;
+  return `<div class="psi"><div class="psi-h"><b>Google PageSpeed Insights</b><a class="btn ghost sm" href="${esc(ps.reportUrl)}" target="_blank" rel="noopener">${ic('ext')}On Google</a></div>${runs.map(row).join('')}
+    <p class="hint">${vit}${field}${flagged ? ` · ${flagged} check${flagged === 1 ? '' : 's'} flagged (see the full report)` : ''}</p></div>`;
+}
 const emptyHtml = (icon, title, text) => `<span class="es-ic">${ic(icon)}</span><h2>${esc(title)}</h2><p>${text}</p>`;
 function scoreColor(s) { return s >= 90 ? '#15803D' : s >= 75 ? '#65A30D' : s >= 60 ? '#CA8A04' : s >= 40 ? '#EA580C' : '#DC2626'; }
-function renderAudit(a, reportUrl) {
+/** Old site against the new site: Roger's check plus Google's four categories, the same checks on both. */
+function scoreCompare(oldA, newA) {
+  if (!newA) return '';
+  const run = (a) => a?.metrics?.pagespeed?.mobile || a?.metrics?.pagespeed?.desktop;
+  const om = run(oldA), nm = run(newA);
+  const rows = [['Roger\'s website check', oldA?.score, newA.score], ...Object.entries(PSI_LABEL).map(([k, l]) => [`${l}${(nm || om)?.strategy === 'desktop' ? '' : ' (phones)'}`, om?.scores?.[k] ?? (k === 'performance' ? oldA?.metrics?.pagespeed?.performance : undefined), nm?.scores?.[k]])]
+    .filter(([, o, n]) => o != null || n != null);
+  const cell = (v, other) => (v == null ? '<td class="na">—</td>' : `<td><b style="color:${psiColor(v)}">${v}</b>${other != null && v > other ? ' <span class="up">+' + (v - other) + '</span>' : ''}</td>`);
+  const src = newA.metrics?.pagespeed?.source === 'local' ? 'New site: Lighthouse on this server (Google can\'t reach a local preview).' : newA.metrics?.pagespeed?.source === 'google' ? 'New site: Google PageSpeed Insights.' : '';
+  const err = newA.metrics?.pagespeed?.error && !nm ? ` Lighthouse didn't run: ${newA.metrics.pagespeed.error.message}` : '';
+  return `<section class="cmp" aria-labelledby="cmp-h"><h3 id="cmp-h">${ic('gauge')}${oldA ? 'Current site vs. new site' : 'New site scores'}</h3>
+    <table><thead><tr><th scope="col"></th>${oldA ? '<th scope="col">Current site</th>' : ''}<th scope="col">New site</th></tr></thead><tbody>
+    ${rows.map(([k, o, n]) => `<tr><th scope="row">${esc(k)}</th>${oldA ? cell(o, n) : ''}${cell(n, o)}</tr>`).join('')}
+    <tr><th scope="row">Main content appears${(nm || om)?.strategy === 'desktop' ? '' : ' (phones)'}</th>${oldA ? `<td>${esc(om?.lab?.lcp || '—')}</td>` : ''}<td>${esc(nm?.lab?.lcp || '—')}</td></tr>
+    <tr><th scope="row">Things to fix</th>${oldA ? `<td>${oldA.issues.length}</td>` : ''}<td>${newA.issues.length}</td></tr></tbody></table>
+    <p class="hint">${esc(src + err)}${oldA?.metrics?.pagespeed?.source === 'google' || oldA?.metrics?.pagespeed?.mobile ? ' Current site: Google PageSpeed Insights.' : ''}</p></section>`;
+}
+
+/** newSite: the new site's scores to compare with; isNew: this audit is of the new site itself */
+function renderAudit(a, reportUrl, newSite, isNew) {
   const c = scoreColor(a.score);
   const cats = a.categories ? `<div class="cats">${Object.entries(a.categories).map(([k, v]) => `<div class="cat"><div class="r"><span>${esc(CAT_LABEL[k] || k)}</span><b>${v}</b></div><div class="bar"><i style="width:${v}%;background:${scoreColor(v)}"></i></div></div>`).join('')}</div>` : '';
   $('#auditOut').className = '';
   $('#auditOut').innerHTML = `<div class="score"><svg class="ring" viewBox="0 0 100 100" role="img" aria-label="Score ${a.score} out of 100"><circle cx="50" cy="50" r="42" fill="none" stroke="#E2E8F0" stroke-width="9"/><circle cx="50" cy="50" r="42" fill="none" stroke="${c}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(a.score / 100) * 263.9} 263.9" transform="rotate(-90 50 50)"/><text x="50" y="58" text-anchor="middle" font-size="26" font-weight="700" fill="#0F172A">${a.score}</text></svg>
-    <div><b>${esc(a.summary.headline)}</b><p>${esc(a.summary.pitch)}</p>${reportUrl ? `<a class="btn ghost sm" href="${esc(reportUrl)}" target="_blank" rel="noopener">${ic('ext')}Full report</a>` : ''}</div></div>
+    <div><b>${esc(isNew ? `The new site scores ${a.score}/100 on the same checks as a website audit.` : a.summary.headline)}</b><p>${esc(isNew ? 'There was no current website to compare with.' : a.summary.pitch)}</p>${reportUrl ? `<a class="btn ghost sm" href="${esc(reportUrl)}" target="_blank" rel="noopener">${ic('ext')}Full report</a>` : ''}</div></div>
+    ${newSite ? scoreCompare(a, newSite) : ''}
     ${cats}
+    ${psiBlock(a.metrics?.pagespeed)}
     <h3 class="issues-h">${a.issues.length ? `${a.issues.length} thing${a.issues.length > 1 ? 's' : ''} to fix` : 'Nothing to fix'}</h3>
     <ul class="issues">${a.issues.map((i) => `<li class="${esc(i.severity)}"><span class="sev ${esc(i.severity)}">${esc(i.severity)}</span><div><b>${esc(i.title)}</b><p>${esc(i.detail)}</p><p class="fix"><b>Fix:</b> ${esc(i.fix)}</p></div></li>`).join('')}</ul>`;
 }
@@ -489,6 +686,7 @@ function siteCard(b) {
     `<span class="src ${esc(b.source)}">${esc(SRC[b.source] || b.source)}</span>`,
     b.themeId && `<span class="tag mono">${esc(b.themeId)}</span>`,
     b.auditScore != null && `<span class="tag" title="Score of their current website">Old site ${b.auditScore}/100</span>`,
+    b.newSiteScore != null && `<span class="tag tag-new" title="The same checks, run on the new site">New site ${b.newSiteScore}/100</span>`,
   ].filter(Boolean).join('') : '';
   return `<article class="site-card${sites.openId === b.id ? ' sel' : ''}${b.replaced ? ' old' : ''}">
     <button type="button" class="site-open" data-build="${esc(b.id)}" aria-label="Open ${esc(b.name || 'failed build')} in the Studio">
@@ -631,7 +829,9 @@ async function publish(btn) {
     afterChange();
   } catch (err) {
     btn.disabled = false; btn.innerHTML = html;
-    toast('err', `Publish failed: ${esc(err.message)}`);
+    // not ready: list what the owner (or the team) still has to review, with the editor link to do it
+    const items = (err.blockers || []).slice(0, 6).map((b) => `<li>${esc(b.message)}</li>`).join('');
+    toast('err', `Publish failed: ${esc(err.message)}${items ? `<ul style="margin:6px 0 0;padding-left:18px">${items}</ul><span class="hint">The owner reviews these in their editor (Business tab), or open it from Owner editor link.</span>` : ''}`, items ? 15000 : undefined);
   }
 }
 

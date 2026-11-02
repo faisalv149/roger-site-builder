@@ -1,0 +1,217 @@
+{
+  "placeId": "mock-cat-thimble",
+  "name": "Thimble & Thread",
+  "primaryType": "fabric_store",
+  "primaryTypeLabel": "Fabric store",
+  "types": [
+    "fabric_store",
+    "store",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "17 Lexington Ave, Asheville, NC 28801, USA",
+  "shortAddress": "17 Lexington Ave, Asheville",
+  "street": "17 Lexington Ave",
+  "city": "Asheville",
+  "state": "NC",
+  "zip": "28801",
+  "country": "US",
+  "phone": "(828) 555-0152",
+  "phoneE164": "+18285550152",
+  "mapsUrl": "https://maps.google.com/?q=Thimble%20%26%20Thread",
+  "rating": 4.8,
+  "reviewCount": 64,
+  "reviews": [
+    {
+      "author": "Ruth Allen",
+      "rating": 5,
+      "text": "Beautiful quilting cottons and patient staff who helped me pick a palette.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Nina Ortiz",
+      "rating": 5,
+      "text": "Took the beginner sewing class and loved it.",
+      "relativeTime": "2 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-thimble-0.jpg",
+      "width": 2200,
+      "height": 1466,
+      "authors": [
+        {
+          "name": "Thimble & Thread"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-thimble-1.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Thimble & Thread"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-thimble-2.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Thimble & Thread"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "storefront"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-thimble-3.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Thimble & Thread"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 18,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 10:00 AM – 6:00 PM",
+      "Tuesday: 10:00 AM – 6:00 PM",
+      "Wednesday: 10:00 AM – 6:00 PM",
+      "Thursday: 10:00 AM – 6:00 PM",
+      "Friday: 10:00 AM – 6:00 PM",
+      "Saturday: 10:00 AM – 6:00 PM",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Fat quarter bundles",
+      "price": {
+        "kind": "from",
+        "amount": 28,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Beginner sewing class",
+      "price": {
+        "kind": "unit",
+        "amount": 45,
+        "unit": "class",
+        "currency": "USD"
+      },
+      "source": "sample",
+      "duration": "2 h"
+    },
+    {
+      "name": "Quilting cottons",
+      "source": "sample",
+      "description": "Ask about current colours in store."
+    },
+    {
+      "name": "Notions & thread",
+      "source": "sample"
+    }
+  ],
+  "qaNote": "shop: catalogue with enquiry, only supported claims"
+}

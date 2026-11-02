@@ -1,0 +1,24 @@
+{
+  "placeId": "mock-cat-marlow",
+  "name": "Marlow & Finch Studio",
+  "primaryType": "establishment",
+  "types": [
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "12 W Jones St, Savannah, GA 31401, USA",
+  "shortAddress": "12 W Jones St, Savannah",
+  "street": "12 W Jones St",
+  "city": "Savannah",
+  "state": "GA",
+  "zip": "31401",
+  "country": "US",
+  "mapsUrl": "https://maps.google.com/?q=Marlow%20%26%20Finch%20Studio",
+  "reviews": [],
+  "photos": [],
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [],
+  "source": "mock",
+  "qaNote": "unknown category, sparse: no phone, no photos, no reviews, no hours → clean general page"
+}

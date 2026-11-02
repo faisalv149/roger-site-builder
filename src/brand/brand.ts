@@ -48,6 +48,8 @@ export function resolveBrand(theme: Theme, inputs: { logo?: LogoPick; scan?: Web
   return { brand: theme.palette.brand, brandInk: '#FFFFFF', source: 'default', rejected, tints, shades };
 }
 
+/** Brand-coloured text readable on both page backgrounds (sections alternate between surface and surface-alt). */
 export function brandTextOnSurface(b: BrandResult, theme: Theme) {
-  return brandTextColor(b.brand, theme.palette.surface, b.shades);
+  const onSurface = brandTextColor(b.brand, theme.palette.surface, b.shades);
+  return theme.palette.surfaceAlt ? brandTextColor(onSurface, theme.palette.surfaceAlt, b.shades) : onSurface;
 }

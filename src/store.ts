@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { config } from './config.js';
 import { remote } from './remote.js';
 import type { BuildResult } from './pipeline.js';
+import type { DesignPreferences } from './design/schema.js';
 
 /**
  * Saved history, so nothing is lost on a page reload or server restart:
@@ -25,6 +26,23 @@ export interface BuildRecord {
   status: 'done' | 'error';
   error?: string;
   result?: BuildResult;
+  /** what the build was asked for, so a refinement can rebuild it the same way (absent on older records) */
+  input?: BuildInputSummary;
+  /** the owner's personalisation answers this build used (absent on older records and unpersonalised builds) */
+  preferences?: DesignPreferences;
+}
+
+export interface BuildInputSummary {
+  placeId?: string;
+  google?: string;
+  website?: string;
+  themeId?: string;
+  themeSource: 'auto' | 'manual' | 'upload';
+  preview: boolean;
+  fonts?: 'theme' | 'business';
+  brandColor?: string;
+  alternative?: boolean;
+  optIn?: boolean;
 }
 
 export interface BuildSummary {
@@ -41,6 +59,8 @@ export interface BuildSummary {
   siteUrl?: string;
   themeId?: string;
   auditScore?: number;
+  /** the new site scored with the same checks (Studio builds) */
+  newSiteScore?: number;
   totalMs?: number;
   /** a newer build of the same site replaced these files */
   replaced?: boolean;
@@ -73,13 +93,24 @@ export interface Conversation {
 export interface PublishRecord {
   slug: string;
   project: string;
+  /** the domain the site is served on now (custom primary domain, or the hosted address) */
   domain: string;
   url: string;
   deploymentId: string;
   publishedAt: string;
+  /** a verified custom domain chosen as primary (absent: the hosted project address is primary) */
+  primaryDomain?: string;
+  /** domains that served the site before and now redirect permanently to the primary */
+  previousDomains?: string[];
+  /** the draft and content revisions this publication was built from (drafts only) */
+  draftRevision?: number;
+  contentRevision?: number;
+  /** where the published revision's files are kept (out/publish/<slug>/r<revision>) */
+  files?: string;
+  pages?: number;
 }
 
-type Collection = 'builds' | 'conversations' | 'publishes' | 'leads';
+type Collection = 'builds' | 'conversations' | 'publishes' | 'leads' | 'drafts' | 'orders';
 
 // One tiny document store, two backends: JSON files (local) or Redis keys "<collection>:<id>" (Vercel).
 const docs = {
@@ -110,6 +141,14 @@ const docs = {
 };
 const safeId = (id: string) => /^[a-z0-9-]{1,64}$/i.test(id);
 
+/** Raw document access for the draft and demo-order modules (src/drafts.ts, src/orders.ts), which validate on read. */
+export const draftDocs = {
+  get: <T>(col: 'drafts' | 'orders', id: string) => (/^[a-z0-9_-]{1,80}$/i.test(id) ? docs.get<T>(col, id) : Promise.resolve(undefined)),
+  put: (col: 'drafts' | 'orders', id: string, data: unknown) => docs.put(col, id, data),
+  del: (col: 'drafts' | 'orders', id: string) => docs.del(col, id),
+  list: <T>(col: 'drafts' | 'orders') => docs.list<T>(col),
+};
+
 export async function saveBuild(rec: BuildRecord) {
   await docs.put('builds', rec.id, rec);
   timings = null; // estimates pick up the new build
@@ -117,6 +156,20 @@ export async function saveBuild(rec: BuildRecord) {
 
 export async function getBuild(id: string): Promise<BuildRecord | undefined> {
   return safeId(id) ? docs.get<BuildRecord>('builds', id) : undefined;
+}
+
+/** The newest finished build of a site (full record), e.g. for its scores. */
+export async function latestBuildFor(slug: string): Promise<BuildRecord | undefined> {
+  return (await docs.list<BuildRecord>('builds')).filter((r) => r.status === 'done' && r.result?.slug === slug).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+/** The newest saved design plan for a business (Google place ID), so rebuilds stay consistent. Unvalidated. */
+export async function findSavedPlan(businessKey: string): Promise<unknown | undefined> {
+  if (!businessKey) return undefined;
+  const recs = (await docs.list<BuildRecord>('builds'))
+    .filter((r) => r.status === 'done' && r.result?.design && r.result.business?.placeId === businessKey)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return recs[0]?.result?.design;
 }
 
 /** How long finished builds took and what they ran with (src/estimate.ts). Imported builds have no timing. */
@@ -147,7 +200,7 @@ export async function listBuilds(): Promise<BuildSummary[]> {
     return {
       id: r.id, createdAt: r.createdAt, source: r.source, from: r.from, status: r.status, error: r.error,
       name: x?.business.name, category: x?.business.primaryTypeLabel, address: x?.business.formattedAddress,
-      slug: x?.slug, siteUrl: x?.siteUrl, themeId: x?.themeId, auditScore: x?.audit?.score, totalMs: x?.totalMs, replaced,
+      slug: x?.slug, siteUrl: x?.siteUrl, themeId: x?.themeId, auditScore: x?.audit?.score, newSiteScore: x?.newSite?.score, totalMs: x?.totalMs, replaced,
       published: pub && !replaced ? { url: pub.url, at: pub.publishedAt, stale: r.createdAt > pub.publishedAt } : undefined,
     };
   });
@@ -186,7 +239,15 @@ export async function getPublish(slug: string): Promise<PublishRecord | undefine
 }
 
 /** A quote-form submission from a generated site */
-export interface Lead { slug: string; at: string; name: string; phone: string; email?: string; zip?: string; service?: string; message?: string; page?: unknown }
+export interface Lead {
+  slug: string; at: string; name: string; phone: string; email?: string; zip?: string; service?: string; message?: string; page?: unknown;
+  /** quote-request / appointment-request / message (personalised sites); absent on older forms and the widget */
+  kind?: 'quote-request' | 'appointment-request' | 'message' | 'order-enquiry' | 'enquiry';
+  /** appointment requests: what the visitor would like; the business confirms (status stays "requested" until then) */
+  preferredDate?: string;
+  preferredTime?: string;
+  status?: 'requested';
+}
 
 export async function saveLead(lead: Lead) {
   await docs.put('leads', `${lead.slug}--${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, lead);

@@ -1,0 +1,176 @@
+{
+  "placeId": "mock-cat-lumen",
+  "name": "Lumen Nail & Brow Bar",
+  "primaryType": "nail_salon",
+  "primaryTypeLabel": "Nail salon",
+  "types": [
+    "nail_salon",
+    "beauty_salon",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "22 E Roosevelt St, Phoenix, AZ 85004, USA",
+  "shortAddress": "22 E Roosevelt St, Phoenix",
+  "street": "22 E Roosevelt St",
+  "city": "Phoenix",
+  "state": "AZ",
+  "zip": "85004",
+  "country": "US",
+  "phone": "(602) 555-0144",
+  "phoneE164": "+16025550144",
+  "mapsUrl": "https://maps.google.com/?q=Lumen%20Nail%20%26%20Brow%20Bar",
+  "rating": 4.5,
+  "reviewCount": 37,
+  "reviews": [
+    {
+      "author": "Keisha Brown",
+      "rating": 5,
+      "text": "My gel manicure lasted three weeks. Friendly team.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Lena Park",
+      "rating": 4,
+      "text": "Brow tint and shape done well, small but clean space.",
+      "relativeTime": "2 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-lumen-0.jpg",
+      "width": 1400,
+      "height": 933,
+      "authors": [
+        {
+          "name": "Lumen Nail & Brow Bar"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-lumen-1.jpg",
+      "width": 1400,
+      "height": 933,
+      "authors": [
+        {
+          "name": "Lumen Nail & Brow Bar"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 19,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 19,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 19,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 19,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 19,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 10,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 19,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 10:00 AM – 7:00 PM",
+      "Tuesday: 10:00 AM – 7:00 PM",
+      "Wednesday: 10:00 AM – 7:00 PM",
+      "Thursday: 10:00 AM – 7:00 PM",
+      "Friday: 10:00 AM – 7:00 PM",
+      "Saturday: 10:00 AM – 7:00 PM",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Gel manicure",
+      "source": "business"
+    },
+    {
+      "name": "Pedicure",
+      "source": "business"
+    },
+    {
+      "name": "Brow shape & tint",
+      "source": "business"
+    },
+    {
+      "name": "Lash lift",
+      "source": "business"
+    }
+  ],
+  "qaNote": "salon, services listed without prices → \"Price on request\", modest photos"
+}

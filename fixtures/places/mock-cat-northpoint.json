@@ -1,0 +1,175 @@
+{
+  "placeId": "mock-cat-northpoint",
+  "name": "Northpoint Advisory",
+  "primaryType": "consultant",
+  "primaryTypeLabel": "Business consultant",
+  "types": [
+    "consultant",
+    "business_consultant",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "41 S High St, Suite 900, Columbus, OH 43215, USA",
+  "shortAddress": "41 S High St, Suite 900, Columbus",
+  "street": "41 S High St, Suite 900",
+  "city": "Columbus",
+  "state": "OH",
+  "zip": "43215",
+  "country": "US",
+  "phone": "(614) 555-0108",
+  "phoneE164": "+16145550108",
+  "mapsUrl": "https://maps.google.com/?q=Northpoint%20Advisory",
+  "rating": 5,
+  "reviewCount": 14,
+  "reviews": [
+    {
+      "author": "Harriet Cole",
+      "rating": 5,
+      "text": "Clear, practical advice that helped us plan our first hire.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Omar Said",
+      "rating": 5,
+      "text": "Structured process and honest about what we did not need.",
+      "relativeTime": "2 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-northpoint-0.jpg",
+      "width": 1300,
+      "height": 866,
+      "authors": [
+        {
+          "name": "Northpoint Advisory"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-northpoint-1.jpg",
+      "width": 1300,
+      "height": 866,
+      "authors": [
+        {
+          "name": "Northpoint Advisory"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "team"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 9:00 AM – 5:00 PM",
+      "Tuesday: 9:00 AM – 5:00 PM",
+      "Wednesday: 9:00 AM – 5:00 PM",
+      "Thursday: 9:00 AM – 5:00 PM",
+      "Friday: 9:00 AM – 5:00 PM",
+      "Saturday: Closed",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Strategy session",
+      "price": {
+        "kind": "fixed",
+        "amount": 250,
+        "currency": "USD"
+      },
+      "source": "sample",
+      "duration": "90 min",
+      "description": "A focused session on one business question, with written notes."
+    },
+    {
+      "name": "Monthly advisory",
+      "price": {
+        "kind": "unit",
+        "amount": 1200,
+        "unit": "month",
+        "currency": "USD"
+      },
+      "source": "sample",
+      "description": "Ongoing support, a monthly review and email access."
+    },
+    {
+      "name": "Growth project",
+      "source": "sample",
+      "description": "Scoped and quoted after an initial conversation."
+    }
+  ],
+  "qaNote": "consultant: packages, a process, weak photos (small)"
+}

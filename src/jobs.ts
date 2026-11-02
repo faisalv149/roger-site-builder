@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { buildSite, type BuildInput, type BuildResult } from './pipeline.js';
-import { saveBuild, type BuildSource } from './store.js';
+import { saveBuild, type BuildInputSummary, type BuildSource } from './store.js';
 import { auditCard } from './imessage/cards.js';
 
 // In-memory job queue. Swap for BullMQ/SQS when running more than one server.
@@ -21,6 +21,16 @@ export interface JobMeta {
   from?: string;
   /** an audit run earlier in the conversation (iMessage builds skip their own) */
   audit?: BuildResult['audit'];
+}
+
+/** What a build was asked for, saved with its record so a refinement can rebuild it the same way. */
+export function summarizeInput(i: BuildInput): BuildInputSummary {
+  return {
+    placeId: i.placeId, google: i.google, website: i.website, themeId: i.themeId,
+    themeSource: i.theme ? 'upload' : i.themeId || i.vertical || i.variant ? 'manual' : 'auto',
+    preview: i.preview !== false, fonts: i.fonts, brandColor: i.brandColor,
+    ...(i.design?.alternative ? { alternative: true } : {}), ...(i.design?.optIn ? { optIn: true } : {}),
+  };
 }
 
 const jobs = new Map<string, Job>();
@@ -50,7 +60,10 @@ export function startBuild(input: BuildInput, meta: JobMeta = {}): Job {
       console.error(`[job ${job.id}]`, e);
     } finally {
       try {
-        await saveBuild({ id: job.id, createdAt: new Date(job.createdAt).toISOString(), finishedAt: new Date().toISOString(), source: meta.source || 'api', from: meta.from, status: job.status === 'done' ? 'done' : 'error', error: job.error, result: job.result });
+        await saveBuild({
+          id: job.id, createdAt: new Date(job.createdAt).toISOString(), finishedAt: new Date().toISOString(), source: meta.source || 'api', from: meta.from,
+          status: job.status === 'done' ? 'done' : 'error', error: job.error, result: job.result, input: summarizeInput(input), preferences: input.design?.preferences,
+        });
       } catch (e) { console.error(`[job ${job.id}] could not save build record`, e); }
       running--;
       job.bus.emit('end');

@@ -131,6 +131,7 @@ async function send(raw) {
     if (res.pending) replies = await waitForLater(res.messageCount);
     hideTyping();
     setSuggest(replies.at(-1)?.quickReplies || []);
+    seen = await savedCount();
   } catch (e) {
     hideTyping();
     console.error('[imessage]', e);
@@ -174,6 +175,20 @@ setInterval(() => { $('#clock').textContent = timeNow(false); }, 15_000);
 $('#today').textContent = `Today ${timeNow()}`;
 setSuggest(START);
 
+/* messages Roger sends on its own later (the new site's score after a preview): checked quietly every few seconds */
+let seen = 0;
+const savedCount = () => fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => (r.ok ? r.json() : null)).then((c) => c?.messages?.length || 0).catch(() => 0);
+setInterval(async () => {
+  if (busy || document.hidden || !seen) return;
+  const c = await fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!c || c.pending || busy || c.messages.length <= seen) return;
+  const later = c.messages.slice(seen).filter((m) => m.dir === 'out');
+  seen = c.messages.length;
+  if (!later.length) return;
+  busy = true; updateSend();
+  try { showTyping(); await sleep(600); await showReplies(later); hideTyping(); if (later.at(-1)?.quickReplies) setSuggest(later.at(-1).quickReplies); } finally { busy = false; updateSend(); }
+}, 4000);
+
 /* pick up a saved conversation after a reload */
 if (stored) fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => (r.ok ? r.json() : null)).then((c) => {
   if (!c?.messages?.length || log.querySelector('.row')) return; // nothing saved, or the user already started typing
@@ -186,10 +201,11 @@ if (stored) fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => 
     if (m.url) addLink(m);
   }
   if (lastOut) setReceipt(lastOut, c.messages[c.messages.length - 1].dir === 'out' ? '<b>Read</b>' : 'Delivered');
+  seen = c.messages.length;
   setSuggest([...c.messages].reverse().find((m) => m.dir === 'out')?.quickReplies || START);
   if (c.pending) { // reloaded while the preview is still building
     busy = true; updateSend(); setSuggest([]);
-    return waitForLater(c.messages.length).then((later) => { hideTyping(); setSuggest(later.at(-1)?.quickReplies || []); }).finally(() => { busy = false; updateSend(); });
+    return waitForLater(c.messages.length).then((later) => { hideTyping(); setSuggest(later.at(-1)?.quickReplies || []); }).finally(async () => { seen = await savedCount(); busy = false; updateSend(); });
   }
 }).catch(() => {});
 

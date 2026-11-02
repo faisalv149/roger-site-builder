@@ -12,7 +12,14 @@ export interface Photo {
   localPath?: string;
   publicPath?: string;
   isOwner?: boolean;
+  /**
+   * What the photo shows. Live photos get this from the vision step (src/design/photos.ts); sample fixtures carry
+   * it pre-filled as a stand-in for that step, the same way they stand in for the Places API.
+   */
+  analysis?: { kind: PhotoKind };
 }
+
+export type PhotoKind = 'team' | 'work' | 'vehicle' | 'storefront' | 'other';
 
 export interface Review {
   author: string;
@@ -56,6 +63,10 @@ export interface Business {
   businessStatus?: string;
   editorialSummary?: string;
   nearbyTowns: string[];
+  /** fictional sample fixtures only: offerings with clearly labelled sample prices (never from Google) */
+  offerings?: { name: string; description?: string; duration?: string; price?: { kind: string; amount?: number; max?: number; unit?: string; currency?: string }; source?: 'sample' | 'business' }[];
+  /** ISO currency for prices (sample fixtures; otherwise from the country) */
+  currency?: string;
   source: 'places' | 'mock';
 }
 
