@@ -15,10 +15,15 @@ import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
 import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead } from './store.js';
 import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
+import { normalizeLead } from './leads.js';
+import { personaliseState, startRefinement } from './design/refine.js';
 import { screenshotsAvailable } from './render/og.js';
-import { publishEnabled, publishSite, unpublishSite } from './publish.js';
+import { publishEnabled, publishSite, setPrimaryDomain, unpublishSite } from './publish.js';
+import { findDraft } from './drafts.js';
+import { publishReadiness } from './design/content.js';
 import { deleteOut, readOut } from './files.js';
 import { remote } from './remote.js';
+import { ownerRoutes, studioDraftRoutes } from './owner-api.js';
 import { claudeEnabled, claudeKeyStatus, claudeVia } from './content/claude.js';
 
 const app = express();
@@ -37,7 +42,8 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 // ── password (STUDIO_PASSWORD) on the Studio, the API and the iMessage page. Generated sites, cards, reports and
 // stock images stay public (owners, site visitors and iMessage link previews fetch them), as do the lead form
 // endpoint the sites post to and the health check the host pings.
-const OPEN = /^\/(sites|cards|reports|stock|demo-sites)\/|^\/api\/health$/;
+// the owner editor (/owner) and its API (/api/owner) use the owner's own key per draft, not the Studio password
+const OPEN = /^\/(sites|cards|reports|stock|demo-sites|owner)\/|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
 // sites post their quote form here from any origin; reading leads (GET) still needs the password
 const isLeadPost = (req: Request) => /^\/api\/leads\/[^/]+$/.test(req.path) && (req.method === 'POST' || req.method === 'OPTIONS');
 const sha = (s: string) => createHash('sha256').update(s).digest();
@@ -52,12 +58,15 @@ app.use((req, res, next) => {
 // ── static ──
 app.use('/app', express.static(path.join(config.dirs.public, 'app')));
 app.use('/imessage', express.static(path.join(config.dirs.public, 'imessage'))); // stand-in iMessage UI for local demos (no gateway)
+app.use('/owner', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'content-security-policy': "frame-ancestors 'self'", 'x-frame-options': 'SAMEORIGIN' }); next(); }, express.static(path.join(config.dirs.public, 'owner')));
 app.use('/stock', express.static(path.join(config.dirs.public, 'stock'), { maxAge: '7d' }));
 app.use('/sites', express.static(config.dirs.sites));
 app.use('/reports', express.static(config.dirs.reports));
 app.use('/cards', express.static(config.dirs.cards));
 app.use('/demo-sites', express.static(path.join(config.dirs.fixtures, 'sites'))); // the deliberately outdated demo site
 app.get('/', (_req, res) => res.redirect('/app/')); // on Vercel public/ is served by its CDN, not by Express
+// the builder's own robots.txt: tools and APIs stay out; previews and reports may be fetched so crawlers see their noindex
+app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /app/\nDisallow: /api/\nDisallow: /owner/\nDisallow: /imessage/\nAllow: /sites/\nAllow: /reports/\n'));
 // generated files, also when they were built on another server instance (src/files.ts)
 app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
   let rel = decodeURIComponent(req.path).slice(1);
@@ -65,13 +74,19 @@ app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
   if (rel.endsWith('/')) rel += 'index.html';
   else if (!path.extname(rel)) return res.redirect(301, `${req.path}/`);
   const data = await readOut(rel);
-  if (!data) return res.status(404).send('Not found');
+  if (!data) {
+    // a site's own 404 page, with a real 404 status (never the home page with a 200)
+    const slug = rel.match(/^sites\/([a-z0-9-]+)\//)?.[1];
+    const page = slug ? await readOut(`sites/${slug}/404.html`) : undefined;
+    if (page) return res.status(404).type('html').send(page.toString('utf8').replace(/href="\//g, `href="/sites/${slug}/`));
+    return res.status(404).send('Not found');
+  }
   res.type(path.extname(rel)).set('cache-control', 'public, max-age=60').send(data);
 }));
 
 // ── meta ──
 app.get('/api/health', wrap(async (_req, res) => {
-  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: screenshotsAvailable(), themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', fonts: await textRendering(), claudeKey: claudeVia() === 'api' ? await claudeKeyStatus() : undefined });
+  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: screenshotsAvailable(), themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', pagespeed: !config.pagespeed ? 'off' : process.env.PAGESPEED_API_KEY ? 'key' : config.pagespeedKey ? 'maps-key' : 'no-key', fonts: await textRendering(), claudeKey: claudeVia() === 'api' ? await claudeKeyStatus() : undefined });
 }));
 // how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
 app.get('/api/estimate', (req, res, next) => {
@@ -139,6 +154,8 @@ app.post('/api/build', themeUpload, wrap(async (req, res) => {
     preview: body.preview !== 'false' && body.preview !== false,
     audit: body.audit !== 'false' && body.audit !== false,
     slug: body.slug || undefined,
+    // Studio builds score the new site for a before/after comparison (scoreNew=false skips the extra ~25 s)
+    scoreNew: body.scoreNew !== false && body.scoreNew !== 'false',
   };
   const file = (req as any).file as Express.Multer.File | undefined;
   if (file) {
@@ -180,8 +197,9 @@ app.post('/api/leads/:slug', wrap(async (req, res) => {
   const slug = req.params.slug.replace(/[^a-z0-9-]/g, '');
   const b = req.body || {};
   if (b.company_website) return res.json({ ok: true }); // honeypot
-  if (!b.name || !b.phone) return res.status(400).json({ error: 'name and phone are required' });
-  const lead = { slug, at: new Date().toISOString(), name: String(b.name).slice(0, 120), phone: String(b.phone).slice(0, 40), email: b.email ? String(b.email).slice(0, 160) : undefined, zip: b.zip ? String(b.zip).slice(0, 10) : undefined, service: b.service ? String(b.service).slice(0, 120) : undefined, message: b.message ? String(b.message).slice(0, 2000) : undefined, page: b.page };
+  const n = normalizeLead(slug, b);
+  if (!n.ok) return res.status(400).json({ error: n.error });
+  const lead = n.lead;
   await saveLead(lead); // data/leads locally, Supabase/Redis on Vercel
   // awaited (with a timeout): on Vercel the function may stop right after the response
   if (config.leadWebhook) await fetch(config.leadWebhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead), signal: AbortSignal.timeout(8000) }).catch((e) => console.warn('[lead webhook]', e.message));
@@ -202,12 +220,28 @@ app.post('/api/imessage/inbound', wrap(async (req, res) => {
 }));
 app.post('/api/imessage/reset', wrap(async (req, res) => { await resetSession(String(req.body.from || 'demo')); res.json({ ok: true }); }));
 
+// ── owner editor API (own key per draft) and the Studio's owner-link controls ──
+app.use('/api/owner', ownerRoutes);
+app.use('/api', studioDraftRoutes);
+
 // ── saved history (data/builds, data/conversations). No auth: fine locally, add it before this is public. ──
 app.get('/api/builds', wrap(async (_req, res) => res.json({ builds: await listBuilds() })));
 // put a built site live on Vercel as its own static project (VERCEL_TOKEN); re-publishing updates it
 app.post('/api/sites/:slug/publish', wrap(async (req, res) => {
   if (!publishEnabled()) return res.status(400).json({ error: 'Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).' });
   res.json(await publishSite(String(req.params.slug)));
+}));
+// what stops this site being published (Studio): reviewed facts, sample content, unconfirmed prices
+app.get('/api/sites/:slug/readiness', wrap(async (req, res) => {
+  const d = await findDraft({ slug: String(req.params.slug) });
+  if (!d) return res.json({ ready: false, items: [{ key: 'content', level: 'blocker', message: 'This site was built before business details could be reviewed. Rebuild it to publish.' }] });
+  const items = publishReadiness(d.content, d.offerings);
+  res.json({ ready: !items.some((i) => i.level === 'blocker'), items, draftId: d.id });
+}));
+// make a verified custom domain the primary address (real Vercel domain verification; the demo step never calls this)
+app.post('/api/sites/:slug/domain', wrap(async (req, res) => {
+  if (!publishEnabled()) return res.status(400).json({ error: 'Publishing is off: set VERCEL_TOKEN.' });
+  res.json(await setPrimaryDomain(String(req.params.slug), String((req.body || {}).domain || '')));
 }));
 // take it offline again: deletes that site's Vercel project (the live URL stops working)
 app.delete('/api/sites/:slug/publish', wrap(async (req, res) => {
@@ -243,6 +277,23 @@ app.delete('/api/builds/:id', wrap(async (req, res) => {
   if (r === 'finished') return res.status(400).json({ error: 'This build made a site: delete the site instead' });
   res.json({ deleted: true });
 }));
+// personalisation pilot: what the questions offer for a build, and rebuilding it with the owner's answers
+app.get('/api/builds/:id/personalise', wrap(async (req, res) => {
+  const s = await personaliseState(String(req.params.id));
+  if (!s) return res.status(404).json({ error: 'No finished build with that id' });
+  res.json(s);
+}));
+app.post('/api/builds/:id/personalise', wrap(async (req, res) => {
+  const body = req.body || {};
+  const r = await startRefinement(String(req.params.id), { preferences: body.preferences, alternative: body.alternative === true, optIn: body.optIn === true }, { source: 'studio' });
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  if (req.query.wait === '1' || body.wait === true) {
+    await waitForJob(r.job);
+    if (r.job.status === 'error') return res.status(500).json({ jobId: r.job.id, error: r.job.error, events: r.job.events });
+    return res.json({ jobId: r.job.id, ...r.job.result });
+  }
+  res.status(202).json({ jobId: r.job.id, status: r.job.status, events: `/api/jobs/${r.job.id}/events` });
+}));
 app.get('/api/builds/:id', wrap(async (req, res) => {
   const b = await getBuild(String(req.params.id));
   if (!b) return res.status(404).json({ error: 'not found' });
@@ -258,7 +309,7 @@ app.get('/api/conversations/:from', wrap(async (req, res) => {
 
 app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
   // body-parser marks client errors (bad JSON, body too large) with a 4xx status
-  if (err.status && err.status >= 400 && err.status < 500) return res.status(err.status).json({ error: err.message });
+  if (err.status && err.status >= 400 && err.status < 500) return res.status(err.status).json({ error: err.message, ...((err as any).blockers ? { blockers: (err as any).blockers } : {}), ...((err as any).verification ? { verification: (err as any).verification } : {}) });
   console.error(err);
   res.status(500).json({ error: err.message });
 });

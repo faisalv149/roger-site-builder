@@ -1,0 +1,172 @@
+{
+  "placeId": "mock-demo-larkspur",
+  "name": "Larkspur Plumbing",
+  "primaryType": "plumber",
+  "primaryTypeLabel": "Plumber",
+  "types": [
+    "plumber",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "25 W Main St, Madison, WI 53703, USA",
+  "shortAddress": "25 W Main St, Madison",
+  "street": "25 W Main St",
+  "city": "Madison",
+  "state": "WI",
+  "zip": "53703",
+  "country": "US",
+  "lat": 43.074,
+  "lng": -89.384,
+  "phone": "(608) 555-0185",
+  "phoneE164": "+16085550185",
+  "mapsUrl": "https://maps.google.com/?q=Larkspur%20Plumbing",
+  "rating": 4.4,
+  "reviewCount": 31,
+  "reviews": [
+    {
+      "author": "Alex Novak",
+      "rating": 5,
+      "text": "Replaced our outdoor spigot and fixed a slow bathroom drain. Straightforward and friendly.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Jenna Price",
+      "rating": 4,
+      "text": "Toilet repair done right. Would call again.",
+      "relativeTime": "2 months ago"
+    },
+    {
+      "author": "Chris Lowe",
+      "rating": 4,
+      "text": "Good communication on a faucet install.",
+      "relativeTime": "3 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/demo-larkspur-0.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Jenna Price"
+        }
+      ],
+      "isOwner": false,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-larkspur-1.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Alex Novak"
+        }
+      ],
+      "isOwner": false,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-larkspur-2.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Chris Lowe"
+        }
+      ],
+      "isOwner": false,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 8:00 AM – 5:00 PM",
+      "Tuesday: 8:00 AM – 5:00 PM",
+      "Wednesday: 8:00 AM – 5:00 PM",
+      "Thursday: 8:00 AM – 5:00 PM",
+      "Friday: 8:00 AM – 5:00 PM",
+      "Saturday: Closed",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -360,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Madison",
+    "Middleton",
+    "Fitchburg",
+    "Sun Prairie"
+  ],
+  "source": "mock",
+  "qaNote": "customer photos only (credited); QA asks for Bold & direct without emergency facts → no emergency messaging"
+}

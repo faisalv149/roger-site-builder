@@ -4,8 +4,9 @@ import type { Business, WebsiteScan } from '../types.js';
 import { fetchJson, fetchRaw } from '../util/http.js';
 import { digits } from '../util/text.js';
 import { claudeJson } from '../content/claude.js';
+import { pageSpeed, type PageSpeedResult, type PsiFinding, type PsiReport } from './pagespeed.js';
 
-export type Category = 'security' | 'speed' | 'mobile' | 'seo' | 'conversion' | 'trust';
+export type Category = 'security' | 'speed' | 'mobile' | 'seo' | 'accessibility' | 'conversion' | 'trust';
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
 export interface AuditIssue {
@@ -31,35 +32,11 @@ export interface AuditResult {
   generatedAt: string;
 }
 
-export interface PageSpeed {
-  performance: number; // 0-100
-  lcp?: string;
-  cls?: string;
-  tbt?: string;
-  fcp?: string;
-}
+/** Google PageSpeed Insights (src/audit/pagespeed.ts). Older saved audits have only the legacy mobile fields. */
+export type PageSpeed = Partial<PageSpeedResult> & { performance?: number; lcp?: string; cls?: string; tbt?: string; fcp?: string };
 
 const PENALTY: Record<Severity, number> = { critical: 25, high: 12, medium: 6, low: 2 };
-const CATS: Category[] = ['security', 'speed', 'mobile', 'seo', 'conversion', 'trust'];
-
-async function pageSpeed(url: string): Promise<PageSpeed | undefined> {
-  if (!config.pagespeedKey || config.mock) return undefined;
-  try {
-    const api = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=mobile&category=performance&key=${encodeURIComponent(config.pagespeedKey)}`;
-    const r = await fetchJson<any>(api, { timeoutMs: 60000 });
-    const a = r.lighthouseResult?.audits || {};
-    return {
-      performance: Math.round((r.lighthouseResult?.categories?.performance?.score ?? 0) * 100),
-      lcp: a['largest-contentful-paint']?.displayValue,
-      cls: a['cumulative-layout-shift']?.displayValue,
-      tbt: a['total-blocking-time']?.displayValue,
-      fcp: a['first-contentful-paint']?.displayValue,
-    };
-  } catch (e) {
-    console.warn(`[pagespeed] ${(e as Error).message.slice(0, 120)}`);
-    return undefined;
-  }
-}
+const CATS: Category[] = ['security', 'speed', 'mobile', 'seo', 'accessibility', 'conversion', 'trust'];
 
 async function imageWeight(scan: WebsiteScan): Promise<{ kb: number; sampled: number; biggest?: { src: string; kb: number } }> {
   const srcs = [...new Set(scan.images.map((i) => i.src).filter((s) => s && !s.startsWith('data:')))].slice(0, 10);
@@ -78,17 +55,30 @@ async function imageWeight(scan: WebsiteScan): Promise<{ kb: number; sampled: nu
 const FREE_EMAIL = /@(yahoo|gmail|aol|hotmail|outlook|msn|comcast|sbcglobal|att|icloud)\./i;
 const STREET_RE = /\b(\d{2,6})\s+(?:[NSEW]\.?\s+)?[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\s(?:St|Street|Rd|Road|Blvd|Boulevard|Ave|Avenue|Dr|Drive|Ln|Lane|Way|Pkwy|Parkway|Hwy|Highway|Ct|Court)\b/g;
 
-export async function auditWebsite(scan: WebsiteScan, b?: Business): Promise<AuditResult> {
+export interface AuditOptions {
+  /** how to get Google-style scores (default: Google's PageSpeed Insights) */
+  scores?: (url: string) => Promise<PageSpeed>; // e.g. scoreSite (src/audit/lighthouse-local.ts) for previews
+  /**
+   * a Roger preview: it is hidden from Google on purpose and lives under a path of this server, so the noindex
+   * tag and the domain's robots.txt / sitemap.xml aren't held against it
+   */
+  preview?: boolean;
+  /** the owner-facing summary (Claude); off for internal comparisons */
+  summarize?: boolean;
+}
+
+export async function auditWebsite(scan: WebsiteScan, b?: Business, opts: AuditOptions = {}): Promise<AuditResult> {
   const issues: AuditIssue[] = [];
   const passed: string[] = [];
   const add = (i: AuditIssue) => issues.push(i);
   const ok = (s: string) => passed.push(s);
 
-  const psP = scan.ok ? pageSpeed(scan.finalUrl) : Promise.resolve(undefined);
+  // Google's Lighthouse run takes 10-40 s, so it starts first and runs alongside the checks below
+  const psP: Promise<PageSpeed | undefined> = scan.ok ? (opts.scores ? opts.scores(scan.finalUrl) : pageSpeed(scan.finalUrl)) : Promise.resolve(undefined);
 
   if (!scan.ok) {
     add({ id: 'down', category: 'security', severity: 'critical', title: 'Your website is not loading', detail: `${scan.url} returned ${scan.status || scan.error || 'no response'}.`, fix: 'We will put a fast, reliable site live on secure hosting.' });
-    return finalize(scan, issues, passed, { ttfbMs: 0, htmlKb: 0, imageKb: 0, pageKb: 0, images: 0, requestsSampled: 0 }, b);
+    return finalize(scan, issues, passed, { ttfbMs: 0, htmlKb: 0, imageKb: 0, pageKb: 0, images: 0, requestsSampled: 0 }, b, opts.summarize);
   }
 
   const $ = cheerio.load(scan.html);
@@ -97,7 +87,9 @@ export async function auditWebsite(scan: WebsiteScan, b?: Business): Promise<Aud
   const year = new Date().getFullYear();
 
   // ── security ──
-  if (scan.finalUrl.startsWith('http:')) add({ id: 'https', category: 'security', severity: 'high', title: 'Browsers mark your site "Not Secure"', detail: `The site loads over plain HTTP (${scan.finalUrl}).`, fix: 'Free HTTPS certificate on every page.' });
+  const localPreview = opts.preview && /^http:\/\/(localhost|127\.)/.test(scan.finalUrl);
+  if (localPreview) ok('HTTPS comes with publishing (this is a local preview)');
+  else if (scan.finalUrl.startsWith('http:')) add({ id: 'https', category: 'security', severity: 'high', title: 'Browsers mark your site "Not Secure"', detail: `The site loads over plain HTTP (${scan.finalUrl}).`, fix: 'Free HTTPS certificate on every page.' });
   else ok('Uses HTTPS');
   if (scan.finalUrl.startsWith('https:') && /\s(src|href)=["']http:\/\//i.test(html)) add({ id: 'mixed', category: 'security', severity: 'medium', title: 'Some files load insecurely', detail: 'The page pulls images or scripts over http:// (mixed content).', fix: 'Serve every asset over HTTPS.' });
   const jq = html.match(/jquery[-.]?(1\.\d+(\.\d+)?|2\.\d+(\.\d+)?)(\.min)?\.js/i);
@@ -142,9 +134,11 @@ export async function auditWebsite(scan: WebsiteScan, b?: Business): Promise<Aud
   const hasSchema = /"@type"\s*:\s*"(LocalBusiness|HomeAndConstructionBusiness|RoofingContractor|Plumber|Electrician|HVACBusiness|GeneralContractor|ProfessionalService|PostalAddress|OpeningHoursSpecification)"/i.test(html);
   if (!hasSchema) add({ id: 'schema', category: 'seo', severity: 'medium', title: 'Missing local business data for Google', detail: 'No LocalBusiness structured data (schema.org).', fix: 'Structured data with your hours, address, phone and service area.' });
   else ok('Has LocalBusiness structured data');
-  if (/<meta[^>]+name=["']robots["'][^>]+noindex/i.test(html)) add({ id: 'noindex', category: 'seo', severity: 'critical', title: 'Your site is hidden from Google', detail: 'A noindex tag tells Google not to list it.', fix: 'Indexable pages and a sitemap.' });
+  if (!opts.preview && /<meta[^>]+name=["']robots["'][^>]+noindex/i.test(html)) add({ id: 'noindex', category: 'seo', severity: 'critical', title: 'Your site is hidden from Google', detail: 'A noindex tag tells Google not to list it.', fix: 'Indexable pages and a sitemap.' });
   const origin = new URL(scan.finalUrl).origin;
-  const [robots, sitemap] = await Promise.all([fetchRaw(`${origin}/robots.txt`, { timeoutMs: 5000, maxBytes: 50_000 }), fetchRaw(`${origin}/sitemap.xml`, { timeoutMs: 5000, maxBytes: 200_000 })]);
+  const [robots, sitemap] = opts.preview
+    ? [{ ok: true, body: Buffer.from('') }, { ok: true, body: Buffer.from('<urlset>') }]
+    : await Promise.all([fetchRaw(`${origin}/robots.txt`, { timeoutMs: 5000, maxBytes: 50_000 }), fetchRaw(`${origin}/sitemap.xml`, { timeoutMs: 5000, maxBytes: 200_000 })]);
   if (!sitemap.ok || !/<urlset|<sitemapindex/i.test(sitemap.body.toString('utf8'))) add({ id: 'sitemap', category: 'seo', severity: 'low', title: 'No sitemap for Google', detail: '/sitemap.xml not found.', fix: 'Auto-generated sitemap.' });
   if (!robots.ok) add({ id: 'robots', category: 'seo', severity: 'low', title: 'No robots.txt', detail: '/robots.txt not found.', fix: 'Standard robots.txt pointing to the sitemap.' });
   const missingAlt = scan.images.filter((i) => !i.alt || !i.alt.trim()).length;
@@ -188,24 +182,77 @@ export async function auditWebsite(scan: WebsiteScan, b?: Business): Promise<Aud
   if (!$('link[rel~="icon"]').length) add({ id: 'favicon', category: 'trust', severity: 'low', title: 'No browser icon', detail: 'Missing favicon.', fix: 'Favicon from your logo.' });
 
   const ps = await psP;
-  if (ps) {
-    if (ps.performance < 50) add({ id: 'psi', category: 'speed', severity: 'high', title: 'Google rates your mobile speed as poor', detail: `PageSpeed ${ps.performance}/100${ps.lcp ? `, main content shows after ${ps.lcp}` : ''}.`, fix: 'Lightweight pages that score 90+.' });
-    else if (ps.performance < 90) add({ id: 'psi', category: 'speed', severity: 'medium', title: 'Mobile speed could be better', detail: `PageSpeed ${ps.performance}/100${ps.lcp ? `, LCP ${ps.lcp}` : ''}.`, fix: 'Lightweight pages that score 90+.' });
-    else ok(`Google PageSpeed ${ps.performance}/100`);
+  if (ps?.reportUrl) pageSpeedIssues(ps as PageSpeedResult, add, ok);
+  return finalize(scan, issues, passed, { ttfbMs: scan.timing.ttfbMs, htmlKb, imageKb: img.kb, pageKb, images: scan.images.length, requestsSampled: img.sampled, pagespeed: ps }, b, opts.summarize);
+}
+
+
+/** Our own checks already cover these Lighthouse findings in owner-friendly words; don't list them twice. */
+const COVERED = new Set(['document-title', 'meta-description', 'image-alt', 'robots-txt', 'is-crawlable', 'viewport', 'is-on-https', 'redirects-http', 'tap-targets']);
+const titles = (fs: PsiFinding[], n = 3) => fs.slice(0, n).map((f) => `${f.title}${f.displayValue ? ` (${f.displayValue})` : ''}`).join('; ');
+const sec = (ms?: number) => (ms ? `${(ms / 1000).toFixed(1)} s` : '');
+
+/** Google's scores and failing checks, as issues in the owner's terms (mobile first: most visitors are on phones). */
+function pageSpeedIssues(ps: PageSpeedResult, add: (i: AuditIssue) => void, ok: (s: string) => void) {
+  const m = ps.mobile;
+  const d = ps.desktop;
+  if (!m && !d) return;
+  // each area uses the phone run when Google scored it there, otherwise the computer run
+  const runFor = (c: PsiFinding['category']): PsiReport => (m?.scores[c] !== undefined ? m : d?.scores[c] !== undefined ? d : (m || d)!);
+  const failingIn = (r: PsiReport, c: PsiFinding['category']) => r.findings.filter((f) => f.category === c && !COVERED.has(f.id));
+  // ── speed ──
+  let main = runFor('performance');
+  let label = main.strategy;
+  let failing = (c: PsiFinding['category']) => failingIn(main, c);
+  const perf = main.scores.performance;
+  if (perf !== undefined) {
+    const savings = failing('performance').filter((f) => f.savingsMs || f.savingsKb).sort((a, b) => (b.savingsMs ?? 0) - (a.savingsMs ?? 0) || (b.savingsKb ?? 0) - (a.savingsKb ?? 0));
+    const field = main.field && main.field.overall === 'SLOW' ? ` Real visitors over the last 28 days also see it load slowly${main.field.lcpMs ? ` (main content after ${sec(main.field.lcpMs)})` : ''}.` : '';
+    const detail = `Google PageSpeed ${perf}/100 on ${label}${label === 'mobile' && d?.scores.performance !== undefined ? `, ${d.scores.performance}/100 on desktop` : ''}${label === 'desktop' && m ? ' (Google could not score phones for this page)' : ''}${main.lab.lcp ? `; main content appears after ${main.lab.lcp}` : ''}.${field}${savings.length ? ` Biggest fixes: ${titles(savings)}.` : ''}`;
+    if (perf < 50) add({ id: 'psi', category: 'speed', severity: 'high', title: `Google rates your ${label} speed as poor`, detail, fix: 'Lightweight pages that score 90+ on Google PageSpeed.' });
+    else if (perf < 90) add({ id: 'psi', category: 'speed', severity: 'medium', title: `${label === 'mobile' ? 'Mobile' : 'Desktop'} speed could be better`, detail, fix: 'Lightweight pages that score 90+ on Google PageSpeed.' });
+    else ok(`Google PageSpeed ${perf}/100 on ${label}`);
+    if (main.lab.clsValue !== undefined && main.lab.clsValue > 0.25) add({ id: 'psi-cls', category: 'speed', severity: 'medium', title: 'The page jumps around while it loads', detail: `Layout shift ${main.lab.cls} (Google wants under 0.1). Visitors tap the wrong thing.`, fix: 'Reserved space for images and fonts, so nothing moves.' });
   }
-  return finalize(scan, issues, passed, { ttfbMs: scan.timing.ttfbMs, htmlKb, imageKb: img.kb, pageKb, images: scan.images.length, requestsSampled: img.sampled, pagespeed: ps }, b);
+  // ── accessibility ──
+  main = runFor('accessibility'); label = main.strategy; failing = (c) => failingIn(main, c);
+  const a11y = main.scores.accessibility;
+  if (a11y !== undefined) {
+    const f = failing('accessibility');
+    const detail = `Google accessibility score ${a11y}/100.${f.length ? ` ${f.length} check${f.length === 1 ? '' : 's'} failed: ${titles(f)}.` : ''}`;
+    if (a11y < 70) add({ id: 'psi-a11y', category: 'accessibility', severity: 'high', title: 'Hard to use for people with low vision or screen readers', detail, fix: 'Readable contrast, labelled buttons and forms, proper headings.' });
+    else if (a11y < 90) add({ id: 'psi-a11y', category: 'accessibility', severity: 'medium', title: 'Some visitors will struggle to use your site', detail, fix: 'Readable contrast, labelled buttons and forms, proper headings.' });
+    else ok(`Google accessibility ${a11y}/100`);
+  }
+  // ── best practices (security, browser errors, outdated code) ──
+  main = runFor('best-practices'); label = main.strategy; failing = (c) => failingIn(main, c);
+  const bp = main.scores['best-practices'];
+  if (bp !== undefined) {
+    const f = failing('best-practices');
+    if (bp < 80) add({ id: 'psi-bp', category: 'security', severity: 'medium', title: 'Google flags problems with how the site is built', detail: `Best-practices score ${bp}/100.${f.length ? ` ${titles(f)}.` : ''}`, fix: 'Modern, secure code without browser errors.' });
+    else if (bp < 100 && f.length) add({ id: 'psi-bp', category: 'security', severity: 'low', title: 'A few technical warnings from Google', detail: `Best-practices score ${bp}/100. ${titles(f)}.`, fix: 'Modern, secure code without browser errors.' });
+    else ok(`Google best practices ${bp}/100`);
+  }
+  // ── search (only what our own SEO checks don't already say) ──
+  main = runFor('seo'); label = main.strategy; failing = (c) => failingIn(main, c);
+  const seo = main.scores.seo;
+  if (seo !== undefined) {
+    const f = failing('seo');
+    if (seo < 90 && f.length) add({ id: 'psi-seo', category: 'seo', severity: seo < 70 ? 'high' : 'medium', title: 'Google\'s search check found problems', detail: `Google SEO score ${seo}/100. ${titles(f)}.`, fix: 'Pages built to Google\'s search guidelines.' });
+    else if (seo >= 90) ok(`Google SEO ${seo}/100`);
+  }
 }
 
 const SEV_ORDER: Severity[] = ['critical', 'high', 'medium', 'low'];
 
-async function finalize(scan: WebsiteScan, issues: AuditIssue[], passed: string[], metrics: AuditResult['metrics'], b?: Business): Promise<AuditResult> {
+async function finalize(scan: WebsiteScan, issues: AuditIssue[], passed: string[], metrics: AuditResult['metrics'], b?: Business, withSummary = true): Promise<AuditResult> {
   issues.sort((a, c) => SEV_ORDER.indexOf(a.severity) - SEV_ORDER.indexOf(c.severity));
   // Exponential decay: a few small issues barely move the score; many serious ones push it down without hitting zero.
   const pen = (list: AuditIssue[]) => list.reduce((s, i) => s + PENALTY[i.severity], 0);
   const score = Math.max(5, Math.round(100 * Math.exp(-pen(issues) / 110)));
   const categories = Object.fromEntries(CATS.map((c) => [c, Math.round(100 * Math.exp(-pen(issues.filter((i) => i.category === c)) / 40))])) as Record<Category, number>;
   const grade = score >= 90 ? 'A' : score >= 75 ? 'B' : score >= 60 ? 'C' : score >= 40 ? 'D' : 'F';
-  const summary = await summarize(scan, issues, passed, score, b);
+  const summary = withSummary ? await summarize(scan, issues, passed, score, b) : { headline: `Scores ${score}/100.`, bullets: issues.slice(0, 3).map((i) => i.title), pitch: '', source: 'template' as const };
   return { url: scan.url, finalUrl: scan.finalUrl, reachable: scan.ok, score, grade, categories, issues, passed, metrics, summary, generatedAt: new Date().toISOString() };
 }
 

@@ -10,8 +10,9 @@ export interface SiteImage {
   width: number;
   height: number;
   alt: string;
-  credit?: string; // shown when the photo was not uploaded by the business
-  source: 'google' | 'stock';
+  /** the photographer's credit; Google requires it on every Places photo, the business's own included */
+  credit?: string;
+  source: 'google' | 'stock' | 'owner';
   kb?: number;
 }
 
@@ -54,7 +55,7 @@ export async function processPhotos(
   b: Business,
   theme: Theme,
   opts: { outDir: string; publicPrefix: string },
-): Promise<{ hero?: SiteImage; gallery: SiteImage[]; rejected: { ref: string; reason: string }[]; usable: number }> {
+): Promise<{ hero?: SiteImage; gallery: SiteImage[]; rejected: { ref: string; reason: string }[]; usable: number; items: ProcessedPhoto[] }> {
   const rules = theme.images;
   const rejected: { ref: string; reason: string }[] = [];
   const sized = b.photos.filter((p) => {
@@ -81,6 +82,7 @@ export async function processPhotos(
   // Hero: prefer a wide owner photo.
   const heroIdx = Math.max(0, good.findIndex((g) => g.p.isOwner && g.p.width / g.p.height >= 1.25));
   const images: SiteImage[] = [];
+  const items: ProcessedPhoto[] = [];
   let hero: SiteImage | undefined;
   let n = 0;
   for (let k = 0; k < good.length; k++) {
@@ -95,14 +97,18 @@ export async function processPhotos(
       width: enc.width,
       height: enc.height,
       alt: isHero ? `${b.name} at work` : `Project photo from ${b.name}`,
-      credit: g.p.isOwner ? undefined : g.p.authors[0]?.name ? `Photo: ${g.p.authors[0].name} via Google` : 'Photo via Google',
+      credit: g.p.authors[0]?.name ? `Photo: ${g.p.authors[0].name} via Google` : 'Photo via Google',
       source: 'google',
       kb: Math.round(enc.data.length / 1024),
     };
     if (isHero) hero = img; else images.push(img);
+    items.push({ image: img, photo: g.p, raw: g.raw });
   }
   // If the gallery would fall short of its minimum, let the hero photo appear there too.
   const minPhotos = ((theme.sectionRules.gallery || {}) as { minPhotos?: number }).minPhotos ?? 3;
   if (hero && images.length < minPhotos && images.length + 1 >= minPhotos) images.unshift({ ...hero, alt: `Project photo from ${b.name}` });
-  return { hero, gallery: images.slice(0, rules.maxGallery), rejected, usable: good.length };
+  return { hero, gallery: images.slice(0, rules.maxGallery), rejected, usable: good.length, items };
 }
+
+/** A kept photo with its downloaded original, for the design planner's ranking and art-directed crops (src/design/photos.ts). */
+export interface ProcessedPhoto { image: SiteImage; photo: Photo; raw: Buffer }

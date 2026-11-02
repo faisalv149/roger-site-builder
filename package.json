@@ -14,10 +14,17 @@
     "fixtures": "tsx scripts/make-fixtures.ts",
     "sweep": "tsx scripts/sweep.ts",
     "e2e": "tsx scripts/e2e.ts out/qa/studio",
-    "e2e:imessage": "tsx scripts/imessage-e2e.ts out/qa/imessage"
+    "e2e:imessage": "tsx scripts/imessage-e2e.ts out/qa/imessage",
+    "qa:design": "tsx scripts/design-qa.ts",
+    "fixtures:plumbing": "tsx scripts/make-plumbing-fixtures.ts",
+    "qa:categories": "tsx scripts/category-qa.ts",
+    "qa:owner": "tsx scripts/owner-journey.ts",
+    "qa:release": "tsx scripts/release-qa.ts",
+    "qa:seo-examples": "tsx scripts/seo-examples.ts",
+    "fixtures:categories": "tsx scripts/make-category-fixtures.ts"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.2.0",
@@ -26,6 +33,7 @@
     "cheerio": "^1.2.0",
     "dotenv": "^18.0.9",
     "express": "^4.22.3",
+    "lighthouse": "^13.6.0",
     "lucide-static": "^1.61.0",
     "multer": "^2.5.0",
     "sharp": "^0.35.5",

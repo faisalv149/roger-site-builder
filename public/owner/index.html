@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<title>Customise your website · Roger</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="owner.css">
+</head>
+<body>
+<a class="o-skip" href="#o-dock">Skip to owner tools</a>
+
+<!-- the business's website, as visitors will see it -->
+<main class="o-stage" aria-label="Website preview">
+  <iframe id="o-frame" title="Your website preview" class="o-frame"></iframe>
+  <div class="o-loading" id="o-loading" role="status"><span class="o-spin" aria-hidden="true"></span><span>Loading your website…</span></div>
+</main>
+
+<!-- owner tools: visually separate from the website's own buttons -->
+<div class="o-dock" id="o-dock" role="toolbar" aria-label="Website owner tools" hidden>
+  <span class="o-dock-tag" aria-hidden="true">Owner</span>
+  <button type="button" class="o-dbtn o-customise" id="o-customise" aria-expanded="false" aria-controls="o-panel">
+    <span class="o-swatch" id="o-swatch" aria-hidden="true"></span><span class="o-lbl">Customise</span>
+  </button>
+  <span class="o-sep" aria-hidden="true"></span>
+  <button type="button" class="o-dbtn o-save" id="o-save" aria-describedby="o-status">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11l3 3v13H5z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/></svg><span class="o-lbl">Save design</span>
+  </button>
+  <span class="o-status" id="o-status" role="status" aria-live="polite">Saved</span>
+  <span class="o-sep" aria-hidden="true"></span>
+  <button type="button" class="o-dbtn o-buy" id="o-buy">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.4 11h10.2L20 7H6.3"/><circle cx="9" cy="19.5" r="1.4"/><circle cx="17" cy="19.5" r="1.4"/></svg><span class="o-lbl" id="o-buy-lbl">Buy this website</span>
+  </button>
+  <button type="button" class="o-dbtn o-min" id="o-min" aria-label="Minimise owner tools">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg>
+  </button>
+</div>
+<button type="button" class="o-restore" id="o-restore" hidden aria-label="Show owner tools">
+  <span class="o-swatch" id="o-swatch2" aria-hidden="true"></span><span>Owner tools</span>
+</button>
+
+<!-- customiser: a floating panel on desktop, a bottom sheet on phones -->
+<section class="o-panel" id="o-panel" role="dialog" aria-modal="false" aria-labelledby="o-panel-h" hidden>
+  <header class="o-ph">
+    <h2 id="o-panel-h">Customise</h2>
+    <div class="o-ph-actions">
+      <button type="button" class="o-ibtn" id="o-undo" aria-label="Undo last change" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg><span>Undo</span></button>
+      <button type="button" class="o-ibtn" id="o-reset" aria-label="Reset to the saved design" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span>Reset</span></button>
+      <button type="button" class="o-ibtn o-close" id="o-close" aria-label="Close customise panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+  </header>
+  <div class="o-tabs" role="tablist" aria-label="Customise sections" id="o-tabs"></div>
+  <div class="o-tabpanels" id="o-tabpanels"></div>
+  <p class="o-note" id="o-note" role="status" aria-live="polite"></p>
+</section>
+
+<!-- demo checkout + domain setup -->
+<dialog class="o-modal" id="o-checkout" aria-labelledby="o-co-h">
+  <div class="o-modal-in" id="o-co-body"></div>
+</dialog>
+
+<!-- the owner's current website against the new site, the same checks on both -->
+<aside class="o-scores" id="o-scores" aria-labelledby="o-scores-h" hidden></aside>
+
+<div class="o-toasts" id="o-toasts" role="status" aria-live="polite"></div>
+
+<div class="o-error" id="o-error" hidden>
+  <h1>This editor link isn't working</h1>
+  <p id="o-error-text">Open the link Roger sent you, or text Roger for a new one.</p>
+</div>
+
+<script src="owner.js"></script>
+</body>
+</html>

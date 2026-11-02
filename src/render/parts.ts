@@ -35,7 +35,7 @@ export function head(id: string, h: string, sub?: string, center = false) {
 
 export function stars(n: number, size = 16) {
   const full = Math.round(n);
-  return `<span class="stars" aria-label="${n} out of 5 stars">${Array.from({ length: 5 }, (_, i) =>
+  return `<span class="stars" role="img" aria-label="${n} out of 5 stars">${Array.from({ length: 5 }, (_, i) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true" fill="${i < full ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6L2.5 9.4l6.6-.8z"/></svg>`).join('')}</span>`;
 }
 
@@ -68,6 +68,18 @@ export function leadForm(m: SiteModel, opts: { compact?: boolean; title?: string
   const id = `f${++formSeq}`;
   const svc = m.services.items.map((s) => `<option>${esc(s.label)}</option>`).join('');
   const consent = m.theme.roger.consentCopy ? `<p class="consent">${esc(m.theme.roger.consentCopy)}</p>` : '';
+  // personalised builds say what the form is for; an appointment is a request until the business confirms it
+  const goal = m.design?.plan.goal;
+  const appt = goal === 'appointment';
+  const kind = goal ? `<input type="hidden" name="kind" value="${appt ? 'appointment-request' : goal === 'call' ? 'message' : goal === 'order' ? 'order-enquiry' : goal === 'enquiry' ? 'enquiry' : 'quote-request'}">` : '';
+  const noun = m.design?.profile.noun ?? 'service';
+  const trades = !m.design || m.design.plan.category === 'trades';
+  const when = appt ? `<div class="row2"><label for="${id}-day">Preferred day<input id="${id}-day" name="preferredDate" type="date" data-min-today></label>
+    <label for="${id}-time">Time of day<select id="${id}-time" name="preferredTime"><option value="">Any time</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></label></div>` : '';
+  const submit = appt ? 'Send appointment request' : goal === 'order' ? 'Send order enquiry' : goal === 'enquiry' ? 'Send enquiry' : m.copy.actionKind === 'form' ? m.copy.action : m.copy.quoteTitle;
+  const ok = appt
+    ? `Request sent. ${m.business.name} will contact you to confirm a time; nothing is booked until they do.`
+    : `Thanks! ${m.business.name} got your request and will reach out shortly.`;
   return `<form class="form lead-form" method="post" action="${esc(m.urls.leadEndpoint)}" data-business="${esc(m.business.name)}">
   ${opts.title ? `<h3 class="form-title h">${esc(opts.title)}</h3>` : ''}
   <div class="fields">
@@ -76,14 +88,16 @@ export function leadForm(m: SiteModel, opts: { compact?: boolean; title?: string
       <label for="${id}-phone">Mobile phone<input id="${id}-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" required></label>
     </div>
     ${opts.compact ? '' : `<div class="row2"><label for="${id}-email"><span>Email <span class="muted">(optional)</span></span><input id="${id}-email" name="email" type="email" autocomplete="email"></label>
-    <label for="${id}-zip">ZIP code<input id="${id}-zip" name="zip" inputmode="numeric" autocomplete="postal-code" maxlength="10"></label></div>`}
-    ${svc ? `<label for="${id}-svc">What do you need?<select id="${id}-svc" name="service"><option value="">Choose a service</option>${svc}<option>Something else</option></select></label>` : ''}
+    ${trades ? `<label for="${id}-zip">ZIP code<input id="${id}-zip" name="zip" inputmode="numeric" autocomplete="postal-code" maxlength="10"></label>` : ''}</div>`}
+    ${svc ? `<label for="${id}-svc">What do you need?<select id="${id}-svc" name="service"><option value="">Choose a ${esc(noun)}</option>${svc}<option>Something else</option></select></label>` : ''}
+    ${when}
     ${opts.compact ? '' : `<label for="${id}-msg"><span>Details <span class="muted">(optional)</span></span><textarea id="${id}-msg" name="message" rows="3"></textarea></label>`}
+    ${kind}
     <div class="hp" aria-hidden="true"><input type="text" name="company_website" tabindex="-1" autocomplete="off"></div>
-    <button class="btn btn-primary btn-block" type="submit">${esc(m.copy.actionKind === 'form' ? m.copy.action : m.copy.quoteTitle)}</button>
+    <button class="btn btn-primary btn-block" type="submit">${esc(submit)}</button>
     ${consent}
   </div>
-  <p class="ok" role="status">Thanks! ${esc(m.business.name)} got your request and will reach out shortly.</p>
+  <p class="ok" role="status">${esc(ok)}</p>
 </form>`;
 }
 

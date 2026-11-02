@@ -1,0 +1,254 @@
+{
+  "placeId": "mock-cat-velvet",
+  "name": "Velvet & Vine Hair Studio",
+  "primaryType": "hair_salon",
+  "primaryTypeLabel": "Hair salon",
+  "types": [
+    "hair_salon",
+    "beauty_salon",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "1508 S Congress Ave, Austin, TX 78704, USA",
+  "shortAddress": "1508 S Congress Ave, Austin",
+  "street": "1508 S Congress Ave",
+  "city": "Austin",
+  "state": "TX",
+  "zip": "78704",
+  "country": "US",
+  "phone": "(512) 555-0187",
+  "phoneE164": "+15125550187",
+  "mapsUrl": "https://maps.google.com/?q=Velvet%20%26%20Vine%20Hair%20Studio",
+  "rating": 4.8,
+  "reviewCount": 212,
+  "reviews": [
+    {
+      "author": "Maya Torres",
+      "rating": 5,
+      "text": "Best balayage I have had. They took time to understand what I wanted and the colour lasted for months.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Jordan Lee",
+      "rating": 5,
+      "text": "Calm studio, great music, and a precise cut. Booking a visit was easy.",
+      "relativeTime": "2 months ago"
+    },
+    {
+      "author": "Ana Pierce",
+      "rating": 4,
+      "text": "Lovely blow-dry before a wedding. Ran ten minutes late but worth the wait.",
+      "relativeTime": "3 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-velvet-0.jpg",
+      "width": 2400,
+      "height": 1600,
+      "authors": [
+        {
+          "name": "Velvet & Vine Hair Studio"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "storefront"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-velvet-1.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Velvet & Vine Hair Studio"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "team"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-velvet-2.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Velvet & Vine Hair Studio"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-velvet-3.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Velvet & Vine Hair Studio"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-velvet-4.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Velvet & Vine Hair Studio"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 2,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 19,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 19,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 19,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 19,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 9,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 19,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: Closed",
+      "Tuesday: 9:00 AM – 7:00 PM",
+      "Wednesday: 9:00 AM – 7:00 PM",
+      "Thursday: 9:00 AM – 7:00 PM",
+      "Friday: 9:00 AM – 7:00 PM",
+      "Saturday: 9:00 AM – 7:00 PM",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Women's cut & style",
+      "price": {
+        "kind": "from",
+        "amount": 65,
+        "currency": "USD"
+      },
+      "source": "sample",
+      "duration": "60 min",
+      "description": "Consultation, wash, cut and finish."
+    },
+    {
+      "name": "Men's cut",
+      "price": {
+        "kind": "fixed",
+        "amount": 38,
+        "currency": "USD"
+      },
+      "source": "sample",
+      "duration": "30 min"
+    },
+    {
+      "name": "Colour",
+      "price": {
+        "kind": "from",
+        "amount": 95,
+        "currency": "USD"
+      },
+      "source": "sample",
+      "duration": "2 h"
+    },
+    {
+      "name": "Balayage",
+      "price": {
+        "kind": "range",
+        "amount": 180,
+        "max": 260,
+        "currency": "USD"
+      },
+      "source": "sample",
+      "duration": "3 h",
+      "description": "Hand-painted highlights, toner included."
+    },
+    {
+      "name": "Blow-dry",
+      "price": {
+        "kind": "fixed",
+        "amount": 45,
+        "currency": "USD"
+      },
+      "source": "sample",
+      "duration": "45 min"
+    },
+    {
+      "name": "Bridal styling",
+      "source": "sample",
+      "description": "Priced after a trial."
+    }
+  ],
+  "qaNote": "salon, sample prices (fixed / from / range / on request), strong photos and a team photo"
+}

@@ -1,0 +1,202 @@
+{
+  "placeId": "mock-demo-bluebird",
+  "name": "Bluebird Bath & Plumbing",
+  "primaryType": "plumber",
+  "primaryTypeLabel": "Plumber",
+  "types": [
+    "plumber",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "1900 J St, Sacramento, CA 95816, USA",
+  "shortAddress": "1900 J St, Sacramento",
+  "street": "1900 J St",
+  "city": "Sacramento",
+  "state": "CA",
+  "zip": "95816",
+  "country": "US",
+  "lat": 38.576,
+  "lng": -121.481,
+  "phone": "(916) 555-0131",
+  "phoneE164": "+19165550131",
+  "website": "{{BASE}}/demo-sites/bluebird-bath/",
+  "mapsUrl": "https://maps.google.com/?q=Bluebird%20Bath%20%26%20Plumbing",
+  "rating": 4.8,
+  "reviewCount": 52,
+  "reviews": [
+    {
+      "author": "Natalie Brooks",
+      "rating": 5,
+      "text": "They redid our primary bathroom plumbing for the remodel: new shower valve, freestanding tub filler, everything level and tidy.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Owen Fischer",
+      "rating": 5,
+      "text": "Beautiful fixture installation. The consultation up front made the whole project easy to plan.",
+      "relativeTime": "2 months ago"
+    },
+    {
+      "author": "Leah Simmons",
+      "rating": 5,
+      "text": "Kitchen sink and disposal replaced, plus a new shutoff valve. Meticulous work.",
+      "relativeTime": "3 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/demo-bluebird-0.jpg",
+      "width": 2400,
+      "height": 1600,
+      "authors": [
+        {
+          "name": "Bluebird Bath & Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-bluebird-1.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Bluebird Bath & Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-bluebird-2.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Bluebird Bath & Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-bluebird-3.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Bluebird Bath & Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-bluebird-4.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Bluebird Bath & Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 8:00 AM – 5:00 PM",
+      "Tuesday: 8:00 AM – 5:00 PM",
+      "Wednesday: 8:00 AM – 5:00 PM",
+      "Thursday: 8:00 AM – 5:00 PM",
+      "Friday: 8:00 AM – 5:00 PM",
+      "Saturday: Closed",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -360,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Sacramento",
+    "Elk Grove",
+    "Folsom",
+    "Davis",
+    "Roseville"
+  ],
+  "source": "mock",
+  "qaNote": "fixtures/remodel focus, large project photos, 22 years → modern & premium"
+}

@@ -1,0 +1,249 @@
+{
+  "placeId": "mock-demo-copperleaf",
+  "name": "Copperleaf Plumbing Co.",
+  "primaryType": "plumber",
+  "primaryTypeLabel": "Plumber",
+  "types": [
+    "plumber",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "2200 SE Hawthorne Blvd, Portland, OR 97214, USA",
+  "shortAddress": "2200 SE Hawthorne Blvd, Portland",
+  "street": "2200 SE Hawthorne Blvd",
+  "city": "Portland",
+  "state": "OR",
+  "zip": "97214",
+  "country": "US",
+  "lat": 45.512,
+  "lng": -122.643,
+  "phone": "(503) 555-0142",
+  "phoneE164": "+15035550142",
+  "website": "{{BASE}}/demo-sites/copperleaf-plumbing/",
+  "mapsUrl": "https://maps.google.com/?q=Copperleaf%20Plumbing%20Co.",
+  "rating": 4.9,
+  "reviewCount": 134,
+  "reviews": [
+    {
+      "author": "Dana Whitfield",
+      "rating": 5,
+      "text": "They replaced our old tank with a tankless water heater. Clean install, explained every step, and the crew left the basement spotless.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Marcus Bell",
+      "rating": 5,
+      "text": "Full repipe of a 1920s house. Careful with the plaster, finished on schedule and the water pressure is finally great.",
+      "relativeTime": "2 months ago"
+    },
+    {
+      "author": "Priya Raman",
+      "rating": 5,
+      "text": "Fixed a hidden leak behind our shower and showed us photos of the problem before doing anything. Honest people.",
+      "relativeTime": "3 months ago"
+    },
+    {
+      "author": "Tom Okafor",
+      "rating": 4,
+      "text": "Drain cleaning on a stubborn kitchen line. Took longer than expected but they stayed until it was clear.",
+      "relativeTime": "4 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/demo-copperleaf-0.jpg",
+      "width": 2400,
+      "height": 1600,
+      "authors": [
+        {
+          "name": "Copperleaf Plumbing Co."
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-copperleaf-1.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Copperleaf Plumbing Co."
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "team"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-copperleaf-2.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Copperleaf Plumbing Co."
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-copperleaf-3.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Copperleaf Plumbing Co."
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-copperleaf-4.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Copperleaf Plumbing Co."
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-copperleaf-5.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Copperleaf Plumbing Co."
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "vehicle"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-copperleaf-6.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Copperleaf Plumbing Co."
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 13,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 7:00 AM – 5:00 PM",
+      "Tuesday: 7:00 AM – 5:00 PM",
+      "Wednesday: 7:00 AM – 5:00 PM",
+      "Thursday: 7:00 AM – 5:00 PM",
+      "Friday: 7:00 AM – 5:00 PM",
+      "Saturday: 8:00 AM – 1:00 PM",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -360,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Portland",
+    "Beaverton",
+    "Gresham",
+    "Lake Oswego",
+    "Milwaukie",
+    "Tigard"
+  ],
+  "source": "mock",
+  "qaNote": "rich data: team photo, large project photos, 4.9★, website with licence/years → modern & premium"
+}

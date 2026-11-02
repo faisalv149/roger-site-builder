@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Compare page families · Roger Studio</title>
+<style>
+:root{--bg:#eef0f3;--ink:#111;--muted:#5b6470;--line:#d5d9df}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;padding:14px 20px;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:2}
+h1{font-size:17px;margin:0}
+label{font-size:13px;font-weight:600;display:inline-flex;gap:8px;align-items:center}
+select,button{font:inherit;min-height:38px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:0 10px}
+button[aria-pressed=true]{background:#111;color:#fff;border-color:#111}
+.note{font-size:12px;color:var(--muted);margin:0}
+main{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;padding:16px}
+figure{margin:0;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+figcaption{padding:8px 12px;font-weight:700;font-size:14px;border-bottom:1px solid var(--line)}
+.vp{position:relative;overflow:hidden;height:calc(100vh - 150px)}
+.vp iframe{border:0;transform-origin:0 0;position:absolute;left:0;top:0;background:#fff}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Compare page families</h1>
+  <label>Site <select id="draft"></select></label>
+  <span role="group" aria-label="Viewport width"><button type="button" data-w="1440" aria-pressed="true">1440</button> <button type="button" data-w="768" aria-pressed="false">768</button> <button type="button" data-w="390" aria-pressed="false">390</button></span>
+  <p class="note">Same business facts, prices, main action and photos in each family. Internal view: nothing is saved.</p>
+</header>
+<main id="cols"></main>
+<script>
+var FAMS = [['editorial-showcase', 'Editorial Showcase'], ['warm-local', 'Warm Local'], ['bold-practical', 'Bold Practical']];
+var width = 1440;
+var cols = document.getElementById('cols'), sel = document.getElementById('draft');
+cols.innerHTML = FAMS.map(function (f) { return '<figure><figcaption>' + f[1] + '</figcaption><div class="vp"><iframe title="' + f[1] + '" data-f="' + f[0] + '"></iframe></div></figure>'; }).join('');
+function fit() {
+  [].forEach.call(document.querySelectorAll('.vp'), function (vp) {
+    var fr = vp.querySelector('iframe'), s = vp.clientWidth / width;
+    fr.style.width = width + 'px'; fr.style.height = (vp.clientHeight / s) + 'px'; fr.style.transform = 'scale(' + s + ')';
+  });
+}
+function load() {
+  var id = sel.value; if (!id) return;
+  [].forEach.call(document.querySelectorAll('iframe'), function (fr) {
+    fetch('/api/drafts/' + encodeURIComponent(id) + '/compare/' + fr.getAttribute('data-f')).then(function (r) { return r.text(); }).then(function (h) { fr.srcdoc = h; });
+  });
+  fit();
+}
+document.querySelector('[role=group]').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  width = Number(b.getAttribute('data-w'));
+  [].forEach.call(this.querySelectorAll('button'), function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+  fit();
+});
+fetch('/api/drafts-list').then(function (r) { return r.json(); }).then(function (j) {
+  sel.innerHTML = j.drafts.map(function (d) { return '<option value="' + d.id + '">' + d.name.replace(/</g, '&lt;') + ' · ' + d.category + '</option>'; }).join('');
+  var q = new URLSearchParams(location.search).get('d'); if (q) sel.value = q;
+  load();
+});
+sel.addEventListener('change', load);
+addEventListener('resize', fit);
+</script>
+</body>
+</html>

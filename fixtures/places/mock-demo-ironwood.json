@@ -1,0 +1,187 @@
+{
+  "placeId": "mock-demo-ironwood",
+  "name": "Ironwood Plumbing & Heating",
+  "primaryType": "plumber",
+  "primaryTypeLabel": "Plumber",
+  "types": [
+    "plumber",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "601 W 1st Ave, Spokane, WA 99201, USA",
+  "shortAddress": "601 W 1st Ave, Spokane",
+  "street": "601 W 1st Ave",
+  "city": "Spokane",
+  "state": "WA",
+  "zip": "99201",
+  "country": "US",
+  "lat": 47.656,
+  "lng": -117.42,
+  "phone": "(509) 555-0122",
+  "phoneE164": "+15095550122",
+  "website": "{{BASE}}/demo-sites/ironwood-plumbing/",
+  "mapsUrl": "https://maps.google.com/?q=Ironwood%20Plumbing%20%26%20Heating",
+  "rating": 4.8,
+  "reviewCount": 64,
+  "reviews": [
+    {
+      "author": "Grace Moreno",
+      "rating": 5,
+      "text": "Gas line for our new range, permit and inspection handled. Very professional.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Dylan Ward",
+      "rating": 5,
+      "text": "Sewer camera inspection before we bought the house saved us a fortune. Clear report.",
+      "relativeTime": "2 months ago"
+    },
+    {
+      "author": "Ruth Becker",
+      "rating": 5,
+      "text": "Drain cleaning and a new garbage disposal. On time and polite.",
+      "relativeTime": "3 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/demo-ironwood-0.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Ironwood Plumbing & Heating"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-ironwood-1.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Ironwood Plumbing & Heating"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "team"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-ironwood-2.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Ironwood Plumbing & Heating"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-ironwood-3.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Ironwood Plumbing & Heating"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "vehicle"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 7:00 AM – 5:00 PM",
+      "Tuesday: 7:00 AM – 5:00 PM",
+      "Wednesday: 7:00 AM – 5:00 PM",
+      "Thursday: 7:00 AM – 5:00 PM",
+      "Friday: 7:00 AM – 5:00 PM",
+      "Saturday: Closed",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -360,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Spokane",
+    "Spokane Valley",
+    "Liberty Lake",
+    "Cheney"
+  ],
+  "source": "mock",
+  "qaNote": "QA builds it with an explicitly chosen theme (plumbing-trust): the theme stays authoritative"
+}

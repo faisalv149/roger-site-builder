@@ -57,10 +57,14 @@ interface ClaudeFacts {
   servicesMentioned?: string[];
   serviceBlurbs?: { id: string; blurb: string }[];
   services?: OwnService[];
+  design?: DesignAdvice;
 }
 
+/** Claude's constrained design suggestion (plumbing pilot). The planner validates it; rules decide without it. */
+export interface DesignAdvice { style?: string | null; mainService?: string | null; headline?: string | null; subline?: string | null }
+
 /** A service the business itself lists (its website, or failing that, what reviews say it provides). */
-export interface OwnService { name: string; description: string; icon: string }
+export interface OwnService { name: string; description: string; icon: string; price?: { kind: 'fixed' | 'from' | 'range' | 'unit'; amount: number; max?: number; unit?: string; currency?: string } | null }
 
 export interface FactsResult {
   facts: Facts;
@@ -69,17 +73,26 @@ export interface FactsResult {
   servicesMentioned: string[];
   serviceBlurbs: Record<string, string>;
   claudeMs?: number;
+  design?: DesignAdvice;
 }
+
+const DESIGN_SYSTEM =
+  ' Also suggest a website design (design): style is one of local-trusted (warm, reviews, team, service area), bold-direct ' +
+  '(fast contact, practical; right for urgent work), modern-premium (editorial, large project photos, workmanship); mainService is the ' +
+  'one service the site should lead with, copied from your services list or themeServices; headline (max 9 words) names that service and ' +
+  'the city; subline (max 28 words) says plainly what the business does. Headline and subline may only use facts from the inputs: no ' +
+  'superlatives, prices, phone numbers, "free", "best", "family-owned", "same-day", and no 24/7, emergency, licensed, insured, warranty ' +
+  'or years unless those are stated. When designPreferences is given, follow it.';
 
 /**
  * Facts the site is allowed to state. Rule from the theme package: only show facts the business states.
  * Claude reads the website + reviews when a key is configured; regex heuristics otherwise (and as a floor).
  */
-export async function extractFacts(b: Business, theme: Theme, scan?: WebsiteScan): Promise<FactsResult> {
+export async function extractFacts(b: Business, theme: Theme, scan?: WebsiteScan, opts: { design?: { style?: string; service?: string; goal?: string } } = {}): Promise<FactsResult> {
   const h = heuristicFacts(b, scan);
   const services = theme.services.defaults.map((s) => ({ id: s.id, label: s.label }));
   const ai = await claudeJson<ClaudeFacts>({
-    system:
+    system: (opts.design ? DESIGN_SYSTEM : '') +
       'You extract verifiable facts about a local business for its website. Never invent facts. ' +
       'License, insurance, warranty and years in business must be explicitly stated on the business\'s OWN website text; otherwise return null. ' +
       'Emergency service and maintenance plans may also be inferred from the business hours or customer reviews. ' +
@@ -95,6 +108,7 @@ export async function extractFacts(b: Business, theme: Theme, scan?: WebsiteScan
       websiteText: scan?.ok ? scan.text.slice(0, 9000) : null,
       reviews: b.reviews.map((r) => ({ rating: r.rating, text: r.text })),
       themeServices: services,
+      ...(opts.design ? { designPreferences: opts.design } : {}),
     }),
     toolName: 'record_facts',
     toolDescription: 'Record the facts found about the business.',
@@ -122,10 +136,33 @@ export async function extractFacts(b: Business, theme: Theme, scan?: WebsiteScan
               name: { type: 'string', description: 'The business\'s own name for the service, 1-5 words' },
               description: { type: 'string', description: 'One plain sentence, max 14 words, from what the inputs say' },
               icon: { type: 'string', enum: SERVICE_ICONS, description: 'Closest matching outline icon' },
+              price: {
+                type: ['object', 'null'],
+                description: 'Only when the website states this exact price in writing; otherwise null. Never estimate or infer a price.',
+                properties: {
+                  kind: { type: 'string', enum: ['fixed', 'from', 'range', 'unit'] },
+                  amount: { type: 'number' },
+                  max: { type: 'number', description: 'top of a range' },
+                  unit: { type: 'string', enum: ['hour', 'session', 'class', 'visit', 'month', 'year', 'week', 'person', 'item', 'day'] },
+                  currency: { type: 'string', description: 'ISO code, e.g. USD' },
+                },
+                required: ['kind', 'amount'],
+              },
             },
             required: ['name', 'description', 'icon'],
           },
         },
+        ...(opts.design ? {
+          design: {
+            type: 'object',
+            properties: {
+              style: { type: ['string', 'null'], enum: ['clean-professional', 'local-trusted', 'bold-direct', 'modern-premium', null] },
+              mainService: { type: ['string', 'null'] },
+              headline: { type: ['string', 'null'] },
+              subline: { type: ['string', 'null'] },
+            },
+          },
+        } : {}),
       },
       required: ['servicesMentioned', 'serviceBlurbs', 'services'],
     },
@@ -150,8 +187,9 @@ export async function extractFacts(b: Business, theme: Theme, scan?: WebsiteScan
   for (const s of d.serviceBlurbs || []) if (s.id && s.blurb) blurbs[s.id] = s.blurb.trim();
   const seen = new Set<string>();
   const own = (d.services || [])
-    .map((s) => ({ name: String(s.name || '').trim().slice(0, 60), description: String(s.description || '').trim().slice(0, 160), icon: String(s.icon || '') }))
+    .map((s) => ({ name: String(s.name || '').trim().slice(0, 60), description: String(s.description || '').trim().slice(0, 160), icon: String(s.icon || ''), price: s.price && typeof s.price === 'object' && Number.isFinite(s.price.amount) ? s.price : undefined }))
     .filter((s) => s.name && !seen.has(s.name.toLowerCase()) && seen.add(s.name.toLowerCase()))
     .slice(0, 8);
-  return { facts, services: own, servicesMentioned: d.servicesMentioned || [], serviceBlurbs: blurbs, claudeMs: ai.ms };
+  const design = opts.design && d.design && typeof d.design === 'object' ? d.design : undefined;
+  return { facts, services: own, servicesMentioned: d.servicesMentioned || [], serviceBlurbs: blurbs, claudeMs: ai.ms, design };
 }

@@ -1,0 +1,170 @@
+{
+  "placeId": "mock-demo-nightjar",
+  "name": "Nightjar Water Heater Pros",
+  "primaryType": "plumber",
+  "primaryTypeLabel": "Plumber",
+  "types": [
+    "plumber",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "320 Gold Ave SW, Albuquerque, NM 87102, USA",
+  "shortAddress": "320 Gold Ave SW, Albuquerque",
+  "street": "320 Gold Ave SW",
+  "city": "Albuquerque",
+  "state": "NM",
+  "zip": "87102",
+  "country": "US",
+  "lat": 35.083,
+  "lng": -106.651,
+  "phone": "(505) 555-0158",
+  "phoneE164": "+15055550158",
+  "mapsUrl": "https://maps.google.com/?q=Nightjar%20Water%20Heater%20Pros",
+  "rating": 4.6,
+  "reviewCount": 23,
+  "reviews": [
+    {
+      "author": "Ben Archuleta",
+      "rating": 5,
+      "text": "Water heater died on Friday and they installed a new one Monday morning. Hauled the old tank away too.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Cora Tafoya",
+      "rating": 4,
+      "text": "Tankless water heater flush and descaling. Hot water is back to normal.",
+      "relativeTime": "2 months ago"
+    },
+    {
+      "author": "Ivan Petrov",
+      "rating": 5,
+      "text": "Replaced the anode rod and thermostat instead of selling us a new heater. Appreciated that.",
+      "relativeTime": "3 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/demo-nightjar-0.jpg",
+      "width": 1300,
+      "height": 866,
+      "authors": [
+        {
+          "name": "Nightjar Water Heater Pros"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-nightjar-1.jpg",
+      "width": 1200,
+      "height": 800,
+      "authors": [
+        {
+          "name": "Nightjar Water Heater Pros"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 18,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 12,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 7:00 AM – 6:00 PM",
+      "Tuesday: 7:00 AM – 6:00 PM",
+      "Wednesday: 7:00 AM – 6:00 PM",
+      "Thursday: 7:00 AM – 6:00 PM",
+      "Friday: 7:00 AM – 6:00 PM",
+      "Saturday: 8:00 AM – 12:00 PM",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -360,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Albuquerque",
+    "Rio Rancho",
+    "Corrales",
+    "Los Lunas"
+  ],
+  "source": "mock",
+  "qaNote": "water heater priority, two smaller photos (no photo-led hero), appointment goal in QA"
+}

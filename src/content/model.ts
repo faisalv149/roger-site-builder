@@ -2,6 +2,7 @@ import type { Theme } from '../theme/schema.js';
 import type { BrandResult, Business, Facts, ServiceItem } from '../types.js';
 import type { SiteImage } from '../brand/photos.js';
 import { digits, fillPlaceholders, titleCase, truncateWords } from '../util/text.js';
+import type { DesignModel } from '../design/compose.js';
 
 export interface SiteModel {
   slug: string;
@@ -47,6 +48,8 @@ export interface SiteModel {
   preview: boolean;
   generatedAt: string;
   warnings: string[];
+  /** personalisation pilot: the design plan and what its renderers need (src/design/compose.ts) */
+  design?: DesignModel;
 }
 
 export interface ModelInputs {

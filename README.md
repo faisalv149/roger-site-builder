@@ -28,6 +28,16 @@ Studio (`/`) lets you: find a business, add an existing website, pick a library 
 
 **Built into every site** (`src/render/widgets.ts`, chosen from the business data at build time, whatever the theme): a **review slider** when there are 2+ Google reviews (auto-advances, pauses on hover/focus, stop/start button, swipe and arrows, Read more; W3C carousel pattern); a **full-screen photo viewer** on every gallery photo (swipe, arrow keys, Esc), arrows on scrolling galleries and "+N more" on grids; a **gallery added automatically** to themes without one when there are 4+ photos; and the **Roger widget** bottom right (Book / Chat / Call, minimisable). The widget runs on demo content for now (a booking calendar, a scripted chat, the business number) and sends bookings, chats and callback requests to `/api/leads`. It replaces the sticky call bar and text bubble; a theme can turn it off with `roger.widget: false`.
 
+**Personalisation (plumbing pilot).** Automatic plumbing builds get a saved **design plan** (`src/design/`), so the first preview needs no questions:
+
+- **Design:** one of three directions (Local & trusted, Bold & direct, Modern & premium), each with its own hero (split, photograph-led or typography-led), type pair, spacing and section composition.
+- **From the data:** sections come from what the data supports (team and project photos, reviews, service area). Hero, team and project photos are kept separate, with crops chosen separately for desktop and phone.
+- **Personalising:** after a preview, **Personalise this website** in the Studio, or "Personalise it" in iMessage, asks three optional questions (main service, what visitors should do, how the business should feel) and rebuilds the same preview. **Try a different design** makes an alternative.
+- **Stability:** plans are versioned and validated, saved with the build (`result.design`), and reused on ordinary rebuilds.
+- **Unchanged:** chosen and uploaded themes stay authoritative unless the operator opts in, and other trades build as before.
+
+Rules, compatibility table and QA: [docs/design-directions.md](docs/design-directions.md). `DESIGN_PILOT=0` turns it off.
+
 **Build-time estimate.** The Studio shows one above **Build website** (and the exact line Roger texts), counts up while building and shows the real time after. Roger uses the same estimate in iMessage: the no-website offer says "It takes about 15 seconds", and "yes" gets "On it. Your preview will be ready in about 15 seconds" right away, with the preview following when it's done. Texting mid-build gets the time left. Estimates round up (Roger slightly over-promises) and use the 75th percentile of recent matching builds (`src/estimate.ts`).
 
 Mock mode (no `GOOGLE_MAPS_API_KEY`) uses 4 sample businesses in `fixtures/places/` and a deliberately outdated demo website at `/demo-sites/summit-peak-roofing/` so the audit has something to find.
@@ -50,6 +60,7 @@ Mock mode (no `GOOGLE_MAPS_API_KEY`) uses 4 sample businesses in `fixtures/place
 | `VERCEL_TOKEN` / `VERCEL_TEAM_ID` / `VERCEL_PROJECT_PREFIX` | Publish finished sites to Vercel (token from vercel.com/account/tokens; team id only for a team token; project prefix default `roger-`). |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Storage on Vercel: records in the `roger_docs` table (create it once with `supabase/schema.sql`), generated files in a private `roger` bucket the app creates. Used automatically on Vercel; elsewhere only with `REMOTE_STORAGE=1`. Upstash Redis (`KV_REST_API_URL` / `KV_REST_API_TOKEN`) works the same way if you prefer it. |
 | `OUT_DIR` | Optional. Where generated sites, cards and reports go (default `out/`). On a host, the persistent disk. |
+| `DESIGN_PILOT` | Optional. `0` turns off the plumbing personalisation pilot (design plans); builds then render exactly as before. |
 
 ## Deploy
 
@@ -74,7 +85,8 @@ Notes: Render's Node runtime has no Chromium, so preview cards use the generated
 | GET | `/api/jobs/:id/events` | — | Server-sent events: each step with timing, then `end` with the result |
 | GET | `/api/themes` · `/api/themes/:id` | — | library (36 package themes + uploads) |
 | POST | `/api/themes/validate` · `/api/themes` | multipart `theme` file or `{ theme }` | validation (errors + warnings) / save to `data/themes/` |
-| POST | `/api/leads/:slug` | `{ name, phone, email?, zip?, service?, message? }` | stores lead, forwards to webhook (CORS open) |
+| POST | `/api/leads/:slug` | `{ name, phone, email?, zip?, service?, message?, kind?, preferredDate?, preferredTime? }` | stores lead, forwards to webhook (CORS open). `kind`: `quote-request` · `appointment-request` · `message` (personalised sites); appointment requests get `status: "requested"`, since the business confirms the time |
+| GET · POST | `/api/builds/:id/personalise` | POST `{ preferences?: { service?, goal?: call\|quote\|appointment, style?: local-trusted\|bold-direct\|modern-premium, emergencyConfirmed? }, alternative?, optIn? }` | what the questions offer for a build (suggestions, recommended answers, current plan) / rebuild it with the answers or as an alternative design: `202 { jobId }`, or the result with `?wait=1`. `409` for a chosen theme without `optIn` |
 | POST | `/api/imessage/inbound` | `{ from, text, async? }` | `{ replies: [{ text, url?, image?, title?, quickReplies? }], pending?, messageCount }`. With `async: true` a build answers "On it. Your preview will be ready in about 20 seconds." at once (`pending` has the estimate) and the preview follows later: saved to the conversation and POSTed to `IMESSAGE_OUTBOUND_URL`. Without it, everything comes back in one response |
 | GET · POST · DELETE | `/api/sites/:slug/publish` | — | is it on Vercel (`{ published, url, publishedAt }`) / publish a built site to Vercel (`{ url, project, … }`) / take it offline again: deletes that site's Vercel project, so its URL stops working. Only the project Roger recorded for the site (`roger-<slug>`) is touched |
 | DELETE | `/api/sites/:slug` | — | delete a site from Roger: unpublishes it from Vercel first (if published), then removes its pages, images, audit report and saved builds. The iMessage conversation and widget leads are kept. Also **Delete site** in the ⋯ menu of a site card or the build summary (with a confirmation) |
@@ -130,6 +142,10 @@ Unknown keys are accepted and reported as warnings (the old uploader rejected th
 - `brandColor.maxChroma: 0.3` only rejects the most extreme colors (pure `#00FF00` is ~0.295 and passes, then gets darkened). Around 0.25 would catch pure greens and reds.
 - The `emergency` service ("24/7 emergency …") is only listed when the business is open 24 hours or mentions emergency service.
 - In-memory job queue (`src/jobs.ts`, 3 concurrent builds). Swap for a real queue when you run more than one server.
+
+## Page families, SEO and publishing
+
+Generated sites use three versioned page families (Editorial Showcase, Warm Local, Bold Practical), each pinned in the design plan with an explicit upgrade. Sites are one or several pages by content. Owners review business details and photos before anything is published; the server enforces it. See [docs/page-families.md](docs/page-families.md) and [docs/seo-and-publishing.md](docs/seo-and-publishing.md). Visual comparison: Studio → a draft → Compare (`/app/compare.html`).
 
 ## Layout
 

@@ -87,7 +87,7 @@ export function noWebsiteCard(name: string, eta?: string): IMessageCard {
 }
 
 /** Step 3: the generated site. */
-export function siteCard(opts: { name: string; url: string; image: string; minutes?: string; hadWebsite: boolean }): IMessageCard {
+export function siteCard(opts: { name: string; url: string; image: string; minutes?: string; hadWebsite: boolean; personalisable?: boolean }): IMessageCard {
   return {
     kind: 'site-preview',
     text: opts.hadWebsite
@@ -96,6 +96,7 @@ export function siteCard(opts: { name: string; url: string; image: string; minut
     url: opts.url,
     image: opts.image,
     title: opts.name,
-    quickReplies: ['Looks great, publish it', 'Change something'],
+    // the owner can answer three optional questions to shape the site
+    quickReplies: ['Looks great, publish it', opts.personalisable ? 'Personalise it' : 'Change something'],
   };
 }

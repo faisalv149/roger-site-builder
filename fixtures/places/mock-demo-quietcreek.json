@@ -1,0 +1,164 @@
+{
+  "placeId": "mock-demo-quietcreek",
+  "name": "Quiet Creek Plumbing",
+  "primaryType": "plumber",
+  "primaryTypeLabel": "Plumber",
+  "types": [
+    "plumber",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "55 Broadway St, Asheville, NC 28801, USA",
+  "shortAddress": "55 Broadway St, Asheville",
+  "street": "55 Broadway St",
+  "city": "Asheville",
+  "state": "NC",
+  "zip": "28801",
+  "country": "US",
+  "lat": 35.597,
+  "lng": -82.553,
+  "mapsUrl": "https://maps.google.com/?q=Quiet%20Creek%20Plumbing",
+  "rating": 4.7,
+  "reviewCount": 19,
+  "reviews": [
+    {
+      "author": "Maya Holt",
+      "rating": 5,
+      "text": "Booked online and they came out the next day for our leaking water line. Tidy and respectful.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Sam Greer",
+      "rating": 4,
+      "text": "Good work on a toilet replacement. Communication was all by text, which suited me.",
+      "relativeTime": "2 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/demo-quietcreek-0.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Quiet Creek Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-quietcreek-1.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Quiet Creek Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-quietcreek-2.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Quiet Creek Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "vehicle"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 8:00 AM – 5:00 PM",
+      "Tuesday: 8:00 AM – 5:00 PM",
+      "Wednesday: 8:00 AM – 5:00 PM",
+      "Thursday: 8:00 AM – 5:00 PM",
+      "Friday: 8:00 AM – 5:00 PM",
+      "Saturday: Closed",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -360,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Asheville",
+    "Weaverville",
+    "Black Mountain",
+    "Fletcher"
+  ],
+  "source": "mock",
+  "qaNote": "no phone number on Google → Call is unavailable; Request a quote leads"
+}

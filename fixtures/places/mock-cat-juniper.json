@@ -1,0 +1,271 @@
+{
+  "placeId": "mock-cat-juniper",
+  "name": "Juniper Street Café",
+  "primaryType": "cafe",
+  "primaryTypeLabel": "Café",
+  "types": [
+    "cafe",
+    "coffee_shop",
+    "food",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "88 Church St, Burlington, VT 05401, USA",
+  "shortAddress": "88 Church St, Burlington",
+  "street": "88 Church St",
+  "city": "Burlington",
+  "state": "VT",
+  "zip": "05401",
+  "country": "US",
+  "phone": "(802) 555-0171",
+  "phoneE164": "+18025550171",
+  "mapsUrl": "https://maps.google.com/?q=Juniper%20Street%20Caf%C3%A9",
+  "rating": 4.7,
+  "reviewCount": 389,
+  "reviews": [
+    {
+      "author": "Sam Doyle",
+      "rating": 5,
+      "text": "Great flat white and the cinnamon buns sell out early for a reason.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Priya Nair",
+      "rating": 5,
+      "text": "Cosy spot for breakfast. The avocado toast is generous.",
+      "relativeTime": "2 months ago"
+    },
+    {
+      "author": "Will Chen",
+      "rating": 4,
+      "text": "Busy at weekends but the line moves.",
+      "relativeTime": "3 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/cat-juniper-0.jpg",
+      "width": 2400,
+      "height": 1600,
+      "authors": [
+        {
+          "name": "Juniper Street Café"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "storefront"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-juniper-1.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Juniper Street Café"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-juniper-2.jpg",
+      "width": 2000,
+      "height": 1333,
+      "authors": [
+        {
+          "name": "Juniper Street Café"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-juniper-3.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Juniper Street Café"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/cat-juniper-4.jpg",
+      "width": 1800,
+      "height": 1200,
+      "authors": [
+        {
+          "name": "Juniper Street Café"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "storefront"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 0,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 0,
+          "hour": 15,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 1,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 15,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 15,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 15,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 15,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 15,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 6,
+          "hour": 7,
+          "minute": 0
+        },
+        "close": {
+          "day": 6,
+          "hour": 15,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 7:00 AM – 3:00 PM",
+      "Tuesday: 7:00 AM – 3:00 PM",
+      "Wednesday: 7:00 AM – 3:00 PM",
+      "Thursday: 7:00 AM – 3:00 PM",
+      "Friday: 7:00 AM – 3:00 PM",
+      "Saturday: 7:00 AM – 3:00 PM",
+      "Sunday: 7:00 AM – 3:00 PM"
+    ]
+  },
+  "utcOffsetMinutes": -300,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [],
+  "source": "mock",
+  "offerings": [
+    {
+      "name": "Flat white",
+      "price": {
+        "kind": "fixed",
+        "amount": 4.5,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Oat latte",
+      "price": {
+        "kind": "fixed",
+        "amount": 5.25,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Breakfast sandwich",
+      "price": {
+        "kind": "fixed",
+        "amount": 9,
+        "currency": "USD"
+      },
+      "source": "sample",
+      "description": "Egg, cheddar and greens on a toasted bun."
+    },
+    {
+      "name": "Avocado toast",
+      "price": {
+        "kind": "fixed",
+        "amount": 11,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Cinnamon bun",
+      "price": {
+        "kind": "fixed",
+        "amount": 4,
+        "currency": "USD"
+      },
+      "source": "sample"
+    },
+    {
+      "name": "Soup of the day",
+      "source": "sample"
+    }
+  ],
+  "qaNote": "café: menu with sample prices, hours first, strong photos"
+}

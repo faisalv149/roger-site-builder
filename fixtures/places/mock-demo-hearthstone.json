@@ -1,0 +1,173 @@
+{
+  "placeId": "mock-demo-hearthstone",
+  "name": "Hearthstone Plumbing",
+  "primaryType": "plumber",
+  "primaryTypeLabel": "Plumber",
+  "types": [
+    "plumber",
+    "point_of_interest",
+    "establishment"
+  ],
+  "formattedAddress": "410 W Idaho St, Boise, ID 83702, USA",
+  "shortAddress": "410 W Idaho St, Boise",
+  "street": "410 W Idaho St",
+  "city": "Boise",
+  "state": "ID",
+  "zip": "83702",
+  "country": "US",
+  "lat": 43.617,
+  "lng": -116.204,
+  "phone": "(208) 555-0119",
+  "phoneE164": "+12085550119",
+  "mapsUrl": "https://maps.google.com/?q=Hearthstone%20Plumbing",
+  "rating": 4.7,
+  "reviewCount": 41,
+  "reviews": [
+    {
+      "author": "Elena Ruiz",
+      "rating": 5,
+      "text": "Our neighbors recommended them and now we do too. Fixed the running toilet and a dripping faucet in one visit.",
+      "relativeTime": "1 month ago"
+    },
+    {
+      "author": "Grant Holloway",
+      "rating": 5,
+      "text": "Friendly, on time, and they cleaned the drain without upselling anything. Real local plumbers.",
+      "relativeTime": "2 months ago"
+    },
+    {
+      "author": "Sue Kimura",
+      "rating": 4,
+      "text": "Water heater repair was quick. They called ahead and wore shoe covers.",
+      "relativeTime": "3 months ago"
+    }
+  ],
+  "photos": [
+    {
+      "ref": "file:fixtures/places/photos/demo-hearthstone-0.jpg",
+      "width": 1600,
+      "height": 1066,
+      "authors": [
+        {
+          "name": "Hearthstone Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "team"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-hearthstone-1.jpg",
+      "width": 1500,
+      "height": 1000,
+      "authors": [
+        {
+          "name": "Hearthstone Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    },
+    {
+      "ref": "file:fixtures/places/photos/demo-hearthstone-2.jpg",
+      "width": 1500,
+      "height": 1000,
+      "authors": [
+        {
+          "name": "Hearthstone Plumbing"
+        }
+      ],
+      "isOwner": true,
+      "analysis": {
+        "kind": "work"
+      }
+    }
+  ],
+  "hours": {
+    "periods": [
+      {
+        "open": {
+          "day": 1,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 1,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 2,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 2,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 3,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 3,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 4,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 4,
+          "hour": 17,
+          "minute": 0
+        }
+      },
+      {
+        "open": {
+          "day": 5,
+          "hour": 8,
+          "minute": 0
+        },
+        "close": {
+          "day": 5,
+          "hour": 17,
+          "minute": 0
+        }
+      }
+    ],
+    "weekdayText": [
+      "Monday: 8:00 AM – 5:00 PM",
+      "Tuesday: 8:00 AM – 5:00 PM",
+      "Wednesday: 8:00 AM – 5:00 PM",
+      "Thursday: 8:00 AM – 5:00 PM",
+      "Friday: 8:00 AM – 5:00 PM",
+      "Saturday: Closed",
+      "Sunday: Closed"
+    ]
+  },
+  "utcOffsetMinutes": -360,
+  "businessStatus": "OPERATIONAL",
+  "nearbyTowns": [
+    "Boise",
+    "Meridian",
+    "Eagle",
+    "Garden City",
+    "Nampa"
+  ],
+  "source": "mock",
+  "qaNote": "team photo, modest photos and reviews, clear towns → local & trusted"
+}
