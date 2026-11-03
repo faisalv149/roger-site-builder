@@ -137,6 +137,8 @@ export interface WebsiteScan {
   content?: import('./sources/site-content.js').SiteContent;
   /** the content was read after running the page's scripts in a browser */
   rendered?: boolean;
+  /** the pages its menu and service cards link to, read once (src/sources/crawl.ts) */
+  crawl?: { pages: import('./sources/crawl.js').CrawledPage[] };
   /** how the page is styled when rendered: colours by use, buttons, typefaces (src/sources/brand-profile.ts) */
   brandRaw?: import('./sources/brand-profile.js').RawBrand;
 }

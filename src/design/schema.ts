@@ -142,7 +142,7 @@ export const designPlanSchema = z.object({
   typography: z.enum(TYPE_PRESETS),
   tokens: z.object({ brand: hex, brandInk: hex, brandText: hex, surface: hex, surfaceAlt: hex, ink: hex, inkMuted: hex }).strict(),
   images: z.object({ hero: z.string().nullable(), slides: z.array(z.string()).max(6), team: z.string().nullable(), gallery: z.array(z.string()).max(12) }).strict(),
-  copy: z.object({ headline: z.string().min(3).max(90), subline: z.string().max(220), source: z.enum(['claude', 'rules', 'saved']) }).strict(),
+  copy: z.object({ headline: z.string().min(3).max(90), subline: z.string().max(220), source: z.enum(['claude', 'rules', 'saved', 'source']) }).strict(),
   emergency: z.boolean(),
   sources: z.object({ direction: decisionSource, goal: decisionSource, service: decisionSource }).strict(),
   preferences: preferencesSchema,

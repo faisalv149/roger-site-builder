@@ -1,3 +1,4 @@
+import { serviceKey } from '../evidence.js';
 import type { SiteModel } from '../content/model.js';
 import type { SiteImage } from '../brand/photos.js';
 import type { OfferingView } from '../design/compose.js';
@@ -53,13 +54,38 @@ const bookingUrl = (m: SiteModel) => (D(m).plan.goal === 'appointment' ? m.sourc
 const contactHref = (c: FCtx) => (c.multi ? c.link(c.sp.pages.find((p) => p.type === 'contact')?.route ?? '', bookingUrl(c.m) ? '#visit' : '#quote') : bookingUrl(c.m) ? '#visit' : '#quote');
 const offerHref = (c: FCtx, o: OfferingView) => { const p = c.sp.pages.find((x) => x.offeringId === o.id); return p ? c.link(p.route) : undefined; };
 const todayHours = (m: SiteModel) => (m.facts.open24h ? 'Open 24 hours' : m.hours.compact.find((r) => !/closed/i.test(r.time)) ? `${m.hours.compact.find((r) => !/closed/i.test(r.time))!.days}: ${m.hours.compact.find((r) => !/closed/i.test(r.time))!.time}` : '');
-const primaryHref = (c: FCtx) => (D(c.m).plan.goal === 'call' && tel(c.m) ? tel(c.m)! : bookingUrl(c.m) ?? contactHref(c));
-const primaryLabel = (m: SiteModel) => (D(m).plan.goal === 'call' && tel(m) ? `Call ${m.contact.phone}` : D(m).actionLabel);
+const sourceCta = (m: SiteModel) => m.source?.cta?.primary;
+const primaryHref = (c: FCtx) => {
+  const p = sourceCta(c.m);
+  if (p) return p.to === 'phone' && tel(c.m) ? tel(c.m)! : (p.to === 'url' || p.to === 'booking') && (p.href || bookingUrl(c.m)) ? (p.href || bookingUrl(c.m))! : contactHref(c);
+  return D(c.m).plan.goal === 'call' && tel(c.m) ? tel(c.m)! : bookingUrl(c.m) ?? contactHref(c);
+};
+const primaryLabel = (m: SiteModel) => sourceCta(m)?.label || (D(m).plan.goal === 'call' && tel(m) ? `Call ${m.contact.phone}` : D(m).actionLabel);
+/**
+ * Does the website's main offer ("Get a free roof inspection") apply to this service? Only when the business shows it
+ * there: on the service's own page or in its description of it. A shared word ("roof") proves nothing. A site with no
+ * such evidence puts the offer in the hero and gives each card its own action.
+ */
+const ctaFits = (m: SiteModel, o: OfferingView): boolean => {
+  const p = sourceCta(m);
+  if (!p) return true; // no source offer: the generic action is the same for every card
+  // the evidence may support the offer on several services; one card carries the button, the others link to their service
+  return p.featuredService ? p.featuredService === serviceKey(o.name) : !!p.eligibleServices?.includes(serviceKey(o.name)) && p.eligibleServices.length === 1;
+};
+/** the website's second action ("See our work") goes to this site's photo section, when there is one */
+const secondaryAction = (c: FCtx) => {
+  const s = c.m.source?.cta?.secondary;
+  if (!s || D(c.m).gallery.length < 2) return '';
+  return `<a class="btn btn-secondary f-cta-2" href="${esc(c.multi ? `${c.link('')}#work` : '#work')}">${esc(s.label)}</a>`;
+};
+/** insert the second action right after the hero's primary button */
+const withSecondary = (html: string, c: FCtx) => { const s = secondaryAction(c); return s ? html.replace(/(<a class="btn btn-primary[^"]*"[^>]*>[^<]*<\/a>)/, `$1${s}`) : html; };
+const galleryTitle = (m: SiteModel) => m.source?.galleryTitle === 'Photos' ? 'Photos' : m.source?.galleryTitle || P(m).galleryTitle;
+const areaTitle = (m: SiteModel) => (m.source?.region ? `Serving ${m.source.region}` : P(m).areaTitle(m.facts.city));
 const facts = (m: SiteModel): string[] => [
   m.proof.showRating ? `${m.proof.rating?.toFixed(1)}★ from ${m.proof.reviewCount} Google reviews` : '',
   m.facts.years ? `${m.facts.years} years in business` : '',
   m.facts.licensed && m.facts.insured ? 'Licensed and insured' : m.facts.licensed ? 'Licensed' : '',
-  m.facts.open24h ? 'Open 24 hours' : '',
 ].filter(Boolean);
 const logo = (m: SiteModel, cls: string) => (m.brand.logo
   ? `<img class="${cls}-logo-img" src="${esc(m.brand.logo.publicPath)}" alt="${esc(m.business.name)}" width="${m.brand.logo.width}" height="${m.brand.logo.height}">`
@@ -68,9 +94,14 @@ const sampleNote = (m: SiteModel) => (D(m).samplePrices ? `<p class="f-sample">$
 /** how to book one offering: its own destination, else the business's booking page */
 const rowAction = (m: SiteModel | undefined, o: OfferingView): { href: string; label: string } | undefined => (o.contact ? { href: o.contact.url, label: o.contact.label } : m && bookingUrl(m) ? { href: bookingUrl(m)!, label: m.source!.booking!.label } : undefined);
 const priceTag = (o: OfferingView, cls = 'f-price', c?: FCtx) => {
-  const act = !o.priced && c ? rowAction(c.m, o) : undefined;
+  // "Request a quote" is a call to action: it is a link to the main action, never loose text
+  // when nothing on the list has a price, "Ask in store" on every row says nothing: rows show no price at all (an action such as "Request a quote" stays)
+  if (c && !o.priced && !D(c.m).offerings.some((x) => x.priced) && !/^(request|get|book|call)\b/i.test(o.price) && !rowAction(c.m, o)) return '';
+  const act = !o.priced && c ? (rowAction(c.m, o) ?? { href: primaryHref(c), label: o.price }) : undefined;
   return act ? `<a class="${cls} is-quote f-book" href="${esc(act.href)}" data-ev="book" aria-label="${esc(`${act.label}: ${o.name}`)}">${esc(act.label)}</a>` : `<span class="${cls}${o.priced ? '' : ' is-quote'}">${esc(o.price)}</span>`;
 };
+/** the About text: one paragraph each, so a longer story reads as paragraphs, not a block */
+const introHtml = (d: { intro?: string; introParas?: string[] }) => (d.introParas?.length ? d.introParas : [d.intro ?? '']).map((p) => `<p>${esc(p)}</p>`).join('');
 const introHeading = (m: SiteModel, fallback: string) => m.source?.story?.heading || fallback;
 const offerName = (c: FCtx, o: OfferingView) => { const h = offerHref(c, o); return h ? `<a href="${esc(h)}">${esc(o.name)}</a>` : esc(o.name); };
 /** what the offerings list shows: the focus item first, then the rest (teaser: the first few) */
@@ -108,21 +139,36 @@ function visitAction(c: FCtx): string {
  * of the same shape: a 16:10 picture (or an icon panel when that one has none), the name, what the source says about
  * it, and the way to book it. Colours and type come from the page's variables, so they follow the business's brand.
  */
-const hasServiceCards = (m: SiteModel) => D(m).offerings.filter((o) => o.image).length >= 2;
+const hasServiceCards = (m: SiteModel) => D(m).offerings.filter((o) => o.image && !o.secondary).length >= 2;
 function serviceCards(c: FCtx, mode: 'full' | 'teaser'): string {
   const m = c.m;
-  const list = offerList(m, mode);
+  const list = (mode === 'teaser' ? D(m).offerings : offerList(m, mode)).filter((o) => !o.secondary).slice(0, 8);
+  const also = D(m).offerings.filter((o) => o.secondary);
   if (!list.length) return '';
   const more = mode === 'teaser' && offersRoute(c) ? `<a class="f-more" href="${esc(c.link(offersRoute(c)!))}">See all ${esc(P(m).offeringsTitle.toLowerCase())} ${icon('arrow-right', { size: 16 })}</a>` : '';
+  // each card's action: the website's main offer on the one service it is featured on; a walk-in service gets directions, not
+  // a booking button; the others link to their service (this site's page for it, else the business's own page), quietly
+  type Act = { href: string; label: string; quiet?: boolean; external?: boolean };
+  const WALK_IN = /\b(no appointment (?:is )?(?:necessary|needed|required)|walk[- ]?ins?(?: welcome| only)?)\b/i;
+  const actOf = (o: OfferingView): Act => {
+    const own = offerHref(c, o);
+    if (WALK_IN.test(`${o.note ?? ''} ${o.description ?? ''}`)) return m.contact.directionsUrl ? { href: m.contact.directionsUrl, label: 'Get directions', quiet: true, external: true } : { href: contactHref(c), label: 'Visit us', quiet: true };
+    return rowAction(m, o) ?? (ctaFits(m, o) ? { href: primaryHref(c), label: primaryLabel(m) } : own ? { href: own, label: 'Learn more', quiet: true } : o.page ? { href: o.page, label: 'Learn more', quiet: true, external: true } : { href: primaryHref(c), label: 'Ask about this service', quiet: true });
+  };
+  const acts = new Map(list.map((o) => [o.id, actOf(o)]));
+  // the same button on three or more cards is noise, not a choice: the hero carries it, the cards keep it as a quiet link
+  const same = new Map<string, number>();
+  for (const x of acts.values()) if (!x.quiet) same.set(`${x.label}|${x.href}`, (same.get(`${x.label}|${x.href}`) ?? 0) + 1);
+  for (const x of acts.values()) if (!x.quiet && (same.get(`${x.label}|${x.href}`) ?? 0) >= 3) x.quiet = true;
   const card = (o: OfferingView) => {
-    const act = rowAction(m, o) ?? { href: primaryHref(c), label: primaryLabel(m) };
+    const act = acts.get(o.id)!;
     const media = o.image
       ? `<div class="f-svc-media"><img src="${esc(o.image.path)}" width="${o.image.width}" height="${o.image.height}" alt="${esc(o.image.alt)}" loading="lazy" decoding="async" style="object-position:${Math.round(o.image.focal.x * 100)}% ${Math.round(o.image.focal.y * 100)}%"></div>`
       : `<div class="f-svc-media is-icon" aria-hidden="true">${icon(o.icon || 'circle-check', { size: 44 })}</div>`;
     const text = [o.description, o.duration].filter(Boolean).join(' · ');
-    return `<li class="f-svc-card">${media}<div class="f-svc-body"><h3>${offerName(c, o)}</h3>${text ? `<p>${esc(text)}</p>` : ''}${o.note ? `<p class="f-svc-note">${esc(o.note)}</p>` : ''}${o.priced ? `<p class="f-svc-price">${esc(o.price)}</p>` : ''}<a class="btn btn-primary f-svc-btn" href="${esc(act.href)}" data-ev="${o.contact || bookingUrl(m) ? 'book' : reqEv(m)}" aria-label="${esc(`${act.label}: ${o.name}`)}">${esc(act.label)}</a></div></li>`;
+    return `<li class="f-svc-card">${media}<div class="f-svc-body"><h3>${offerName(c, o)}</h3>${text ? `<p>${esc(text)}</p>` : ''}${o.note ? `<p class="f-svc-note">${esc(o.note)}</p>` : ''}${o.priced ? `<p class="f-svc-price">${esc(o.price)}</p>` : ''}${act.quiet ? `<a class="f-svc-link" href="${esc(act.href)}"${act.external ? ' target="_blank" rel="noopener"' : ''} data-ev="${o.contact || act.href === bookingUrl(m) ? 'book' : 'link'}" aria-label="${esc(act.label === 'Learn more' ? `Learn more about ${o.name}${act.external ? ` on ${m.business.name}'s website (opens in a new tab)` : ''}` : `${act.label}: ${o.name}${act.external ? ' (opens in a new tab)' : ''}`)}">${esc(act.label)} ${icon('arrow-right', { size: 16 })}</a>` : `<a class="btn btn-primary f-svc-btn" href="${esc(act.href)}" data-ev="${o.contact || bookingUrl(m) ? 'book' : reqEv(m)}" aria-label="${esc(`${act.label}: ${o.name}`)}">${esc(act.label)}</a>`}</div></li>`;
   };
-  return `<section class="f-svc" id="services" aria-labelledby="services-h"><div class="wrap"><div class="f-svc-head"><h2 id="services-h">${esc(P(m).offeringsTitle)}</h2>${more}</div><ul class="f-svc-grid">${list.map(card).join('')}</ul>${sampleNote(m)}</div></section>`;
+  return `<section class="f-svc" id="services" aria-labelledby="services-h"><div class="wrap"><div class="f-svc-head"><h2 id="services-h">${esc(P(m).offeringsTitle)}</h2>${more}</div><ul class="f-svc-grid">${list.map(card).join('')}</ul>${also.length ? `<div class="f-svc-also"><h3>Also offered</h3><ul>${also.map((o) => `<li><a href="${esc(offerHref(c, o) ?? contactHref(c))}">${esc(o.name)}</a></li>`).join('')}</ul></div>` : ''}${sampleNote(m)}</div></section>`;
 }
 
 /** the business's own videos: a poster picture and a clear play button; nothing loads until a visitor asks for it */
@@ -163,7 +209,7 @@ function offeringDetail(c: FCtx, cls: string): string {
   return `<section class="${cls}-detail"><div class="wrap ${cls}-detail-grid"><div class="${cls}-detail-main">${o.description ? `<p class="${cls}-detail-text">${esc(o.description)}</p>` : ''}
     <dl class="f-facts">${o.priced ? `<div><dt>Price</dt><dd>${esc(o.price)}</dd></div>` : `<div><dt>Price</dt><dd>${esc(o.price)}</dd></div>`}${o.duration ? `<div><dt>Time</dt><dd>${esc(o.duration)}</dd></div>` : ''}${c.m.facts.city ? `<div><dt>Where</dt><dd>${esc(c.m.areas.slice(0, 3).join(', ') || c.m.facts.city)}</dd></div>` : ''}</dl>
     ${sampleNote(c.m)}<div class="btn-row"><a class="btn btn-primary" href="${esc(primaryHref(c))}" data-ev="${reqEv(c.m)}">${esc(primaryLabel(c.m))}</a></div></div>
-    ${siblings.length ? `<nav class="${cls}-related" aria-label="Other ${esc(P(c.m).noun)}s"><h2>Also from ${esc(c.m.business.name)}</h2><ul>${siblings.map((s) => `<li>${offerName(c, s)} ${priceTag(s)}</li>`).join('')}</ul>${offersRoute(c) ? `<a class="f-more" href="${esc(c.link(offersRoute(c)!))}">All ${esc(P(c.m).offeringsTitle.toLowerCase())} ${icon('arrow-right', { size: 16 })}</a>` : ''}</nav>` : ''}
+    ${siblings.length ? `<nav class="${cls}-related" aria-label="Other ${esc(P(c.m).noun)}s"><h2>Also from ${esc(c.m.business.name)}</h2><ul>${siblings.map((s) => `<li>${offerName(c, s)} ${priceTag(s, 'f-price', c)}</li>`).join('')}</ul>${offersRoute(c) ? `<a class="f-more" href="${esc(c.link(offersRoute(c)!))}">All ${esc(P(c.m).offeringsTitle.toLowerCase())} ${icon('arrow-right', { size: 16 })}</a>` : ''}</nav>` : ''}
   </div></section>`;
 }
 const gridGallery = (ps: SiteImage[], cls: string, max: number) => `<div class="${cls}">${ps.slice(0, max).map((p, i) => fig(p, i, ps.length, i === 0 ? 'lead' : '')).join('')}</div>`;
@@ -195,14 +241,14 @@ const editorial: Family = {
   intro(c) {
     const d = D(c.m);
     if (!d.intro) return '';
-    return `<section class="fe-intro" id="about" aria-labelledby="about-h"><div class="wrap fe-intro-grid"><h2 class="fe-label" id="about-h">${esc(introHeading(c.m, `About ${c.m.business.name}`))}</h2><p class="fe-intro-text">${esc(d.intro)}</p></div></section>`;
+    return `<section class="fe-intro" id="about" aria-labelledby="about-h"><div class="wrap fe-intro-grid"><h2 class="fe-label" id="about-h">${esc(introHeading(c.m, `About ${c.m.business.name}`))}</h2><div class="fe-intro-text">${introHtml(d)}</div></div></section>`;
   },
   offerings(c, v, mode) {
     const m = c.m;
     const list = offerList(m, mode);
     if (!list.length) return '';
     const more = mode === 'teaser' && offersRoute(c) ? `<a class="f-more" href="${esc(c.link(offersRoute(c)!))}">All ${esc(P(m).offeringsTitle.toLowerCase())} ${icon('arrow-right', { size: 16 })}</a>` : '';
-    const rows = list.map((o, i) => `<li><span class="fe-num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span><div class="fe-li-main"><h3>${offerName(c, o)}</h3>${o.description || o.note ? `<p>${esc([o.description, o.note].filter(Boolean).join(' · '))}</p>` : ''}${o.duration ? `<p class="fe-dur">${esc(o.duration)}</p>` : ''}</div>${priceTag(o, 'fe-li-price')}</li>`).join('');
+    const rows = list.map((o, i) => `<li><span class="fe-num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span><div class="fe-li-main"><h3>${offerName(c, o)}</h3>${o.description || o.note ? `<p>${esc([o.description, o.note].filter(Boolean).join(' · '))}</p>` : ''}${o.duration ? `<p class="fe-dur">${esc(o.duration)}</p>` : ''}</div>${priceTag(o, 'fe-li-price', c)}</li>`).join('');
     return `<section class="fe-offers${v === 'plans' ? ' is-plans' : ''}" id="services" aria-labelledby="services-h"><div class="wrap fe-offers-grid"><div class="fe-sec-head"><p class="fe-label">${esc(P(m).offeringsTitle)}</p><h2 id="services-h">${esc(m.design!.plan.category === 'food' ? 'From the menu' : m.design!.plan.category === 'trades' ? 'What we do' : `Our ${P(m).noun}s`)}</h2>${more}</div><div><ol class="fe-list">${rows}</ol>${sampleNote(m)}</div></div></section>`;
   },
   proof(c) {
@@ -211,14 +257,14 @@ const editorial: Family = {
     if (!q.length && !m.trust.length && !m.proof.showRating && !D(m).reviewsLink) return '';
     const [lead, ...rest] = q;
     return `<section class="fe-proof" id="reviews" aria-labelledby="reviews-h"><div class="wrap"><h2 class="fe-label" id="reviews-h">${esc(m.proof.showRating ? 'In their words' : 'Good to know')}</h2>
-      ${lead ? `<figure class="fe-pull"><blockquote><p>“${esc(lead.text)}”</p></blockquote><figcaption>${esc(lead.author)} · Google review</figcaption></figure>` : ''}
-      ${rest.length ? `<div class="fe-quotes">${rest.map((r) => `<figure><blockquote><p>“${esc(r.text)}”</p></blockquote><figcaption>${esc(r.author)}</figcaption></figure>`).join('')}</div>` : ''}
+      ${lead ? `<figure class="fe-pull"><blockquote><p>“${esc(lead.text)}”</p></blockquote><figcaption>${esc(lead.author)} · ${esc((lead as { from?: string }).from ?? 'Google review')}</figcaption></figure>` : ''}
+      ${rest.length ? `<div class="fe-quotes">${rest.map((r) => `<figure><blockquote><p>“${esc(r.text)}”</p></blockquote><figcaption>${esc(r.author)} · ${esc((r as { from?: string }).from ?? 'Google review')}</figcaption></figure>`).join('')}</div>` : ''}
       ${reviewsLink(m, 'fe-proof-link')}<p class="fe-proof-meta">${m.proof.showRating ? `${stars(m.proof.rating || 0, 14)} ${m.proof.rating?.toFixed(1)} from ${m.proof.reviewCount} Google reviews` : ''}${m.trust.length ? `${m.proof.showRating ? ' · ' : ''}${esc(m.trust.join(' · '))}` : ''}</p></div></section>`;
   },
   gallery(c, v) {
     const ps = D(c.m).gallery;
     if (ps.length < 2) return '';
-    return `<section class="fe-gallery" id="work" aria-labelledby="work-h"><div class="wrap"><div class="fe-sec-head fe-sec-head-row"><p class="fe-label">${esc(P(c.m).galleryTitle)}</p><h2 id="work-h">${esc(c.m.design!.plan.category === 'trades' ? 'Selected work' : 'A closer look')}</h2></div>${v === 'masonry' ? gridGallery(ps, 'gal fe-masonry', 7) : gridGallery(ps, `gal fe-feature${ps.length < 3 ? ' is-pair' : ''}`, ps.length >= 5 ? 5 : ps.length >= 3 ? 3 : 2)}</div></section>`;
+    return `<section class="fe-gallery" id="work" aria-labelledby="work-h"><div class="wrap"><div class="fe-sec-head fe-sec-head-row"><p class="fe-label">${esc(galleryTitle(c.m))}</p><h2 id="work-h">${esc(c.m.source?.galleryTitle === 'Photos' ? 'From the business' : c.m.design!.plan.category === 'trades' ? 'Selected work' : 'A closer look')}</h2></div>${v === 'masonry' ? gridGallery(ps, 'gal fe-masonry', 7) : gridGallery(ps, `gal fe-feature${ps.length < 3 ? ' is-pair' : ''}`, ps.length >= 5 ? 5 : ps.length >= 3 ? 3 : 2)}</div></section>`;
   },
   cta(c) {
     const m = c.m;
@@ -274,7 +320,7 @@ const warm: Family = {
   intro(c) {
     const d = D(c.m);
     if (!d.intro) return '';
-    return `<section class="fw-intro" id="about" aria-labelledby="about-h"><div class="wrap"><div class="fw-intro-card"><h2 id="about-h">${esc(introHeading(c.m, c.m.design!.plan.category === 'trades' ? 'About us' : `Welcome to ${c.m.business.name}`))}</h2><p>${esc(d.intro)}</p>${facts(c.m).length ? `<ul class="fw-chips">${facts(c.m).map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}</div></div></section>`;
+    return `<section class="fw-intro" id="about" aria-labelledby="about-h"><div class="wrap"><div class="fw-intro-card"><h2 id="about-h">${esc(introHeading(c.m, c.m.design!.plan.category === 'trades' ? 'About us' : `Welcome to ${c.m.business.name}`))}</h2>${introHtml(d)}${facts(c.m).length ? `<ul class="fw-chips">${facts(c.m).map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}</div></div></section>`;
   },
   offerings(c, _v, mode) {
     const m = c.m;
@@ -288,13 +334,13 @@ const warm: Family = {
     const q = reviewQuotes(m, 3);
     if (!q.length && !m.trust.length && !D(m).reviewsLink) return '';
     return `<section class="fw-proof" id="reviews" aria-labelledby="reviews-h"><div class="wrap"><div class="fw-sec-head"><h2 id="reviews-h">${esc(m.proof.showRating ? P(m).proofTitle(m.facts.city) : 'Good to know')}</h2>${m.proof.showRating ? `<p class="fw-badge">${stars(m.proof.rating || 0, 15)}<span>${m.proof.rating?.toFixed(1)} from ${m.proof.reviewCount} Google reviews</span></p>` : ''}</div>
-      ${q.length ? `<div class="fw-quotes">${q.map((r) => `<figure class="fw-quote"><span class="fw-avatar" aria-hidden="true">${esc(initials(r.author))}</span>${stars(r.rating, 14)}<blockquote><p>${esc(r.text)}</p></blockquote><figcaption>${esc(r.author)} · Google review</figcaption></figure>`).join('')}</div>` : ''}
+      ${q.length ? `<div class="fw-quotes">${q.map((r) => `<figure class="fw-quote"><span class="fw-avatar" aria-hidden="true">${esc(initials(r.author))}</span>${stars(r.rating, 14)}<blockquote><p>${esc(r.text)}</p></blockquote><figcaption>${esc(r.author)} · ${esc(r.from ?? 'Google review')}</figcaption></figure>`).join('')}</div>` : ''}
       ${m.trust.length ? `<ul class="fw-chips">${m.trust.map((t) => `<li>${icon('badge-check', { size: 16 })}${esc(t)}</li>`).join('')}</ul>` : ''}${reviewsLink(m, 'fw-proof-link')}</div></section>`;
   },
   gallery(c) {
     const ps = D(c.m).gallery;
     if (ps.length < 2) return '';
-    return `<section class="fw-gallery" id="work" aria-labelledby="work-h"><div class="wrap"><div class="fw-sec-head"><h2 id="work-h">${esc(P(c.m).galleryTitle)}</h2></div><div class="gal fw-grid">${ps.slice(0, ps.length >= 6 ? 6 : ps.length >= 3 ? 3 : 2).map((p, i) => fig(p, i, ps.length)).join('')}</div></div></section>`;
+    return `<section class="fw-gallery" id="work" aria-labelledby="work-h"><div class="wrap"><div class="fw-sec-head"><h2 id="work-h">${esc(galleryTitle(c.m))}</h2></div><div class="gal fw-grid">${ps.slice(0, ps.length >= 6 ? 6 : ps.length >= 3 ? 3 : 2).map((p, i) => fig(p, i, ps.length)).join('')}</div></div></section>`;
   },
   cta(c) {
     const m = c.m;
@@ -327,15 +373,15 @@ const bold: Family = {
     const m = c.m;
     const items = navItems(c, D(m).plan.sections.map((s) => s.id));
     const call = tel(m) ? `<a class="fb-phone" href="${tel(m)}" data-ev="call" aria-label="Call ${esc(m.contact.phone)}"><span class="fb-phone-l">Call</span><span class="fb-phone-n">${esc(m.contact.phone)}</span><span class="fb-phone-ic">${icon('phone', { size: 20 })}</span></a>` : '';
-    const cta = `<a class="btn btn-primary fb-head-cta" href="${esc(primaryHref(c) === tel(m) ? contactHref(c) : primaryHref(c))}" data-ev="${reqEv(m)}">${esc(D(m).plan.goal === 'call' ? D(m).headerLabel : D(m).actionLabel)}</a>`;
+    const cta = `<a class="btn btn-primary fb-head-cta" href="${esc(primaryHref(c) === tel(m) ? contactHref(c) : primaryHref(c))}" data-ev="${reqEv(m)}">${esc(sourceCta(m)?.label ?? (D(m).plan.goal === 'call' ? D(m).headerLabel : D(m).actionLabel))}</a>`;
     return `<header class="fb-head"><div class="wrap fb-head-in"><a class="fb-logo" href="${esc(c.link(''))}" aria-label="${esc(m.business.name)}, home">${logo(m, 'fb')}</a><nav class="fb-nav" aria-label="Main">${navHtml(items)}</nav>${call}${cta}${mobileMenu(items, '')}</div></header>`;
   },
   hero(c, v) {
     const m = c.m;
     const d = D(m);
     const checks = facts(m);
-    const panel = `<aside class="fb-panel" aria-label="${esc(d.actionLabel)}"><p class="fb-panel-h">${esc(d.plan.goal === 'call' && tel(m) ? 'Call now' : d.actionLabel)}</p>${tel(m) ? `<a class="fb-panel-phone" href="${tel(m)}" data-ev="call">${icon('phone', { size: 24 })}<span>${esc(m.contact.phone)}</span></a>` : ''}<a class="btn btn-primary btn-block" href="${esc(d.plan.goal === 'call' && tel(m) ? contactHref(c) : primaryHref(c))}" data-ev="${reqEv(m)}">${esc(d.plan.goal === 'call' && tel(m) ? 'Send a request' : d.actionLabel)}</a>${todayHours(m) ? `<p class="fb-panel-hours">${icon('clock', { size: 16 })}${esc(todayHours(m))}</p>` : ''}${checks.length ? `<ul class="fb-checks">${checks.map((f) => `<li>${icon('check', { size: 16 })}${esc(f)}</li>`).join('')}</ul>` : ''}</aside>`;
-    const text = `<p class="fb-kicker">${esc(m.business.name)}${m.facts.city ? ` · ${esc(m.facts.city)}` : ''}</p><h1 id="top-h">${esc(m.copy.hero)}</h1><p class="fb-lede">${esc(m.copy.subline)}</p>${apptNote(m)}`;
+    const panel = `<aside class="fb-panel" aria-label="${esc(d.actionLabel)}"><p class="fb-panel-h">${esc(d.plan.goal === 'call' && tel(m) ? 'Call now' : d.actionLabel)}</p>${tel(m) ? `<a class="fb-panel-phone" href="${tel(m)}" data-ev="call">${icon('phone', { size: 24 })}<span>${esc(m.contact.phone)}</span></a>` : ''}<a class="btn btn-primary btn-block" href="${esc(sourceCta(m) ? primaryHref(c) : d.plan.goal === 'call' && tel(m) ? contactHref(c) : primaryHref(c))}" data-ev="${reqEv(m)}">${esc(sourceCta(m)?.label ?? (d.plan.goal === 'call' && tel(m) ? 'Send a request' : d.actionLabel))}</a>${todayHours(m) && !/24 hours/i.test(todayHours(m)!) ? `<p class="fb-panel-hours">${icon('clock', { size: 16 })}${esc(todayHours(m))}</p>` : ''}${checks.length ? `<ul class="fb-checks">${checks.map((f) => `<li>${icon('check', { size: 16 })}${esc(f)}</li>`).join('')}</ul>` : ''}</aside>`;
+    const text = `<p class="fb-kicker">${esc(m.business.name)}${m.facts.city ? ` · ${esc(m.facts.city)}` : ''}</p><h1 id="top-h"${m.copy.hero.length > 36 ? ' class="is-long"' : ''}>${esc(m.copy.hero)}</h1><p class="fb-lede">${esc(m.copy.subline)}</p>${apptNote(m)}`;
     const photo = (v === 'split' || v === 'photo-led') && d.heroImages ? `<figure class="fb-photo">${picture(d.heroImages, true)}${credit(d.heroImages.desktop)}</figure>` : v === 'carousel' && d.slides.length >= 2 ? `<div class="fb-photo">${carousel(d.slides)}</div>` : '';
     // photo-free: big verified numbers instead of a picture
     const nums = [m.facts.years && [String(m.facts.years), 'years in business'], m.proof.showRating && [m.proof.rating!.toFixed(1), `rating, ${m.proof.reviewCount} reviews`], m.areas.length > 1 && [String(m.areas.length), 'towns served'], d.offerings.length >= 3 && [String(d.offerings.length), `${P(m).noun}s`]].filter(Boolean) as [string, string][];
@@ -345,7 +391,7 @@ const bold: Family = {
   intro(c) {
     const d = D(c.m);
     if (!d.intro) return '';
-    return `<section class="fb-intro" id="about" aria-labelledby="about-h"><div class="wrap fb-intro-grid"><h2 id="about-h">${esc(introHeading(c.m, 'About'))}</h2><p>${esc(d.intro)}</p></div></section>`;
+    return `<section class="fb-intro" id="about" aria-labelledby="about-h"><div class="wrap fb-intro-grid"><h2 id="about-h">${esc(introHeading(c.m, 'About'))}</h2><div class="fb-intro-text">${introHtml(d)}</div></div></section>`;
   },
   offerings(c, v, mode) {
     const m = c.m;
@@ -361,12 +407,12 @@ const bold: Family = {
     const m = c.m;
     const q = reviewQuotes(m, 1)[0];
     if (!q && !m.proof.showRating && !m.trust.length && !D(m).reviewsLink) return '';
-    return `<section class="fb-proof" id="reviews" aria-labelledby="reviews-h"><div class="wrap fb-proof-grid"><div><h2 id="reviews-h">${esc(m.proof.showRating ? 'Rated by customers' : 'Good to know')}</h2>${m.proof.showRating ? `<p class="fb-rating"><b>${m.proof.rating?.toFixed(1)}</b><span>${stars(m.proof.rating || 0, 18)}<br>${m.proof.reviewCount} Google reviews</span></p>` : ''}${m.trust.length ? `<ul class="fb-checks">${m.trust.map((t) => `<li>${icon('check', { size: 16 })}${esc(t)}</li>`).join('')}</ul>` : ''}${reviewsLink(m, 'fb-proof-link')}</div>${q ? `<figure class="fb-quote"><blockquote><p>“${esc(q.text)}”</p></blockquote><figcaption>${esc(q.author)} · Google review</figcaption></figure>` : ''}</div></section>`;
+    return `<section class="fb-proof" id="reviews" aria-labelledby="reviews-h"><div class="wrap fb-proof-grid"><div><h2 id="reviews-h">${esc(m.proof.showRating ? 'Rated by customers' : 'Good to know')}</h2>${m.proof.showRating ? `<p class="fb-rating"><b>${m.proof.rating?.toFixed(1)}</b><span>${stars(m.proof.rating || 0, 18)}<br>${m.proof.reviewCount} Google reviews</span></p>` : ''}${m.trust.length ? `<ul class="fb-checks">${m.trust.map((t) => `<li>${icon('check', { size: 16 })}${esc(t)}</li>`).join('')}</ul>` : ''}${reviewsLink(m, 'fb-proof-link')}</div>${q ? `<figure class="fb-quote"><blockquote><p>“${esc(q.text)}”</p></blockquote><figcaption>${esc(q.author)} · ${esc((q as { from?: string }).from ?? 'Google review')}</figcaption></figure>` : ''}</div></section>`;
   },
   gallery(c) {
     const ps = D(c.m).gallery;
     if (ps.length < 2) return '';
-    return `<section class="fb-gallery" id="work" aria-labelledby="work-h"><div class="wrap"><div class="fb-sec-head"><h2 id="work-h">${esc(P(c.m).galleryTitle)}</h2></div><div class="gal fb-grid">${ps.slice(0, ps.length >= 4 ? 4 : 2).map((p, i) => fig(p, i, ps.length)).join('')}</div></div></section>`;
+    return `<section class="fb-gallery" id="work" aria-labelledby="work-h"><div class="wrap"><div class="fb-sec-head"><h2 id="work-h">${esc(galleryTitle(c.m))}</h2></div><div class="gal fb-grid">${ps.slice(0, ps.length >= 4 ? 4 : 2).map((p, i) => fig(p, i, ps.length)).join('')}</div></div></section>`;
   },
   cta(c) {
     const m = c.m;
@@ -411,7 +457,7 @@ function pageBody(f: Family, c: FCtx): string {
     let videosDone = false;
     for (const s of plan.sections) {
       switch (s.id) {
-        case 'hero': out.push(f.hero(c, s.variant)); break;
+        case 'hero': out.push(withSecondary(f.hero(c, s.variant), c)); break;
         case 'intro': out.push(f.intro(c)); break;
         case 'urgent': out.push(urgent(c)); break;
         case 'services': case 'focus': out.push(hasServiceCards(m) ? serviceCards(c, c.multi ? 'teaser' : 'full') : f.offerings(c, offerVariant, c.multi ? 'teaser' : 'full')); break;

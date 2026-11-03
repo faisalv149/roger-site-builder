@@ -5,6 +5,7 @@ import { parseColor, toHex } from '../color/oklch.js';
 import { extractSiteContent, restoreName, type SiteContent } from './site-content.js';
 import { extractorResult } from '../content/extraction.js';
 import { measureBrand, renderPage } from './render-page.js';
+import { crawlSite } from './crawl.js';
 
 const SOCIAL: [string, RegExp][] = [
   ['facebook', /facebook\.com\//i], ['instagram', /instagram\.com\//i], ['x', /(twitter|x)\.com\//i],
@@ -51,7 +52,7 @@ export function googleFontFamilies(href: string): string[] {
   }
 }
 
-export async function scanWebsite(input: string, opts: { extraPages?: number; render?: 'auto' | 'never' | 'always'; brand?: boolean } = {}): Promise<WebsiteScan> {
+export async function scanWebsite(input: string, opts: { extraPages?: number; render?: 'auto' | 'never' | 'always'; brand?: boolean; crawl?: boolean } = {}): Promise<WebsiteScan> {
   const url = normalizeUrl(input);
   const res = await fetchRaw(url, { timeoutMs: 15000, maxBytes: 5_000_000 });
   const html = res.body.toString('utf8');
@@ -163,6 +164,13 @@ export async function scanWebsite(input: string, opts: { extraPages?: number; re
   scan.content = extractSiteContent(html, res.url, { socials: scan.socials });
   await recoverContent(scan, opts.render ?? 'auto');
   await enrichServicePages(scan);
+  // the pages the menu and the service cards link to (budgeted, same site, robots honoured)
+  if (opts.crawl ?? process.env.CRAWL_PAGES !== '0') {
+    const links = [...scan.content!.nav.map((n) => n.href), ...scan.content!.services.map((s) => s.href || s.pageUrl || ''), ...(scan.content!.hero ? [scan.content!.hero.secondary?.href || ''] : [])].filter(Boolean);
+    const crawl = await crawlSite(scan.finalUrl, links);
+    scan.crawl = { pages: crawl.pages };
+    scan.content!.report.push(crawl.report);
+  }
   // how the page is styled, measured in a browser (colours by use, buttons, typefaces)
   if (opts.brand ?? process.env.BRAND_MEASURE !== '0') scan.brandRaw = await measureBrand(scan.finalUrl);
   return scan;

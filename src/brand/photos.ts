@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { FRAMES, fitFor, usesOf } from '../design/image-fit.js';
 import path from 'node:path';
 import sharp from 'sharp';
 import type { Theme } from '../theme/schema.js';
@@ -59,8 +60,9 @@ export async function processPhotos(
   const rules = theme.images;
   const rejected: { ref: string; reason: string }[] = [];
   const sized = b.photos.filter((p) => {
-    const ok = p.width >= rules.minWidth && p.height >= rules.minHeight;
-    if (!ok) rejected.push({ ref: p.ref, reason: `below ${rules.minWidth}×${rules.minHeight} (${p.width}×${p.height})` });
+    // big enough for some frame it could fill (a gallery tile, a service card, a hero)? The frame decides, not one cut-off
+    const ok = usesOf(p.width, p.height).length > 0;
+    if (!ok) rejected.push({ ref: p.ref, reason: `too small for any frame (${p.width}×${p.height}: under ${FRAMES.gallery.css}px across once cropped)` });
     return ok;
   });
   // Business-uploaded photos first; customer photos after (they need a visible credit).
@@ -80,7 +82,9 @@ export async function processPhotos(
   const good = processed.filter(Boolean) as { p: Photo; raw: Buffer; i: number }[];
 
   // Hero: prefer a wide owner photo.
-  const heroIdx = Math.max(0, good.findIndex((g) => g.p.isOwner && g.p.width / g.p.height >= 1.25));
+  // (only a picture big enough for a hero frame leads; otherwise no picture is stretched to fill it)
+  const heroFits = (g: { p: Photo }) => fitFor(g.p.width, g.p.height, 'hero').level !== 'undersized';
+  const heroIdx = good.findIndex((g) => g.p.isOwner && g.p.width / g.p.height >= 1.25 && heroFits(g));
   const images: SiteImage[] = [];
   const items: ProcessedPhoto[] = [];
   let hero: SiteImage | undefined;

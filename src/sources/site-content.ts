@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import type { AnyNode, Element } from 'domhandler';
 import { extractorResult, type ExtractorResult } from '../content/extraction.js';
 import { digits } from '../util/text.js';
+import { areasOf, cardServices, claimsOf, heroOf, navMenu, testimonialsOf, type NavItem, type ServiceAreas, type SourceClaim, type SourceHero, type Testimonial } from './page-structure.js';
 
 /**
  * What a business's own website says about it, read from the page itself: who it is, where, how to reach and book it,
@@ -33,7 +34,11 @@ export interface SourceService {
   /** the picture on this service's own card on the page: the relationship is kept with the service */
   image?: { url: string; seen: string; alt?: string; key: string };
   position: number;
-  method: 'headings' | 'list' | 'json-ld';
+  method: 'headings' | 'list' | 'json-ld' | 'cards';
+  /** where it was read: the element and text, for the evidence record */
+  locator?: string;
+  /** where its card or link goes (another page of the site, or an anchor) */
+  href?: string;
 }
 export interface SourceImage {
   /** the address to download (the original, not a thumbnail) */
@@ -84,6 +89,16 @@ export interface SiteContent {
   videos: SourceVideo[];
   hours?: { lines: string[]; method: 'json-ld' | 'text' };
   socials: { network: string; url: string }[];
+  /** the hero: headline, the calls to action in it (primary first) and its picture */
+  hero?: SourceHero;
+  /** places the business says it serves, and the region it names */
+  areas?: ServiceAreas;
+  /** testimonials with their authors, as the page shows them */
+  testimonials: Testimonial[];
+  /** claims the business makes about itself, in its own words */
+  claims: SourceClaim[];
+  /** the navigation's links (and their menu parents when the markup has them) */
+  nav: NavItem[];
   report: ExtractorResult[];
 }
 
@@ -314,7 +329,7 @@ function cardImage($: $, h: Element, all: Element[], base: string): SourceServic
     if (all.some((o) => o !== h && $.contains(node, o))) return undefined; // the block now holds another service: no picture of its own
     const img = box.find('img').filter((_, im) => !/logo|icon|sprite/i.test($(im).attr('src') || '') && !$(im).closest('a[href^="mailto:"], a[href^="tel:"]').length).first();
     const bgEl = box.find('[style*="background-image"], [data-bg]').first();
-    const src = img.attr('data-src') || img.attr('data-lazy-src') || largestFromSrcset(img.attr('srcset') || img.attr('data-srcset')) || img.attr('src') || (bgEl.attr('style') || '').match(/url\((['"]?)([^)'"]+)\1\)/)?.[2] || bgEl.attr('data-bg');
+    const src = largestFromSrcset(img.attr('srcset') || img.attr('data-srcset')) || img.attr('data-src') || img.attr('data-lazy-src') || img.attr('src') || (bgEl.attr('style') || '').match(/url\((['"]?)([^)'"]+)\1\)/)?.[2] || bgEl.attr('data-bg');
     if (src && !/^data:/.test(src)) {
       try {
         const seen = new URL(src, base).toString();
@@ -364,13 +379,16 @@ function servicesOf($: $, base: string, links: Anchor[]): { items: SourceService
       break;
     }
   }
-  // 2) schema.org Service / Offer items
+  // 2) repeated cards (name, a sentence, a link, a photo): the way most business sites show what they offer
+  const cards = cardServices($, base);
+  if (cards.length >= 3) return { items: cards.map((c, i) => ({ name: c.name, description: c.description, pageUrl: c.href && new URL(c.href).origin === new URL(base).origin && !c.href.includes('#') ? c.href : undefined, href: c.href, image: c.image ? { url: originalImageUrl(c.image.seen), seen: c.image.seen, alt: c.image.alt, key: imageKey(c.image.seen) } : undefined, position: i, method: 'cards' as const, locator: c.locator })), method: 'cards' };
+  // 3) schema.org Service / Offer items
   const ld: SourceService[] = [];
   for (const n of ldNodes($)) {
     if (ldTypes(n).some((t) => /^(Service|Product|MedicalProcedure|MedicalTherapy)$/.test(t)) && typeof n.name === 'string') ld.push({ name: clean(n.name), description: clean(n.description) || undefined, position: ld.length, method: 'json-ld' });
   }
   if (ld.length >= 2) return { items: ld.slice(0, 24), method: 'json-ld' };
-  // 3) a list after a "Services" label
+  // 4) a list after a "Services" label
   for (const label of labels) {
     let box: cheerio.Cheerio<AnyNode> = $(label);
     for (let up = 0; up < 6; up++) {
@@ -650,5 +668,14 @@ export function extractSiteContent(html: string, baseUrl: string, opts: { social
   const hours = hoursOf($page, text);
   report.push(hours ? extractorResult('hours', hours.method === 'json-ld' ? 'success' : 'partial', hours.method === 'json-ld' ? 'from structured data' : 'read from page text, not confirmed', hours.lines.length) : extractorResult('hours', 'skipped', 'no opening hours on the page: hours stay unknown', 0));
 
-  return { identity, address, phones, emails, booking: { primary, others }, services, story, images, videos, hours, socials: opts.socials || [], report };
+  // the hero, the places served, testimonials, the claims the business makes, and the menu
+  const hero = heroOf($page, baseUrl);
+  report.push(hero ? extractorResult('hero', hero.primary ? 'success' : 'partial', `headline "${hero.headline.slice(0, 70)}"${hero.primary ? `; primary action "${hero.primary.label}" (${hero.primary.kind})` : '; no button found in it'}${hero.secondary ? `; secondary "${hero.secondary.label}"` : ''}${hero.image ? `; picture from a ${hero.image.origin === 'css' ? 'background' : 'image'}` : ''}`, 1) : extractorResult('hero', 'skipped', 'no H1 on the page', 0));
+  const areas = areasOf(ld, text);
+  report.push(areas ? extractorResult('service area', 'success', `${areas.region ? `${areas.region}: ` : ''}${areas.places.slice(0, 6).join(', ')}${areas.places.length > 6 ? ` and ${areas.places.length - 6} more` : ''} (from ${areas.sources.join(', ')})`, areas.places.length) : extractorResult('service area', 'skipped', 'the page names no area it serves', 0));
+  const testimonials = testimonialsOf($page);
+  report.push(testimonials.length ? extractorResult('testimonials', 'success', `${testimonials.length} with their authors`, testimonials.length) : extractorResult('testimonials', 'skipped', 'no named testimonials on the page', 0));
+  const claims = claimsOf($page);
+  const nav = navMenu($page, baseUrl);
+  return { identity, address, phones, emails, booking: { primary, others }, services, story, images, videos, hours, socials: opts.socials || [], hero, areas, testimonials, claims, nav, report };
 }

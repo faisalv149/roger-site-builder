@@ -247,10 +247,20 @@ export interface Lead {
   preferredDate?: string;
   preferredTime?: string;
   status?: 'requested';
+  /** what happened when Roger tried to pass this enquiry to the business, separately from saving it (src/lead-delivery.ts) */
+  delivery?: { attempts: { channel: string; status: string; at: string; detail?: string }[]; confirmed: boolean };
+  /** a test enquiry sent from the Studio before publishing */
+  test?: boolean;
 }
 
-export async function saveLead(lead: Lead) {
-  await docs.put('leads', `${lead.slug}--${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, lead);
+/** Saves the enquiry and returns its id, so the delivery result can be recorded on it afterwards. */
+export async function saveLead(lead: Lead): Promise<string> {
+  const id = `${lead.slug}--${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  await docs.put('leads', id, lead);
+  return id;
+}
+export async function recordLeadDelivery(id: string, lead: Lead, delivery: NonNullable<Lead['delivery']>) {
+  await docs.put('leads', id, { ...lead, delivery });
 }
 
 export async function listLeads(slug: string): Promise<Lead[]> {

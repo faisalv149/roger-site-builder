@@ -35,7 +35,7 @@ const template = fs.readFileSync(new URL('../fixtures/websites/lakeside-clinic.h
 /** A picture that differs from every other one (so duplicate detection keeps them apart). */
 async function picture(n: number, w = 1200, h = 800) {
   const shapes = Array.from({ length: 6 }, (_, i) => `<circle cx="${(n * 97 + i * 211) % w}" cy="${(n * 53 + i * 131) % h}" r="${60 + ((n + i) * 37) % 160}" fill="rgb(${(n * 61 + i * 40) % 255},${(n * 29 + i * 70) % 255},${(n * 83 + i * 25) % 255})"/>`).join('');
-  return sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="rgb(${(n * 40) % 255},${(n * 90) % 255},${(n * 20) % 255})"/>${shapes}</svg>`)).jpeg({ quality: 80 }).toBuffer();
+  return sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="rgb(${(n * 40) % 255},${(n * 90) % 255},${(n * 20) % 255})"/>${shapes}<filter id="t"><feTurbulence type="fractalNoise" baseFrequency="0.015" numOctaves="4" seed="${n}"/></filter><rect width="${w}" height="${h}" filter="url(#t)" opacity="0.6"/></svg>`)).jpeg({ quality: 80 }).toBuffer();
 }
 const images = new Map<string, Buffer>();
 for (let n = 1; n <= 5; n++) images.set(`/img/photo-${n}.jpg`, await picture(n));
@@ -128,7 +128,7 @@ test('content from the website is recovered and kept: all five services, the boo
   assert.deepEqual([...built.services].sort(), [...SERVICES].sort());
   const html = read(built.slug);
   for (const s of SERVICES) assert.ok(html.includes(s.replace('&', '&amp;')), `${s} is on the page`);
-  assert.match(html, /We offer a range of services, from advanced decompression therapy/); // the clinic's own story
+  assert.match(html, /is dedicated to providing comprehensive chiropractic care/); // the clinic's own story, led by its first sentence
   assert.equal((html.match(/data-video /g) || []).length, 3, 'three videos');
   assert.ok(!/Chiropracti[,s]/.test(html), 'no name cut short by the page builder appears');
   assert.equal(restoreName('At Lakeside Chiropracti, we believe in', 'Lakeside Chiropractic'), 'At Lakeside Chiropractic, we believe in');
@@ -143,7 +143,7 @@ test('content from the website is recovered and kept: all five services, the boo
   const photoRecords = built.extraction!.photos.filter((r) => r.role === 'content');
   assert.ok(photoRecords.some((r) => r.skipped === 'duplicate'), 'the duplicate was noticed and recorded');
   assert.equal(built.extraction!.retention.find((r) => r.what === 'services')!.kept, 5);
-  assert.equal(built.review!.status, 'ready');
+  assert.deepEqual(built.review!.checks.filter((c) => c.level !== 'info' && c.id !== 'story-unedited'), []);
 });
 
 test('contact details are accurate: the clinic\'s phone, the full address, the main booking page; service destinations stay separate', () => {
@@ -285,7 +285,12 @@ test('service pictures stay with their services, cropped to one shape, with a fo
   }
   // each card's own booking destination
   assert.match(byName('Massage Therapy'), /href="tel:1-512-630-3723"[^>]*>Call to book/);
-  assert.match(byName('Massage Chair Session'), /href="https:\/\/practice\.chirotouch\.com\/portal\/LakesideChiropractic"[^>]*>Book online/);
+  assert.match(byName('Chiropractic Adjustment'), /href="https:\/\/practice\.chirotouch\.com\/portal\/LakesideChiropractic"[^>]*>Book online/);
+  // "No appointment necessary": the card offers the way there, not a booking button
+  assert.doesNotMatch(byName('Massage Chair Session'), /Book online/);
+  assert.match(byName('Massage Chair Session'), />(Get directions|Visit us)/);
+  // the same booking button on three or more cards is a quiet link on each card (the hero carries the button)
+  assert.match(byName('Chiropractic Adjustment'), /class="f-svc-link"/);
   // the pictures are saved with the service, with the uncropped copy for re-cropping
   const draft = (await (await import('../src/drafts.js')).findDraft({ slug: r.slug }))!;
   const adj = draft.offerings.find((o: any) => o.name === 'Chiropractic Adjustment')!;
@@ -350,7 +355,7 @@ test('the brand is read from the website\'s rendered styles, with evidence, and 
     const html = read(r.slug);
     assert.match(html, /<style id="rg-brand">:root\{[^}]*--brand:#E4B600[^}]*--heading:#0828B9/);
     assert.equal(r.brandProfile!.primary!.hex, '#0828B9');
-    assert.equal(r.review!.status, 'ready');
+    assert.deepEqual(r.review!.checks.filter((c) => c.level !== 'info' && c.id !== 'story-unedited'), []); // (without Claude the About text is unedited, which is a finding)
     assert.ok(r.extraction!.extractors.some((e) => e.name === 'brand' && e.status === 'success' && /#0828B9/.test(e.reason)));
     assert.ok(html.includes('family=Nunito+Sans') && html.includes('family=Inter'), 'the substituted typefaces are loaded');
     const d = (await (await import('../src/drafts.js')).findDraft({ slug: r.slug }))!;

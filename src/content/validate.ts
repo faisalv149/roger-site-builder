@@ -62,7 +62,7 @@ export function checkBuild(f: BuildFacts): BuildReview {
   if (found && f.hidden.services) add('services-hidden', 'block', `The services section is hidden (${f.hidden.services}) although the website lists ${found}.`);
 
   if (f.photos.discovered && !f.photos.kept) add('photos-none', 'review', `The website shows ${f.photos.discovered} photo${f.photos.discovered > 1 ? 's' : ''}, but none could be used${f.photos.failures ? ` (${f.photos.failures} failed to download)` : ''}.`);
-  else if (f.photos.discovered && f.photos.kept < f.photos.discovered) add('photos-partial', 'info', `${f.photos.kept} of ${f.photos.discovered} website photos are used; the rest were duplicates, too small or failed to download.`);
+  else if (f.photos.discovered && f.photos.kept < f.photos.discovered) add('photos-partial', 'info', `${f.photos.kept} of ${f.photos.discovered} website photos are used; the rest were icons or graphics, duplicates, under-sized or failed to download.`);
   if (f.videos.discovered && f.videos.kept < f.videos.discovered) add('videos-dropped', 'review', `The website has ${f.videos.discovered} videos; the site shows ${f.videos.kept}.`);
   if (c?.booking.primary && !f.booking) add('booking-dropped', 'block', `The website's booking address (${c.booking.primary.url}) is missing from the site.`);
   if (f.serviceImages && f.serviceImages.discovered && f.serviceImages.usable < f.serviceImages.discovered) add('service-images-lost', f.serviceImages.usable ? 'review' : 'review', `The website shows a picture on ${f.serviceImages.discovered} service${f.serviceImages.discovered > 1 ? 's' : ''}; ${f.serviceImages.usable} could be used${f.serviceImages.failures ? ` (${f.serviceImages.failures} failed to download)` : ''}.`);
@@ -75,7 +75,7 @@ export function checkBuild(f: BuildFacts): BuildReview {
  * The finished page against what was expected of it: every service named, the booking address linked, the phone
  * and the street shown. Anything absent is a check that fails, not a section that quietly disappears.
  */
-export function checkOutput(html: string, expect: { services: string[]; bookingUrl?: string; phone?: string; street?: string; name?: string; /** the website's own brand colours: they must reach the page's styles */ brandColors?: string[]; /** service pictures that were usable: each must be on a card */ serviceImages?: number }): BuildCheck[] {
+export function checkOutput(html: string, expect: { services: string[]; bookingUrl?: string; phone?: string; street?: string; name?: string; /** the website's own brand colours: they must reach the page's styles */ brandColors?: string[]; /** service pictures that were usable: each must be on a card */ serviceImages?: number; /** the website's main call to action: its words must be on the page */ ctaLabel?: string }): BuildCheck[] {
   const out: BuildCheck[] = [];
   const text = html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ');
   const lower = text.toLowerCase().replace(/&amp;/g, '&').replace(/&#39;/g, "'");
@@ -91,6 +91,12 @@ export function checkOutput(html: string, expect: { services: string[]; bookingU
     const cards = (html.match(/class="f-svc-media"[^>]*><img/g) || []).length;
     if (cards < expect.serviceImages) out.push({ id: 'output-service-images', level: 'block', message: `${expect.serviceImages} service pictures were recovered but only ${cards} appear on the service cards.` });
   }
+  if (expect.ctaLabel && !lower.includes(expect.ctaLabel.toLowerCase())) out.push({ id: 'output-cta', level: 'block', message: `The website's main call to action ("${expect.ctaLabel}") is not on the page.` });
+  // a call to action that isn't a link: "Request a quote" sitting as loose text
+  const loose = (text.match(/<(?:span|p|div)[^>]*class="[^"]*is-quote[^"]*"[^>]*>[^<]*<\/(?:span|p|div)>/gi) || []).filter((x) => /quote|book|call|request|inspection/i.test(x));
+  if (loose.length) out.push({ id: 'output-inert-cta', level: 'block', message: `${loose.length} call${loose.length > 1 ? 's' : ''} to action on the page ${loose.length > 1 ? 'are' : 'is'} not a link.` });
+  const noSrc = (html.match(/<img\b[^>]*\bsrc=""/gi) || []).length;
+  if (noSrc) out.push({ id: 'output-empty-image', level: 'block', message: `${noSrc} image${noSrc > 1 ? 's have' : ' has'} no file.` });
   if (expect.name && /\(\s*555\s*\)\s*010-?0\d\d\d|555-01\d\d/.test(html)) out.push({ id: 'output-placeholder-phone', level: 'block', message: 'The page contains a placeholder (fictional 555) phone number.' });
   return out;
 }

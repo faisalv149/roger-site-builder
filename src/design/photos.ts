@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { fitFor } from './image-fit.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
@@ -22,6 +23,8 @@ export interface PhotoInfo {
   height: number;
   aspect: number;
   owner: boolean;
+  /** the picture the business's own website puts in its hero */
+  siteHero?: boolean;
   kind: PhotoKind | 'unknown';
   /** 0..1 */
   sharpness: number;
@@ -109,6 +112,7 @@ export async function analyzePhotos(items: ProcessedPhoto[], kinds: (PhotoKind |
       height,
       aspect: width / Math.max(1, height),
       owner: !!it.photo.isOwner,
+      siteHero: it.photo.origin?.role === 'hero',
       kind: kinds[i] ?? 'unknown',
       sharpness: m.sharpness,
       exposure: m.exposure,
@@ -122,7 +126,10 @@ const aspectFit = (a: number) => (a >= 1.3 ? 1 : a >= 1 ? 0.6 : 0.25);
 export function heroScore(p: PhotoInfo): number {
   // the work itself leads; a van or shopfront only when nothing better is there
   const kindBonus = p.kind === 'work' ? 0.12 : p.kind === 'storefront' || p.kind === 'vehicle' ? 0.02 : p.kind === 'team' ? -0.25 : 0;
-  return p.quality * 0.7 + aspectFit(p.aspect) * 0.2 + (p.owner ? 0.1 : 0) + kindBonus;
+  // the business's own hero picture is relevant by definition: it ranks first when it is good enough to lead
+  // a picture too small for a hero frame is not stretched to fill one: another that fits leads
+  const small = fitFor(p.width, p.height, 'hero').level === 'undersized' ? -0.3 : 0;
+  return p.quality * 0.7 + aspectFit(p.aspect) * 0.2 + (p.owner ? 0.1 : 0) + kindBonus + small + (p.siteHero && p.quality >= 0.45 ? 0.35 : 0);
 }
 /** Strong enough to carry a full-width photograph-led hero. */
 export const photoLedOk = (p?: PhotoInfo) => !!p && p.width >= 1400 && p.aspect >= 1.3 && p.quality >= 0.55;

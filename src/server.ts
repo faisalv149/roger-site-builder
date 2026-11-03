@@ -12,14 +12,15 @@ import { lookupCandidates } from './sources/resolve.js';
 import { confirmBusinessCard } from './imessage/cards.js';
 import { runAudit, type BuildInput } from './pipeline.js';
 import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
-import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead } from './store.js';
+import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead, recordLeadDelivery } from './store.js';
+import { deliverLead, ownerEmailOf, configuredChannels } from './lead-delivery.js';
 import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { normalizeLead } from './leads.js';
 import { personaliseState, startRefinement } from './design/refine.js';
 import { screenshotsAvailable } from './render/og.js';
 import { publishEnabled, publishSite, setPrimaryDomain, unpublishSite } from './publish.js';
-import { findDraft } from './drafts.js';
+import { findDraft, putDraft } from './drafts.js';
 import { publishReadiness } from './design/content.js';
 import { deleteOut, readOut } from './files.js';
 import { remote } from './remote.js';
@@ -201,10 +202,13 @@ app.post('/api/leads/:slug', wrap(async (req, res) => {
   const n = normalizeLead(slug, b);
   if (!n.ok) return res.status(400).json({ error: n.error });
   const lead = n.lead;
-  await saveLead(lead); // data/leads locally, Supabase/Redis on Vercel
-  // awaited (with a timeout): on Vercel the function may stop right after the response
-  if (config.leadWebhook) await fetch(config.leadWebhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead), signal: AbortSignal.timeout(8000) }).catch((e) => console.warn('[lead webhook]', e.message));
-  if (req.is('application/json')) return res.json({ ok: true });
+  const leadId = await saveLead(lead); // data/leads locally, Supabase/Redis on Vercel
+  // saved is not delivered: pass it on (awaited, with timeouts: on Vercel the function may stop right after the response) and record the result
+  const draft = await findDraft({ slug }).catch(() => undefined);
+  const delivery = await deliverLead(lead, { business: draft?.base.business.name || slug, ownerEmail: ownerEmailOf(draft?.content) });
+  await recordLeadDelivery(leadId, lead, { attempts: delivery.attempts, confirmed: delivery.confirmed }).catch((e) => console.warn('[lead delivery record]', e.message));
+  for (const a of delivery.attempts.filter((x) => x.status === 'failed')) console.warn(`[lead ${a.channel}] ${slug}: ${a.detail}`);
+  if (req.is('application/json')) return res.json({ ok: true, saved: true, delivered: delivery.confirmed });
   res.redirect(303, `${String(req.get('referer') || `/sites/${slug}/`).split('#')[0]}#quote`);
 }));
 // reading leads (names, phone numbers) needs the Studio password; only sending one is open
@@ -232,6 +236,21 @@ app.post('/api/sites/:slug/publish', wrap(async (req, res) => {
   if (!publishEnabled()) return res.status(400).json({ error: 'Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).' });
   res.json(await publishSite(String(req.params.slug)));
 }));
+// send a test enquiry through the same path a visitor's form uses; the site can't be published until one arrives
+app.post('/api/sites/:slug/test-lead', wrap(async (req, res) => {
+  const slug = String(req.params.slug).replace(/[^a-z0-9-]/g, '');
+  const d = await findDraft({ slug });
+  if (!d) return res.status(404).json({ error: 'No such site' });
+  const n = normalizeLead(slug, { name: 'Roger test enquiry', phone: '(000) 000-0000', message: 'Test enquiry sent by Roger before publishing. Safe to ignore.', kind: 'enquiry', page: 'test' });
+  if (!n.ok) return res.status(400).json({ error: n.error });
+  n.lead.test = true;
+  const leadId = await saveLead(n.lead);
+  const delivery = await deliverLead(n.lead, { business: d.base.business.name, ownerEmail: ownerEmailOf(d.content), test: true });
+  await recordLeadDelivery(leadId, n.lead, { attempts: delivery.attempts, confirmed: delivery.confirmed });
+  // the gate opens only when a channel acknowledged the test: a saved enquiry that reaches nobody is not delivery
+  if (delivery.confirmed) { d.base.leadTestedAt = new Date().toISOString(); d.base.leadDelivery = delivery.attempts; await putDraft(d); }
+  res.status(delivery.confirmed ? 200 : 502).json({ ok: delivery.confirmed, saved: true, delivered: delivery.confirmed, channels: delivery.configured, attempts: delivery.attempts, error: delivery.confirmed ? undefined : delivery.configured.length ? 'The test enquiry was saved, but no channel confirmed delivery.' : 'No delivery channel is set up: set LEAD_WEBHOOK_URL, or RESEND_API_KEY and LEAD_FROM_EMAIL (with the business\'s email or LEAD_NOTIFY_EMAIL).' });
+}));
 // what stops this site being published (Studio): reviewed facts, sample content, unconfirmed prices
 // Re-resolve a site whose saved business identity isn't a business (a postal code, a town) and rebuild its pages in place
 app.post('/api/sites/:slug/re-resolve', wrap(async (req, res) => {
@@ -243,7 +262,7 @@ app.post('/api/sites/:slug/re-resolve', wrap(async (req, res) => {
 app.get('/api/sites/:slug/readiness', wrap(async (req, res) => {
   const d = await findDraft({ slug: String(req.params.slug) });
   if (!d) return res.json({ ready: false, items: [{ key: 'content', level: 'blocker', message: 'This site was built before business details could be reviewed. Rebuild it to publish.' }] });
-  const items = publishReadiness(d.content, d.offerings);
+  const items = publishReadiness(d.content, d.offerings, { checks: d.base.source?.review?.checks, leadTested: !!d.base.leadTestedAt, leadNotified: configuredChannels(ownerEmailOf(d.content)).length > 0 });
   res.json({ ready: !items.some((i) => i.level === 'blocker'), items, draftId: d.id });
 }));
 // make a verified custom domain the primary address (real Vercel domain verification; the demo step never calls this)

@@ -78,6 +78,10 @@ export interface OwnService {
   contact?: { kind: 'online' | 'phone' | 'email' | 'page'; url: string; label: string } | null;
   /** the picture on this service's own card on the website, cropped and stored with it */
   image?: import('../sources/service-images.js').ServiceImage | null;
+  /** listed in the website's menu but not led with: shown after the main services */
+  secondary?: boolean;
+  /** the business's own page about this service */
+  page?: string;
   /** read from the business's own website (as opposed to reviews or the theme) */
   fromWebsite?: boolean;
 }
@@ -90,6 +94,8 @@ export interface FactsResult {
   serviceBlurbs: Record<string, string>;
   claudeMs?: number;
   design?: DesignAdvice;
+  /** what Claude suggested before the page's own list took over: proposals for review, never shown by themselves */
+  claudeServices?: OwnService[];
   /** whether Claude read the content, whether its answer held up, and why a fallback answered instead */
   claude: ClaudeRun;
   /** what the page and Google establish: true when stated, null when unknown (never an invented "no") */
@@ -138,7 +144,7 @@ const ICON_BY_WORD: [RegExp, string][] = [
   [/decompress|therapy|rehab|recovery|pain|physio|injury/i, 'heart-pulse'], [/consult|exam|assess|evaluat|screen|check/i, 'clipboard-check'], [/fit|train|strength|exercise|yoga/i, 'dumbbell'],
   [/child|kid|pediatric|family|baby/i, 'baby'], [/pet|dog|vet|groom/i, 'dog'], [/clean|repair|install|fix/i, 'wrench'],
 ];
-const iconFor = (name: string) => { const i = ICON_BY_WORD.find(([re]) => re.test(name))?.[1]; return i && SERVICE_ICONS.includes(i) ? i : 'circle-check'; };
+export const iconFor = (name: string) => { const i = ICON_BY_WORD.find(([re]) => re.test(name))?.[1]; return i && SERVICE_ICONS.includes(i) ? i : 'circle-check'; };
 
 /**
  * The services the page itself lists are the services. Claude may add a one-line description and an icon to those, but
@@ -307,5 +313,5 @@ export async function extractFacts(b: Business, theme: Theme, scan?: WebsiteScan
   const own = mergeServices(sourceServices, claudeOwn, { siteText, reviewText });
   if (!sourceServices.length && own.length < claudeOwn.length) dropped.push(`${claudeOwn.length - own.length} service(s) not on the website`);
   const design = opts.design && d.design && typeof d.design === 'object' ? d.design : undefined;
-  return { facts, services: own, servicesMentioned: d.servicesMentioned || [], serviceBlurbs: blurbs, claudeMs: ai.ms, design, claude: { enabled: true, via: ai.via, ran: true, validated: true, ms: ai.ms, dropped }, states: states(facts) };
+  return { facts, services: own, claudeServices: claudeOwn, servicesMentioned: d.servicesMentioned || [], serviceBlurbs: blurbs, claudeMs: ai.ms, design, claude: { enabled: true, via: ai.via, ran: true, validated: true, ms: ai.ms, dropped }, states: states(facts) };
 }

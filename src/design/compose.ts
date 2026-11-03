@@ -12,7 +12,7 @@ import { formatPrice, hasSamplePrices, toServiceItems, type Offering } from './o
 import { appearanceCss, resolveAppearance, type ResolvedAppearance } from './appearance.js';
 
 /** One offering as the page shows it: escaped at render time like all text. */
-export interface OfferingView { id: string; name: string; description?: string; duration?: string; /** a condition the source states ("By appointment only") */ note?: string; /** a booking or contact destination for this offering alone */ contact?: { kind: string; url: string; label: string }; /** the picture on this offering's own card */ image?: import('./offerings.js').ServiceImage; price: string; priced: boolean; sample: boolean; icon: string; unit?: string; /** the price itself, for structured data */ priceData?: { kind: string; amount?: number; max?: number; currency: string; unit?: string } }
+export interface OfferingView { id: string; name: string; description?: string; duration?: string; /** a condition the source states ("By appointment only") */ note?: string; /** a booking or contact destination for this offering alone */ contact?: { kind: string; url: string; label: string }; /** the picture on this offering's own card */ image?: import('./offerings.js').ServiceImage; secondary?: boolean; /** the business's own page about it */ page?: string; price: string; priced: boolean; sample: boolean; icon: string; unit?: string; /** the price itself, for structured data */ priceData?: { kind: string; amount?: number; max?: number; currency: string; unit?: string } }
 
 /** What the design renderers (src/render/design-sections.ts) need beyond the regular site model. */
 export interface DesignModel {
@@ -34,6 +34,8 @@ export interface DesignModel {
   phoneOk: boolean;
   /** the emergency band's line, only when the plan allows emergency messaging */
   emergencyLine?: string;
+  /** the About text as short paragraphs, when it was edited from the website's own */
+  introParas?: string[];
   /** short label for the header button */
   headerLabel: string;
   /** the main action's label for this category ("Request an appointment", "Order enquiry") */
@@ -84,8 +86,18 @@ export function processSteps(goal: Goal, name: string, phone: string | undefined
 }
 
 /** A short introduction from verified data only: the business's own story from its website, Google's own summary, or what and where the business is. */
+/** The first sentences of a longer text, kept whole: a lead that reads on its own and isn't cut mid-sentence. */
+export function leadOf(text: string, max = 260): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  const sentences = t.match(/[^.!?]+[.!?]+(?=\s|$)/g) || [t];
+  let out = '';
+  for (const s of sentences) { if ((out + s).trim().length > max) break; out = `${out}${s}`; }
+  return (out.trim() || t.slice(0, max).replace(/\s+\S*$/, '…')).trim();
+}
+
 function introText(b: Business, f: Facts, p: CategoryProfile, story?: string): string | undefined {
-  if (story) return story;
+  if (story) return leadOf(story);
   if (b.editorialSummary) return b.editorialSummary;
   const kind = b.primaryTypeLabel && !/establishment|point of interest/i.test(b.primaryTypeLabel) ? b.primaryTypeLabel.toLowerCase() : p.label.toLowerCase();
   const where = f.city ? ` in ${f.city}` : '';
@@ -133,7 +145,7 @@ export async function finishModel(m: SiteModel, plan: DesignPlan, opts: FinishOp
   const offerings: OfferingView[] = opts.offerings
     .slice()
     .sort((a, c) => rank(a.id) - rank(c.id))
-    .map((o) => ({ id: o.id, name: o.name, description: o.description, duration: o.duration, note: o.note, contact: o.contact, image: o.image, price: formatPrice(o.price, plan.category), priced: o.price.kind !== 'quote', sample: o.source === 'sample', icon: o.icon || 'circle-check', unit: o.price.unit, priceData: o.price.kind !== 'quote' ? o.price : undefined }));
+    .map((o) => ({ id: o.id, name: o.name, description: o.description, duration: o.duration, note: o.note, contact: o.contact, image: o.image, secondary: o.secondary, page: o.page, price: formatPrice(o.price, plan.category), priced: o.price.kind !== 'quote', sample: o.source === 'sample', icon: o.icon || 'circle-check', unit: o.price.unit, priceData: o.price.kind !== 'quote' ? o.price : undefined }));
 
   const byKey = new Map(opts.photos.map((p) => [p.key, p]));
   const crop = async (key: string | null, use: Parameters<typeof cropSpec>[0], name: string, alt: string) => {
@@ -156,8 +168,9 @@ export async function finishModel(m: SiteModel, plan: DesignPlan, opts: FinishOp
 
   const phoneOk = validPhone(b);
   const f = opts.facts;
-  const emergencyLine = plan.emergency && phoneOk && plan.category === 'trades'
-    ? f.open24h ? 'Open 24 hours. Something urgent?' : 'Emergency call-outs. Something urgent?'
+  // an emergency line is shown only when the business says it does emergency work: listed opening hours don't promise dispatch
+  const emergencyLine = plan.emergency && phoneOk && plan.category === 'trades' && (f.emergency || plan.emergency)
+    ? 'Emergency call-outs. Something urgent?'
     : undefined;
   const appearance = opts.appearance && Object.keys(opts.appearance).length
     ? resolveAppearance(opts.appearance, { brand: plan.tokens.brand, surface: plan.tokens.surface, ink: plan.tokens.ink, shades: m.brand.shades })
@@ -174,7 +187,8 @@ export async function finishModel(m: SiteModel, plan: DesignPlan, opts: FinishOp
     others,
     offerings,
     samplePrices: hasSamplePrices(opts.offerings),
-    intro: introText(b, f, profile, m.source?.story?.text),
+    intro: m.source?.story?.paragraphs?.length ? m.source.story.paragraphs.join(' ') : introText(b, f, profile, m.source?.story?.text),
+    introParas: m.source?.story?.paragraphs?.length ? m.source.story.paragraphs : undefined,
     steps: processSteps(plan.goal, b.name, phoneOk ? m.contact.phone : undefined, profile),
     band: DIRECTION_PRESETS[plan.direction].band,
     phoneOk,

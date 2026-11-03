@@ -88,7 +88,7 @@ body[data-motion=off] .d-svc-card:hover,body[data-motion=off] .d-plan:hover,body
 .cz-dot[aria-current=true]::after{background:var(--brand);width:22px;margin-left:-11px}
 .dh-carousel{padding-block:calc(var(--section-y) * .7) var(--section-y)}
 @media (min-width:${DESK}px){.dh-carousel .dh-grid{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr)}}
-.d-credit{position:absolute;right:10px;bottom:10px;z-index:2;background:rgba(0,0,0,.6);color:#fff;font-size:11px;line-height:1.3;padding:3px 7px;border-radius:4px}
+.d-credit{position:absolute;right:10px;bottom:10px;z-index:2;background:rgba(0,0,0,.6);color:#fff;font-size:12px;line-height:1.3;padding:3px 7px;border-radius:4px}
 /* hero photo credits sit top-right: the Roger widget covers the bottom-right corner of the first screen */
 .dh .d-credit{top:10px;bottom:auto}
 .d-note{display:flex;gap:8px;align-items:flex-start;font-size:var(--fs-sm);color:var(--ink-muted);max-width:46ch}

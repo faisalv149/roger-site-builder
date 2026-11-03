@@ -88,6 +88,8 @@ export type SiteContent = z.infer<typeof contentSchema>;
 export const valueHash = (v: unknown) => createHash('sha1').update(JSON.stringify(v ?? null)).digest('hex').slice(0, 12);
 const fresh = (): Review => ({ status: 'unreviewed' });
 
+/** text a schema limits in length, cut at a word so a long caption never invalidates the whole saved record */
+const clip = (s: string, max: number) => { const t = s.replace(/\s+/g, ' ').trim(); return t.length <= max ? t : `${t.slice(0, max - 1).replace(/\s+\S*$/, '')}…`.slice(0, max); };
 /** Initial content from what the build found. Sample fixtures mark everything as sample. */
 export function contentFromBuild(b: Business, f: Facts, photos: PhotoMeta[], opts: { description?: string; goal?: Goal; sample: boolean; fetchedAt: string }): SiteContent {
   // a business known only from its own website has no Google record behind its name, phone or address
@@ -111,7 +113,7 @@ export function contentFromBuild(b: Business, f: Facts, photos: PhotoMeta[], opt
   const media: MediaItem[] = photos.map((p, i) => ({
     key: p.key, source: opts.sample ? 'sample' : p.image.source === 'google' ? 'google' : 'website',
     attribution: p.image.credit ? { name: p.image.credit.replace(/^Photo:\s*/i, '') } : undefined,
-    publishable: false, alt: p.image.alt || `${b.name}, photo ${i + 1}`, order: i, publicPath: p.image.publicPath, width: p.width, height: p.height,
+    publishable: false, alt: clip(p.image.alt || `${b.name}, photo ${i + 1}`, 160), order: i, publicPath: p.image.publicPath, width: p.width, height: p.height,
   }));
   return { version: CONTENT_VERSION, revision: 1, facts, media };
 }
@@ -238,8 +240,16 @@ export interface ReadinessItem { key: string; level: 'blocker' | 'warning'; mess
  * What stops a real publication. Optional things (no photos, prices on request) are not blockers; unconfirmed
  * claims, sample content and unreviewed contact details are.
  */
-export function publishReadiness(c: SiteContent | undefined, offerings: Offering[]): ReadinessItem[] {
+export function publishReadiness(c: SiteContent | undefined, offerings: Offering[], review?: { checks?: { id: string; level: string; message: string }[]; leadTested?: boolean; leadNotified?: boolean }): ReadinessItem[] {
   const out: ReadinessItem[] = [];
+  // what the build itself found: blocks stop a publication, items for review are shown to the owner first
+  for (const k of review?.checks ?? []) {
+    if (k.level === 'block') out.push({ key: `build:${k.id}`, level: 'blocker', message: k.message });
+    else if (k.level === 'review') out.push({ key: `build:${k.id}`, level: 'warning', message: k.message });
+  }
+  if (review && review.leadTested === false) out.push({ key: 'lead-test', level: 'blocker', message: 'Send a test enquiry: a visitor\'s message must reach you before the site is published.' });
+  // a saved enquiry that reaches nobody is a lost customer: without a delivery channel the site can't be published
+  if (review && review.leadNotified === false) out.push({ key: 'lead-delivery', level: 'blocker', message: 'Enquiries would be saved but nobody would be told: set up where they are sent (an email address, or a webhook) before publishing.' });
   if (!c) return [{ key: 'content', level: 'blocker', message: 'The business details haven\'t been reviewed yet.' }];
   const F = c.facts as Record<string, { value: unknown; provenance: Provenance; review: Review } | undefined>;
   for (const [k, f] of Object.entries(F)) {
@@ -259,8 +269,13 @@ export function publishReadiness(c: SiteContent | undefined, offerings: Offering
     else if (o.price.kind !== 'quote' && o.source !== 'owner') out.push({ key: `offering:${o.id}`, level: 'blocker', message: `Confirm the price of "${o.name}" (${o.source === 'website' ? 'from your website' : 'not from you'}).` });
   }
   for (const m of c.media) if (m.source === 'sample' && m.role !== 'omit') out.push({ key: `media:${m.key}`, level: 'warning', message: 'A sample photo will be left out of the published site.' });
-  if (c.media.some((m) => m.source === 'website' && !m.publishable && m.role !== 'omit')) out.push({ key: 'media-website', level: 'warning', message: 'Photos from your current website show in the preview. Confirm they are yours to publish, or upload others.' });
-  if (c.media.some((m) => m.source === 'google' && m.role !== 'omit')) out.push({ key: 'media', level: 'warning', message: 'Photos from Google stay in the preview only. Upload your own photos to show them on the published site.' });
+  // a picture shown in the preview is not thereby cleared for publication: "found on your website" and "via Google" are where it came from, not proof it may be published
+  const unconfirmed = (src: MediaItem['source']) => c.media.filter((m) => m.source === src && !m.publishable && m.role !== 'omit');
+  const web = unconfirmed('website'), goog = unconfirmed('google');
+  if (web.length) out.push({ key: 'media-website', level: 'blocker', message: `${web.length} photo${web.length > 1 ? 's' : ''} from your current website ${web.length > 1 ? 'are' : 'is'} not confirmed as yours to publish. Confirm each one, leave it out, or upload your own.` });
+  if (goog.length) out.push({ key: 'media', level: 'blocker', message: `${goog.length} photo${goog.length > 1 ? 's' : ''} from Google can't be published without the photographer's permission. Leave ${goog.length > 1 ? 'them' : 'it'} out or upload your own.` });
+  const svc = offerings.filter((o) => o.image && o.image.source === 'website' && !o.image.confirmed);
+  if (svc.length) out.push({ key: 'service-images', level: 'blocker', message: `${svc.length} service picture${svc.length > 1 ? 's' : ''} came from your website and ${svc.length > 1 ? 'are' : 'is'} not confirmed as yours to publish: ${svc.slice(0, 4).map((o) => o.name).join(', ')}.` });
   if (!c.media.some((m) => m.publishable && m.role !== 'omit')) out.push({ key: 'media-none', level: 'warning', message: 'No photos of your own yet: the published site will use a text-only design.' });
   return out;
 }

@@ -22,7 +22,7 @@ body[data-family] section{scroll-margin-top:80px}
 .f-menu-nav a{padding:12px 14px;border-radius:8px;text-decoration:none;color:var(--ink);font-weight:600}
 .f-menu-nav a:hover,.f-menu-nav a:focus-visible{background:var(--surface-alt)}
 @media (max-width:${DESK - 1}px){.f-menu{display:block}}
-.f-more{display:inline-flex;align-items:center;gap:6px;font-weight:700;text-decoration:none;color:var(--brand-text)}
+.f-more{display:inline-flex;align-items:center;gap:6px;min-height:44px;font-weight:700;text-decoration:none;color:var(--brand-text)}
 .f-more:hover{text-decoration:underline}
 .f-note{font-size:var(--fs-sm);color:var(--ink-muted);margin:var(--sp-3) 0 0;line-height:1.5}
 .f-visit-act{margin:var(--sp-4) 0 var(--sp-5)}
@@ -40,6 +40,19 @@ a.f-book:hover,a.f-book:focus-visible{text-decoration:underline}
 .f-video-fail{position:absolute;inset:auto 0 0 0;margin:0;padding:var(--sp-3) var(--sp-4);background:rgba(0,0,0,.78);color:#fff;font-size:var(--fs-sm)}
 .f-video-fail a{color:#fff;text-decoration:underline}
 .f-video-note{margin-top:var(--sp-4)}
+.f-svc-link{display:inline-flex;align-items:center;gap:6px;min-height:44px;margin-top:auto;font-weight:700;color:var(--heading,var(--ink));text-decoration:underline;text-underline-offset:3px;align-self:flex-start}
+.f-svc-link:hover{color:var(--brand-text,var(--heading))}
+.f-svc-also{margin-top:var(--sp-6)}
+.f-svc-also h3{font-size:var(--fs-lg);margin:0 0 var(--sp-3)}
+.f-svc-also ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:12px}
+.f-svc-also li{border-radius:999px;background:var(--surface-alt);font-weight:600}
+.f-svc-also li a{display:block;padding:10px 16px;color:var(--heading,var(--ink));text-decoration:none;min-height:44px;line-height:24px}
+.f-svc-also li a:hover{text-decoration:underline}
+/* touch targets: the logo link and a phone number in the footer are at least 44px tall */
+:is(.fe-logo,.fw-logo,.fb-logo){display:inline-flex;align-items:center;min-height:44px}
+:is(.fe-foot,.fw-foot,.fb-foot) a[href^="tel:"]{display:inline-flex;align-items:center;min-height:44px}
+.credit{opacity:.85}
+.f-svc-also li span{font-weight:400;color:var(--ink-muted);margin-left:6px}
 /* image-led service cards */
 .f-svc{padding-block:var(--section-y)}
 .f-svc-head{display:flex;justify-content:space-between;align-items:flex-end;gap:var(--sp-4);margin-bottom:var(--sp-6)}
@@ -54,7 +67,7 @@ a.f-book:hover,a.f-book:focus-visible{text-decoration:underline}
 .f-svc-body h3{margin:0;font-size:var(--fs-xl);line-height:1.2;color:var(--heading,var(--ink))}
 .f-svc-body h3 a{color:inherit;text-decoration:none}
 .f-svc-body h3 a:hover,.f-svc-body h3 a:focus-visible{text-decoration:underline}
-.f-svc-body p{margin:0;max-width:none;line-height:1.55}
+.f-svc-body p{text-wrap:pretty;margin:0;max-width:none;line-height:1.55}
 .f-svc-note,.f-svc-price{font-size:var(--fs-sm);color:var(--ink-muted)}
 .f-svc-btn{margin-top:auto;align-self:flex-start}
 @media (max-width:899px){.f-svc-card{flex-basis:calc((100% - 24px)/2)}}
@@ -85,6 +98,7 @@ a.f-book:hover,a.f-book:focus-visible{text-decoration:underline}
 @media (min-width:${DESK}px){.f-steps{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .f-urgent{background:var(--band);color:#fff;padding-block:var(--sp-4)}
 .f-urgent-in{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between}
+.f-urgent .btn-light,.f-urgent .btn-light span{color:#14161a}
 .f-urgent p{display:flex;gap:10px;align-items:center;font-weight:700;margin:0}
 .f-detail{padding-block:var(--section-y)}
 .f-detail-grid{display:grid;gap:var(--sp-7)}
@@ -142,6 +156,8 @@ ${FE} .fe-hero-type h1{font-size:clamp(calc(44px * var(--tk,1)),8vw,calc(112px *
 ${FE} .fe-intro{padding-block:var(--section-y);border-top:1px solid var(--fe-rule)}
 ${FE} .fe-intro-grid{display:grid;gap:var(--sp-5)}
 ${FE} .fe-intro-text{font-family:var(--font-heading);font-size:clamp(calc(24px * var(--tk,1)),2.6vw,calc(38px * var(--tk,1)));line-height:1.3;max-width:28ch;margin:0}
+${FE} .fe-intro-text p{margin:0 0 .7em}
+${FE} .fe-intro-text p + p{font-family:var(--font-body);font-size:var(--fs-lg);line-height:1.65;max-width:56ch}
 @media (min-width:${DESK}px){${FE} .fe-intro-grid{grid-template-columns:minmax(0,4fr) minmax(0,8fr)}}
 ${FE} .fe-offers{padding-block:var(--section-y);background:var(--surface-alt)}
 ${FE} .fe-offers-grid{display:grid;gap:var(--sp-6)}
@@ -243,6 +259,8 @@ ${FW} .fw-hero-type .fw-actions{justify-content:center}
 ${FW} .fw-cards{display:flex;justify-content:center;margin-top:var(--sp-6)}
 ${FW} .fw-intro{padding-block:var(--section-y)}
 ${FW} .fw-intro-card{max-width:860px;margin:0 auto;text-align:center}
+/* a story of several sentences reads left-aligned on a phone; centring suits a line or two */
+@media (max-width:${DESK - 1}px){${FW} .fw-intro-card p{text-align:left}}
 ${FW} .fw-intro h2{font-size:var(--fs-2xl)}
 ${FW} .fw-intro p{font-size:var(--fs-xl);line-height:1.55;color:var(--ink)}
 ${FW} .fw-chips{list-style:none;display:flex;flex-wrap:wrap;gap:8px;padding:0;margin:var(--sp-5) 0 0}
@@ -294,6 +312,10 @@ ${FW} .fw-visit{padding-block:var(--section-y);background:var(--surface-alt)}
 ${FW} .fw-visit-grid{display:grid;gap:var(--gutter)}
 ${FW} .fw-visit-card{background:var(--surface);border-radius:24px;padding:clamp(18px,3vw,32px);display:grid;gap:var(--sp-4);align-content:start}
 ${FW} .fw-visit h2{font-size:var(--fs-2xl);margin:0}
+/* a photo's credit sits on its top-left corner, clear of the cards stacked over the bottom of the hero picture */
+${FW} .fw-hero .d-credit{top:10px;bottom:auto;right:auto;left:10px}
+/* a visit card with no map beside it is centred, not left alone in an empty row */
+${FW} .fw-visit-grid.is-single{justify-content:center}
 ${FW} .fw-addr{display:flex;gap:10px;margin:0}
 ${FW} .fw-map iframe,${FW} .fw-map img{border-radius:24px}
 @media (min-width:${DESK}px){${FW} .fw-visit-grid{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr)}${FW} .fw-visit-grid.is-single{grid-template-columns:minmax(0,760px)}}
@@ -334,11 +356,15 @@ ${FB} .fb-hero{background:var(--band);color:#fff;padding-block:calc(var(--sectio
 ${FB} .fb-hero-grid{display:grid;gap:var(--sp-6);align-items:start}
 ${FB} .fb-kicker{font-size:var(--fs-sm);font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.85);margin:0}
 ${FB} .fb-hero h1{font-size:clamp(calc(44px * var(--tk,1)),7.4vw,calc(108px * var(--tk,1)));line-height:.95;text-transform:uppercase;margin:var(--sp-4) 0;max-width:12ch;color:#fff}
-${FB} .fb-lede{font-size:var(--fs-lg);color:rgba(255,255,255,.88);max-width:46ch}
+${FB} .fb-hero h1.is-long{font-size:clamp(calc(34px * var(--tk,1)),4.4vw,calc(68px * var(--tk,1)));max-width:19ch;line-height:1.02}
+${FB} .fb-lede{font-size:var(--fs-lg);color:rgba(255,255,255,.88);max-width:46ch;line-height:1.55}
+/* a sentence reads in even lines: no one-word last line, and on a phone a size that keeps about 36 characters to a line */
+:is(.fe-lede,.fw-lede,.fb-lede){text-wrap:pretty;overflow-wrap:break-word;hyphens:manual}
+@media (max-width:${DESK - 1}px){${FB} .fb-lede{font-size:clamp(16px,4.4vw,19px);max-width:none}}
 ${FB} .fb-hero .d-note{color:rgba(255,255,255,.85)}
 ${FB} .fb-panel{background:var(--surface);color:var(--ink);padding:var(--sp-6);border-top:6px solid var(--brand);display:grid;gap:14px}
 ${FB} .fb-panel-h{font-family:var(--font-heading);font-weight:var(--hw);text-transform:uppercase;font-size:var(--fs-xl);margin:0}
-${FB} .fb-panel-phone{display:inline-flex;gap:10px;align-items:center;font-family:var(--font-heading);font-weight:var(--hw);font-size:var(--fs-2xl);color:var(--ink);text-decoration:none;min-height:44px}
+${FB} .fb-panel-phone{display:inline-flex;gap:10px;align-items:center;white-space:nowrap;font-family:var(--font-heading);font-weight:var(--hw);font-size:clamp(24px,7vw,var(--fs-2xl));color:var(--ink);text-decoration:none;min-height:44px}
 ${FB} .fb-panel-hours{display:flex;gap:8px;align-items:center;margin:0;font-weight:600}
 ${FB} .fb-checks{list-style:none;padding:0;margin:0;display:grid;gap:8px;border-top:2px solid var(--ink);padding-top:14px}
 ${FB} .fb-checks li{display:flex;gap:8px;align-items:center;font-weight:700}
@@ -357,6 +383,8 @@ ${FB} .fb-intro{padding-block:var(--section-y);border-bottom:var(--fb-line)}
 ${FB} .fb-intro-grid{display:grid;gap:var(--sp-4)}
 ${FB} .fb-intro h2{font-size:var(--fs-sm);letter-spacing:.14em;text-transform:uppercase;margin:0}
 ${FB} .fb-intro p{font-size:var(--fs-xl);font-weight:600;line-height:1.4;max-width:46ch;margin:0}
+${FB} .fb-intro .fb-intro-text p{font-size:var(--fs-lg);font-weight:400;line-height:1.65;max-width:62ch;margin:0 0 var(--sp-4)}
+${FB} .fb-intro .fb-intro-text p:last-child{margin-bottom:0}
 @media (min-width:${DESK}px){${FB} .fb-intro-grid{grid-template-columns:200px 1fr}}
 ${FB} .fb-sec-head{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:end;justify-content:space-between;border-bottom:var(--fb-line);padding-bottom:12px;margin-bottom:0}
 ${FB} .fb-sec-head h2{font-size:clamp(calc(30px * var(--tk,1)),4vw,calc(56px * var(--tk,1)));text-transform:uppercase;line-height:1;margin:0}

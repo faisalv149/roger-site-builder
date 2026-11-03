@@ -9,11 +9,15 @@ import { formatDuration, imageKey, nameKey } from './sources/site-content.js';
 import { fetchServiceImages, type ServiceImageRecord } from './sources/service-images.js';
 import { buildBrandProfile, dominantColors, profileColors, type BrandProfile } from './sources/brand-profile.js';
 import { extractorResult } from './content/extraction.js';
+import { featuredService, buildAssets, buildEvidenceModel, headlineRelevant, reconcileServices, reviewEvidence, serviceKey, type EvidenceModel } from './evidence.js';
+import { iconFor, shorten, splitNote } from './content/facts.js';
 import { IdentityError } from './sources/website-business.js';
 import { fetchSiteImages, type ImageRecord } from './sources/site-images.js';
 import { claudeNotRun, describeExtractors, type ClaudeRun, type ExtractionReport } from './content/extraction.js';
 import { checkBuild, checkOutput, statusOf, type BuildCheck, type BuildReview } from './content/validate.js';
 import { previewMessage } from './content/summary.js';
+import { usesOf } from './design/image-fit.js';
+import { editStory, type EditedStory } from './content/story.js';
 import { factStates, type FactStates } from './content/facts.js';
 import type { SourceBundle } from './content/model.js';
 import sharp from 'sharp';
@@ -162,7 +166,7 @@ async function timed<T>(steps: Step[], emit: Emit, name: string, fn: () => Promi
 const COUNTRY_CURRENCY: Record<string, string> = { US: 'USD', CA: 'CAD', GB: 'GBP', UK: 'GBP', IE: 'EUR', DE: 'EUR', FR: 'EUR', ES: 'EUR', IT: 'EUR', NL: 'EUR', AU: 'AUD', NZ: 'NZD', PK: 'PKR', IN: 'INR', AE: 'AED', ZA: 'ZAR', SG: 'SGD' };
 
 /** What the page may claim, with the same thresholds the content model uses (src/content/model.ts). */
-function evidenceFor(theme: Theme, b: Business, facts: Facts): Evidence {
+function evidenceFor(theme: Theme, b: Business, facts: Facts, sourceAreas?: string[]): Evidence {
   const pr = (theme.sectionRules.proof || {}) as { minRating?: number; minReviews?: number };
   const ar = (theme.sectionRules.area || {}) as { maxPlaces?: number };
   return {
@@ -170,7 +174,8 @@ function evidenceFor(theme: Theme, b: Business, facts: Facts): Evidence {
     rating: b.rating,
     reviewCount: b.reviewCount,
     trust: facts.licensed || facts.insured || !!facts.years || facts.warranty,
-    areas: [...new Set([facts.city, ...facts.serviceAreas, ...b.nearbyTowns].filter(Boolean) as string[])].slice(0, ar.maxPlaces ?? 8),
+    // the places the business itself says it serves come first, and alone when it names any
+    areas: sourceAreas?.length ? [...new Set(sourceAreas)].slice(0, 12) : [...new Set([facts.city, ...facts.serviceAreas, ...b.nearbyTowns].filter(Boolean) as string[])].slice(0, ar.maxPlaces ?? 8),
     address: b.formattedAddress,
   };
 }
@@ -186,6 +191,18 @@ const identityNote = (b: Business) => {
   const how = !i ? '' : i.status === 'website-only' ? 'from the website (no matching Google listing)' : i.status === 'unverified' ? 'Google listing, not checked against a website' : `Google listing ${i.status}${i.googleListsWebsite ? ' (Google lists the same website)' : ''}`;
   return `${b.name} · ${how}${b.source === 'website' ? '' : ` · ${b.photos.length} photos · ${b.reviews.length} reviews`}`;
 };
+
+/** a service's destination when it is a page of the business's own site other than the home page (not an anchor, a form or a phone) */
+function ownPage(dest: string | undefined, home: string): string | undefined {
+  try {
+    if (!dest) return undefined;
+    const u = new URL(dest), h = new URL(home);
+    if (!/^https?:$/.test(u.protocol) || u.origin !== h.origin) return undefined;
+    if (u.pathname.replace(/\/$/, '') === h.pathname.replace(/\/$/, '')) return undefined; // the same page: an anchor or form on it
+    u.hash = '';
+    return u.toString();
+  } catch { return undefined; }
+}
 
 export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promise<BuildResult> {
   const started = Date.now();
@@ -218,8 +235,9 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   // the website's own photographs (fetched at full size, measured, de-duplicated; failures recorded)
   let siteImages: Awaited<ReturnType<typeof fetchSiteImages>> | undefined;
   if (content && scan && b.source !== 'mock') {
-    const firstTheme = getTheme(input.themeId || '') || [...(await import('./theme/load.js')).loadThemes().values()][0];
-    siteImages = await timed(steps, emit, 'Fetch website photos', () => fetchSiteImages(content, { pageUrl: scan.finalUrl, minWidth: firstTheme.theme.images.minWidth, minHeight: firstTheme.theme.images.minHeight }), (r) => r.report.reason);
+    siteImages = await timed(steps, emit, 'Fetch website photos', () => fetchSiteImages(content, { pageUrl: scan.finalUrl, places: content.areas?.places }), (r) => r.report.reason);
+    const heroKey = content.hero?.image ? imageKey(content.hero.image.seen) : undefined;
+    for (const p of siteImages.photos) if (heroKey && imageKey(p.ref) === heroKey) p.origin = { ...p.origin, role: 'hero' };
     b.photos = [...siteImages.photos, ...b.photos];
     for (const r of siteImages.records.filter((x) => !x.ok)) warnings.push(`Website photo not retrieved: ${r.url.split('/').pop()} (${r.error})`);
   }
@@ -239,7 +257,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   } else {
     const prelim = heuristicFacts(b, scan);
     const any = getTheme(input.themeId || '') || [...(await import('./theme/load.js')).loadThemes().values()][0];
-    const usable = b.photos.filter((p) => p.width >= any.theme.images.minWidth && p.height >= any.theme.images.minHeight).length;
+    const usable = b.photos.filter((p) => usesOf(p.width, p.height).length > 0).length;
     const pick = selectTheme(b, prelim, usable, optIn ? {} : { themeId: input.themeId, vertical: input.vertical, variant: input.variant });
     entry = pick.entry;
     themeReason = optIn ? 'Personalised: Roger\'s design plan replaces the chosen theme (opted in)' : pick.reason;
@@ -291,17 +309,41 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     for (const n of brandProfile.notes) warnings.push(`Brand: ${n}`);
   }
 
+  // the evidence model: the service inventory reconciled across the home page, menu and service pages, pictures with their
+  // provenance, claims with where they were read. The site shows what this verifies; proposals wait for review.
+  let evModel: EvidenceModel | undefined;
+  let storyEdit: EditedStory | undefined;
+  if (content && scan && b.source !== 'mock') {
+    const crawlPages = scan.crawl?.pages ?? [];
+    const recs = reconcileServices({ homeUrl: scan.finalUrl, content, crawl: crawlPages, textServices: factsRes.services.map((x) => ({ name: x.name, description: x.description })), inferred: (factsRes.claudeServices ?? []).map((x) => ({ name: x.name, description: x.description })) });
+    const built = buildAssets({ homeUrl: scan.finalUrl, content, crawl: crawlPages, services: recs, imageRecords: siteImages?.records, serviceImageRecords: serviceImgs?.records, logoUrl: logoRes.logo?.sourceUrl, googlePhotos: b.photos.filter((p) => p.source !== 'website').length });
+    evModel = buildEvidenceModel({ scan, business: b, services: recs, assets: built.assets, projectsVerified: built.projectsVerified, brand: brandProfile });
+    // emergency service stated in the website's own text (read by the facts step) counts as stated on the website
+    if (factsRes.facts.emergency && !evModel.claims.emergencyResponse?.value) evModel.claims.emergencyResponse = { value: 'stated on the website', sourceUrl: scan.finalUrl, sourceType: 'website', observedAt: new Date().toISOString(), confidence: 0.7, status: 'verified' };
+    const verified = recs.filter((r) => r.status === 'verified').sort((a, z) => a.priority - z.priority);
+    if (verified.length) {
+      factsRes.services = verified.map((r) => {
+        const src = content.services.find((x) => serviceKey(x.name) === serviceKey(r.canonicalName));
+        const { description, note } = splitNote(r.description?.value);
+        const contact = src?.booking ? { kind: src.booking.kind, url: src.booking.url, label: src.booking.kind === 'phone' ? 'Call to book' : src.booking.label } : null;
+        return { name: r.canonicalName, description: shorten(description ?? '', 150), icon: iconFor(r.canonicalName), note, contact, image: serviceImgs?.byService.get(nameKey(r.canonicalName)) ?? null, fromWebsite: true, secondary: !r.isPrimary, page: ownPage(r.destination, scan.finalUrl), price: factsRes.services.find((x) => serviceKey(x.name) === serviceKey(r.canonicalName))?.price ?? undefined };
+      });
+    }
+    if (content.areas?.places.length) factsRes.facts.serviceAreas = content.areas.places;
+  }
+
   // 5) Services (before the design plan, which leads with one of them)
   const services = pickServices(theme, b, scan, factsRes.servicesMentioned, factsRes.serviceBlurbs, { emergencyOk: factsRes.facts.emergency || factsRes.facts.open24h, own: factsRes.services, ownFromWebsite: factsRes.services.some((x) => x.fromWebsite) });
   emit({ type: 'step', step: 'Services', status: 'done', note: services.source === 'business' ? `${services.items.length} from the business's own website/reviews` : services.hidden ? 'none stated, section hidden' : `theme's standard list (${factsRes.services.length} own services found, need ${(theme.sectionRules.services as any)?.min ?? 3})` });
-  const evidence = evidenceFor(theme, b, factsRes.facts);
+  const evidence = evidenceFor(theme, b, factsRes.facts, content?.areas?.places);
   const personalise: PersonaliseInfo = {
     eligible: config.designPilot,
     reason: config.designPilot ? undefined : 'Personalisation is turned off (DESIGN_PILOT=0)',
     manualTheme: manualTheme && !optIn,
     suggestions: [...new Set(services.items.filter((s) => services.source === 'business' || (s.hits ?? 0) > 0).map((s) => s.label))].slice(0, 4),
     phoneOk: validPhone(b),
-    emergencyVerified: factsRes.facts.open24h || factsRes.facts.emergency,
+    // emergency service is what the business says it offers; opening hours on a listing don't promise dispatch
+    emergencyVerified: factsRes.facts.emergency,
   };
 
   // the stock placeholder hero when Google has no usable photo (legacy themes show it; design plans go type-led)
@@ -340,10 +382,24 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       videos.push({ title: v.title, duration: formatDuration(v.duration), kind: v.kind, url: v.url, pageUrl: v.pageUrl, poster, note: v.note });
     }
     const primary = content.booking.primary;
+    storyEdit = content.story ? await editStory({ name: b.name, heading: content.story.heading, text: content.story.text }) : undefined;
+    const heroCta = content.hero?.primary;
+    const second = content.hero?.secondary;
+    const projects = !!evModel?.projectsVerified;
     sourceBundle = {
+      cta: heroCta || second ? {
+        primary: heroCta ? { label: heroCta.label, to: heroCta.kind === 'phone' ? 'phone' : heroCta.kind === 'form' || heroCta.kind === 'anchor' ? 'form' : primary && heroCta.href === primary.url ? 'booking' : 'url', href: heroCta.kind === 'external' || heroCta.kind === 'page' ? heroCta.href : undefined, terms: heroCta.terms, eligibleServices: (evModel?.offers[0]?.eligible ?? []).map((e) => serviceKey(e.service)), featuredService: featuredService(evModel?.offers[0], evModel?.services ?? []) } : undefined,
+        // "See our work" goes to the photo section of this site when the work is shown there; a link to a page that exists only on the old site would be dead
+        secondary: second && (projects || /work|project|gallery|photo/i.test(second.label)) ? { label: second.label, to: 'gallery' } : undefined,
+      } : undefined,
+      galleryTitle: projects ? 'Recent work' : 'Photos',
+      region: content.areas?.region,
+      claims: content.claims.map((c) => ({ key: c.key, text: c.text })),
+      testimonials: content.testimonials.map((t) => ({ author: t.author, text: t.text })),
+      evidence: evModel,
       website: scan?.finalUrl,
       booking: primary ? { url: primary.url, label: 'Book online', platform: primary.platform, kind: primary.kind } : undefined,
-      story: content.story ? { heading: content.story.heading, text: content.story.text } : undefined,
+      story: content.story ? { heading: storyEdit?.heading ?? content.story.heading, text: content.story.text, paragraphs: storyEdit?.paragraphs, edited: storyEdit?.method === 'edited' } : undefined,
       videos,
     };
   }
@@ -383,6 +439,16 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       tokens: tokensFor(base),
     });
     const plan = planOut.plan;
+    // the headline: the website's own, when it says what the business does; otherwise what it is, its main services and where
+    if (evModel?.hero && content?.hero) {
+      const ctx = { typeLabel: b.primaryTypeLabel, services: evModel.services.filter((s) => s.isPrimary).map((s) => s.canonicalName) };
+      const own = content.hero.headline.replace(/\s+/g, ' ').trim();
+      const subOk = content.hero.subline && content.hero.subline.length >= 40;
+      const where = content.areas?.region || b.city;
+      const composed = `${b.primaryTypeLabel ? b.primaryTypeLabel.replace(/ contractor$/i, '') : 'Local'} ${ctx.services.slice(0, 3).map((x) => x.toLowerCase()).join(', ')}${where ? ` in ${where}` : ''}`.replace(/\s+/g, ' ').trim();
+      const headline = own.length >= 8 && own.length <= 90 && headlineRelevant(own, ctx) ? own : composed.slice(0, 90);
+      plan.copy = { headline, subline: subOk ? content.hero.subline!.slice(0, 220) : plan.copy.subline, source: 'source' };
+    }
     themeReason = `${themeReason}. Page layout, type and spacing come from the design plan (${DIRECTION_LABEL[plan.direction]}, ${profileFor(category).label.toLowerCase()}); the theme supplies copy patterns and services`;
     warnings.push(...planOut.warnings);
     personalise.recommended = { style: planOut.recommended.direction, goal: planOut.recommended.goal, service: planOut.recommended.service };
@@ -469,13 +535,22 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   const outputChecks = b.source === 'mock' ? [] : checkOutput(renderedAll, {
     services: content?.services.map((x) => x.name) ?? [],
     bookingUrl: sourceBundle?.booking?.url,
+    ctaLabel: sourceBundle?.cta?.primary?.label,
     phone: b.phone,
     street: b.formattedAddress?.split(',')[0] ?? content?.address?.street,
     name: b.name,
     brandColors: brandProfile && brandProfile.method === 'rendered' ? profileColors(brandProfile) : undefined,
     serviceImages: serviceImgs?.byService.size,
   });
-  const reviewChecks = [...review0.checks, ...outputChecks, ...recovered.map((m): BuildCheck => ({ id: 'recovered', level: 'info', message: `Filled in ${m}.`, recovered: true }))];
+  const evFindings = evModel ? reviewEvidence(evModel, {
+    servicesShown: offerings.length ? offerings.map((o) => o.name) : model.services.items.map((x) => x.label),
+    headline: model.copy.hero, typeLabel: b.primaryTypeLabel,
+    primaryCtaLabel: model.design ? (sourceBundle?.cta?.primary?.label ? sourceBundle.cta.primary.label : undefined) : undefined,
+    galleryTitle: sourceBundle?.galleryTitle, storyChars: storyEdit?.method === "edited" ? 0 : model.design?.intro?.length,
+    serviceCardImages: (renderedAll.match(/class="f-svc-media"><img/g) || []).length,
+  }) : [];
+  if (storyEdit && storyEdit.method === 'extracted' && (content?.story?.text.length ?? 0) >= 200) evFindings.push({ id: 'story-unedited', level: 'review', message: "The About text is the website's own sentences, not an edited summary: read it before publishing." });
+  const reviewChecks = [...review0.checks, ...outputChecks, ...evFindings.map((f): BuildCheck => ({ id: f.id, level: f.level, message: f.message })), ...recovered.map((m): BuildCheck => ({ id: 'recovered', level: 'info', message: `Filled in ${m}.`, recovered: true }))];
   const review: BuildReview = { status: statusOf(reviewChecks), checks: reviewChecks };
   for (const c of review.checks.filter((x) => x.level !== 'info')) warnings.push(`Check: ${c.message}`);
   const extractors = [...(content?.report ?? []), ...(siteImages ? [siteImages.report] : []), ...(serviceImgs ? [extractorResult('service pictures', serviceImgs.byService.size === serviceImgs.records.length ? 'success' : serviceImgs.byService.size ? 'partial' : 'failed', `${serviceImgs.byService.size} of ${serviceImgs.records.length} service pictures fetched and cropped to 16:10${serviceImgs.records.some((r) => !r.ok) ? `; ${serviceImgs.records.filter((r) => !r.ok).map((r) => `${r.service}: ${r.skipped ?? r.error}`).slice(0, 2).join('; ')}` : ''}`, serviceImgs.byService.size, serviceImgs.records.length)] : []), ...(brandProfile ? [extractorResult('brand', brandProfile.method === 'rendered' && brandProfile.primary ? 'success' : brandProfile.primary ? 'partial' : 'failed', brandProfile.primary ? `${brandProfile.method}: primary ${brandProfile.primary.hex} (${brandProfile.primary.confidence})${brandProfile.secondary ? `, secondary ${brandProfile.secondary.hex} (${brandProfile.secondary.confidence})` : ''}${brandProfile.button ? `, buttons ${brandProfile.button.fill} with ${brandProfile.button.text} lettering` : ''}` : 'no brand colours could be read from the page or the logo')] : [])];

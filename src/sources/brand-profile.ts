@@ -13,6 +13,8 @@ export interface RawBrand {
   text: { heading: Record<string, { w: number; ex: string[] }>; body: Record<string, { w: number; ex: string[] }> };
   fonts: { heading: Record<string, { w: number; ex: string[] }>; body: Record<string, { w: number; ex: string[] }> };
   buttons: { bg: string; text: string; radius: number; label: string; where: string; border?: string }[];
+  /** how many headings are set in capitals, of those seen */
+  headingCaps?: { upper: number; total: number };
   header?: { bg: string; where: string };
   footer?: { bg: string; where: string };
   elements: number;
@@ -20,7 +22,7 @@ export interface RawBrand {
 
 /** Runs inside the page (plain JavaScript, kept as a string so no build step rewrites it). */
 export const BRAND_SAMPLER = `(() => {
-  const out = { bg: {}, text: { heading: {}, body: {} }, fonts: { heading: {}, body: {} }, buttons: [], elements: 0 };
+  const out = { bg: {}, text: { heading: {}, body: {} }, fonts: { heading: {}, body: {} }, buttons: [], elements: 0, headingCaps: { upper: 0, total: 0 } };
   const rgba = (s) => { const m = String(s).match(/rgba?\\(([^)]+)\\)/); if (!m) return null; const p = m[1].split(',').map((x) => parseFloat(x)); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
   const hex = (c) => '#' + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('').toUpperCase();
   const sel = (e) => e.tagName.toLowerCase() + (e.id ? '#' + e.id.slice(0, 24) : '') + (typeof e.className === 'string' && e.className ? '.' + e.className.split(/\\s+/)[0].slice(0, 28) : '');
@@ -49,6 +51,7 @@ export const BRAND_SAMPLER = `(() => {
       const col = rgba(cs.color);
       const fs = parseFloat(cs.fontSize);
       const isHead = /^H[1-6]$/.test(e.tagName) || fs >= 22;
+      if (/^H[1-6]$/.test(e.tagName)) { out.headingCaps.total++; if (cs.textTransform === 'uppercase' || (t.length > 3 && t === t.toUpperCase() && /[A-Z]/.test(t))) out.headingCaps.upper++; }
       if (col && col.a > 0.5) add(isHead ? out.text.heading : out.text.body, hex(col), t.length, sel(e) + ' "' + t.slice(0, 24) + '"');
       const stack = cs.fontFamily;
       const fam = stack.split(',')[0].replace(/["']/g, '').trim();
@@ -87,6 +90,8 @@ export interface FontReading { family: string; kind: 'sans' | 'serif' | 'mono' |
 export interface FontSubstitution { from: string; to: string; kind: 'sans' | 'serif'; reason: string }
 
 export interface BrandProfile {
+  /** whether the website sets its headings in capitals (so the design doesn't invent that style) */
+  headingCase?: 'upper' | 'normal';
   /** rendered: measured in a browser; css: read from the page's stylesheets; logo: from the logo alone; none: nothing found */
   method: 'rendered' | 'css' | 'logo' | 'none';
   sourceUrl?: string;
@@ -110,12 +115,22 @@ const rgb = (h: string) => parseHex(h)!;
 /** chroma and lightness in OKLCH: neutrals have almost no chroma */
 const chroma = (h: string) => rgbToOklch(rgb(h)).c;
 const lightness = (h: string) => rgbToOklch(rgb(h)).l;
-const isNeutral = (h: string) => chroma(h) < 0.05;
+/** near-blacks keep a little tint when they are navy or plum: that tint is the brand, so the bar is lower for dark colours */
+const isNeutral = (h: string) => chroma(h) < (lightness(h) < 0.4 ? 0.012 : 0.05);
 /** OKLab distance: under about 0.06 the eye reads two colours as the same */
+/** a colour that is meant to be noticed: a call-to-action fill, not a dark navigation chip */
+const vivid = (h: string) => chroma(h) >= 0.08 && lightness(h) > 0.25 && lightness(h) < 0.92;
 const near = (a: string, b: string) => deltaE(rgb(a), rgb(b)) < 0.06;
 
 function topEntries(map: Record<string, { w: number; ex: string[] }>, n = 6) {
-  return Object.entries(map).sort((a, b) => b[1].w - a[1].w).slice(0, n).map(([hex, v]) => ({ hex: hexOf(hex), w: v.w, ex: v.ex }));
+  const sorted = Object.entries(map).sort((a, b) => b[1].w - a[1].w).map(([hex, v]) => ({ hex: hexOf(hex), w: v.w, ex: [...v.ex] }));
+  // shades a designer made from one colour (a navy at three brightnesses) count as that colour
+  const merged: { hex: string; w: number; ex: string[] }[] = [];
+  for (const e of sorted) {
+    const into = merged.find((m) => near(m.hex, e.hex));
+    if (into) { into.w += e.w; into.ex.push(...e.ex.slice(0, 1)); } else merged.push(e);
+  }
+  return merged.sort((a, b) => b.w - a.w).slice(0, n);
 }
 
 /** A close family of the page's own typeface, among families the site can load. Explicit, so nothing is substituted silently. */
@@ -179,7 +194,7 @@ export function buildBrandProfile(raw: RawBrand | undefined, opts: { logoColors?
   for (const b of bgs) if (!isNeutral(b.hex)) { const s = touch(b.hex); s.primary += (b.w / total) * 6; s.ev.push({ where: b.ex[0] ?? 'background', detail: `background over ${Math.round((b.w / total) * 100)}% of coloured area` }); }
   const headTotal = headText.reduce((s, t) => s + t.w, 0) || 1;
   for (const t of headText) if (!isNeutral(t.hex)) { const s = touch(t.hex); s.primary += (t.w / headTotal) * 3; s.ev.push({ where: t.ex[0] ?? 'heading', detail: 'heading or large text colour' }); }
-  if (raw.header && !isNeutral(raw.header.bg)) { const s = touch(raw.header.bg); s.primary += 3; s.ev.push({ where: raw.header.where, detail: 'header background' }); }
+  if (raw.header && !isNeutral(raw.header.bg) && !(lightness(raw.header.bg) > 0.9)) { const s = touch(raw.header.bg); s.primary += 3; s.ev.push({ where: raw.header.where, detail: 'header background' }); }
   if (raw.footer && !isNeutral(raw.footer.bg)) { const s = touch(raw.footer.bg); s.primary += 1; s.ev.push({ where: raw.footer.where, detail: 'footer background' }); }
   // buttons: the style that is used most (a call to action repeats)
   const btnKey = (b: RawBrand['buttons'][number]) => `${b.bg}|${b.text}|${Math.round(b.radius / 4)}`;
@@ -187,7 +202,8 @@ export function buildBrandProfile(raw: RawBrand | undefined, opts: { logoColors?
   for (const b of raw.buttons) { if (isNeutral(b.bg) && lightness(b.bg) > 0.9) continue; const g = btnGroups.get(btnKey(b)) ?? { n: 0, b, labels: [] }; g.n++; g.labels.push(b.label); btnGroups.set(btnKey(b), g); }
   const btnRanked = [...btnGroups.values()].sort((a, b) => b.n - a.n);
   // a button needs a label that reads as an action or a visible fill; hamburger and close controls are not the brand's button
-  const action = btnRanked.find((g) => !isNeutral(g.b.bg) && g.labels.some((l) => /book|schedule|call|contact|get|start|request|order|shop|buy|submit|visit|learn|appointment|quote|reserve/i.test(l))) ?? btnRanked.find((g) => !isNeutral(g.b.bg));
+  const actionish = (g: { labels: string[] }) => g.labels.some((l) => /book|schedule|call|contact|get|start|request|order|shop|buy|submit|visit|learn|appointment|quote|reserve|estimate|inspection/i.test(l));
+  const action = btnRanked.find((g) => vivid(g.b.bg) && actionish(g)) ?? btnRanked.find((g) => vivid(g.b.bg)) ?? btnRanked.find((g) => !isNeutral(g.b.bg) && actionish(g)) ?? btnRanked.find((g) => !isNeutral(g.b.bg));
   if (action) {
     const s = touch(action.b.bg); s.accent += 4 + Math.min(action.n, 6) * 0.4; s.ev.push({ where: action.b.where, detail: `button fill (${action.n} buttons: ${[...new Set(action.labels)].slice(0, 3).join(', ')})` });
     const t = touch(action.b.text); if (!isNeutral(action.b.text)) t.primary += 1.5;
@@ -217,6 +233,7 @@ export function buildBrandProfile(raw: RawBrand | undefined, opts: { logoColors?
   if (raw.header) profile.header = { background: hexOf(raw.header.bg), where: raw.header.where };
   if (raw.footer) profile.footer = { background: hexOf(raw.footer.bg), where: raw.footer.where };
 
+  if (raw.headingCaps && raw.headingCaps.total >= 3) profile.headingCase = raw.headingCaps.upper / raw.headingCaps.total >= 0.5 ? 'upper' : 'normal';
   const h = readFont(raw.fonts.heading), b = readFont(raw.fonts.body);
   if (h || b) {
     profile.typography = { heading: h, body: b, substitution: {} };
@@ -289,8 +306,8 @@ export function brandCss(p: BrandProfile, opts: { sans?: boolean; logoColors?: s
   const dark = ['.fw-foot', '.fw-strip', '.fb-head', '.fb-hero', '.fb-cta', '.fb-foot', '.fb-panel', '.fe-cta', '.fe-foot', '.f-urgent'].join(',');
   const css = `:root{${Object.entries(t).map(([k, v]) => `${k}:${v}`).join(';')}}
 body[data-family] main :is(h1,h2,h3){color:var(--heading)}
-body[data-family] :is(${dark}) :is(h1,h2,h3,h4,p,li,span,a){color:inherit}
-body[data-family] .btn{border-radius:var(--radius-btn)}
+body[data-family] :is(${dark}) :is(h1,h2,h3,h4,p,li,span,a):not(.btn,.btn *,.fb-btn-outline,.fb-btn-outline *){color:inherit}
+${p.headingCase === 'normal' ? 'body[data-family] :is(h1,h2,h3,h4){text-transform:none;letter-spacing:normal}\n' : ''}body[data-family] .btn{border-radius:var(--radius-btn)}
 body[data-family] .btn-primary{background:var(--brand);color:var(--brand-ink)}
 body[data-family] .btn-secondary{color:var(--heading);border-color:var(--heading)}
 ${headerOnBand

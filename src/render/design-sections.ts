@@ -246,7 +246,7 @@ export function area({ m, l, bg }: Ctx): string {
   const visit = P(m).hoursFirst;
   const towns = !visit && m.areas.length ? `<ul class="chips">${m.areas.map((a) => `<li class="chip">${icon('map-pin', { size: 15 })}${esc(a)}</li>`).join('')}</ul>` : '';
   const addr = m.contact.address ? `<p class="addr">${ic(m, 'building-2', 20)}<span>${esc(m.contact.address)}${m.contact.directionsUrl ? ` · <a href="${esc(m.contact.directionsUrl)}" target="_blank" rel="noopener">Directions</a>` : ''}</span></p>` : '';
-  const h = `<div class="sec-head"><h2 id="area-h">${esc(P(m).areaTitle(m.facts.city))}</h2></div>`;
+  const h = `<div class="sec-head"><h2 id="area-h">${esc(m.source?.region ? `Serving ${m.source.region}` : P(m).areaTitle(m.facts.city))}</h2></div>`;
   if (l.variant === 'compact') {
     const line = !visit && m.areas.length ? `<p class="d-lead">Serving ${esc(m.areas.slice(0, 6).join(', '))}${m.areas.length > 6 ? ' and nearby' : ''}.</p>` : '';
     return `<section id="area" class="section ${bg} d-area-compact" aria-labelledby="area-h"><div class="wrap d-area-cols"><div>${h}${line}${addr}</div><div>${hoursTable(m)}</div></div></section>`;

@@ -3,12 +3,13 @@ import multer from 'multer';
 import { queueRescore, scoreStatus } from './rescore.js';
 import { config } from './config.js';
 import { ContentError, editMedia, reviewFact } from './design/content.js';
+import { confirmServiceImages } from './design/offerings.js';
 import { pageMeta, seoIssues } from './seo.js';
 import { addUpload } from './uploads.js';
 import { contentView, ensureLocalSite, refreshSavedSite, DraftError, findDraft, generateAnother, getDraft, issueOwnerKey, ownerState, ownerUrl, previewTokens, putDraft, renderWorking, resolvePlan, saveDraft, summarisePlan, verifyOwnerKey, withDraftLock, type DraftRecord } from './drafts.js';
 import { allOrders, createDemoOrder, domainIdeas, DNS_PROVIDERS, getOrder, listOrders, orderView, simulateVerification, updateOnboarding } from './orders.js';
 import { layoutOptions } from './design/planner.js';
-import { latestBuildFor } from './store.js';
+import { latestBuildFor, listLeads } from './store.js';
 import { scoreSummary } from './audit/compare.js';
 
 /**
@@ -151,6 +152,27 @@ ownerRoutes.post('/:draftId/media/edit', wrap(async (req, res) => {
     for (const e of edits.slice(0, 60)) x.content = editMedia(x.content, e);
     x.updatedAt = new Date().toISOString();
     await refreshSavedSite(x);
+    await putDraft(x);
+    return x;
+  });
+  res.json({ content: contentView(d) });
+}));
+
+// ── the owner's inbox: enquiries from the site, with whether each one was passed on ──
+ownerRoutes.get('/:draftId/leads', wrap(async (_req, res) => {
+  const d = (res.locals as Locals).draft;
+  const leads = (await listLeads(d.slug)).filter((l) => !l.test).slice(0, 100);
+  res.json({ leads: leads.map((l) => ({ at: l.at, name: l.name, phone: l.phone, email: l.email, service: l.service, message: l.message, kind: l.kind, delivered: !!l.delivery?.confirmed, delivery: l.delivery?.attempts ?? [] })) });
+}));
+
+// ── rights: the owner confirms the pictures from their website (on service cards) are theirs to publish ──
+ownerRoutes.post('/:draftId/media/confirm-service-images', wrap(async (req, res) => {
+  const id = (res.locals as Locals).draft.id;
+  const ids = Array.isArray(json(req).services) ? (json(req).services as unknown[]).map(String) : undefined;
+  const d = await withDraftLock(id, async () => {
+    const x = (await getDraft(id))!;
+    x.offerings = confirmServiceImages(x.offerings, ids);
+    x.updatedAt = new Date().toISOString();
     await putDraft(x);
     return x;
   });
