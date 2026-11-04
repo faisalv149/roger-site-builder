@@ -29,6 +29,7 @@ import { studioRoutes } from './studio/routes.js';
 import { resumeInterruptedJobs } from './studio/jobs.js';
 import { shareRoutes } from './studio/concepts/share.js';
 import { fillListingPhotos } from './studio/concepts/listing-photos.js';
+import { fillGoogleContent, googlePhotoRoute } from './sources/google-live.js';
 import { claudeEnabled, claudeKeyStatus, claudeToolMode, claudeVia } from './content/claude.js';
 
 const app = express();
@@ -49,7 +50,7 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 // endpoint the sites post to and the health check the host pings.
 // the owner editor (/owner) and its API (/api/owner) use the owner's own key per draft, not the Studio password
 // /p/<token>/: a client's preview link for one chosen concept (src/studio/concepts/share.ts)
-const OPEN = /^\/(sites|cards|reports|stock|demo-sites|owner|p)\/|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
+const OPEN = /^\/(sites|cards|reports|stock|demo-sites|owner|p|gphoto)\/|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
 // sites post their quote form here from any origin; reading leads (GET) still needs the password
 const isLeadPost = (req: Request) => /^\/api\/leads\/[^/]+$/.test(req.path) && (req.method === 'POST' || req.method === 'OPTIONS');
 const sha = (s: string) => createHash('sha256').update(s).digest();
@@ -66,6 +67,18 @@ app.use('/app', express.static(path.join(config.dirs.public, 'app')));
 app.use('/imessage', express.static(path.join(config.dirs.public, 'imessage'))); // stand-in iMessage UI for local demos (no gateway)
 app.use('/owner', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'content-security-policy': "frame-ancestors 'self'", 'x-frame-options': 'SAMEORIGIN' }); next(); }, express.static(path.join(config.dirs.public, 'owner')));
 app.use('/stock', express.static(path.join(config.dirs.public, 'stock'), { maxAge: '7d' }));
+// Google listing photos for the page being viewed (never stored), and the page's Google credits and reviews filled
+// per view (src/sources/google-live.ts)
+app.get('/gphoto/:placeId/:n', wrap(googlePhotoRoute));
+app.use('/sites', async (req, res, next) => {
+  if (!/(\.html|\/)$/.test(req.path)) return next();
+  const rel = decodeURIComponent(req.path) + (req.path.endsWith('/') ? 'index.html' : '');
+  if (rel.includes('..')) return next();
+  const file = path.join(config.dirs.sites, rel);
+  const html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : (await readOut(`sites${rel}`).catch(() => undefined))?.toString('utf8');
+  if (!html || !html.includes('⟦g:')) return next();
+  res.set({ 'cache-control': 'private, no-store' }).type('html').send(await fillGoogleContent(html));
+});
 app.use('/sites', express.static(config.dirs.sites));
 app.use('/reports', express.static(config.dirs.reports));
 app.use('/cards', express.static(config.dirs.cards));

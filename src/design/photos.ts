@@ -6,6 +6,7 @@ import sharp from 'sharp';
 import type { ProcessedPhoto, SiteImage } from '../brand/photos.js';
 import type { PhotoKind } from '../types.js';
 import { claudeVisionJson } from '../content/claude.js';
+import { isLivePhoto } from '../sources/google-live.js';
 import type { HeroVariant } from './schema.js';
 
 /**
@@ -228,6 +229,10 @@ async function cropTo(p: PhotoInfo, raw: Buffer, w: number, h: number, maxKb: nu
  */
 export async function writeCrops(p: PhotoInfo, spec: CropSpec, opts: { outDir: string; publicPrefix: string; name: string; maxKb: number; alt: string; raw: () => Promise<Buffer | undefined>; focal?: { x: number; y: number } }): Promise<{ desktop: SiteImage; mobile: SiteImage } | undefined> {
   const out = {} as { desktop: SiteImage; mobile: SiteImage };
+  if (isLivePhoto(p.image.publicPath)) {
+    for (const which of ['desktop', 'mobile'] as const) { const [w, h] = spec[which]; out[which] = { ...p.image, publicPath: `${p.image.publicPath}&w=${Math.min(1920, w)}`, width: w, height: h, alt: opts.alt }; }
+    return out;
+  }
   let raw: Buffer | undefined;
   for (const which of ['desktop', 'mobile'] as const) {
     const [w, h] = spec[which];

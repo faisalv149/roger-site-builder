@@ -29,7 +29,8 @@ export async function writeIcons(dir: string, opts: { name: string; brand: strin
 /** Branded 1200×630 share image: hero photo + name + rating. Used for og:image / iMessage rich links. */
 export async function writeOgCard(file: string, opts: { heroFile: string | Buffer; name: string; line2?: string; line3?: string; brand: string; ink: string }) {
   const W = 1200, H = 630;
-  const base = await sharp(opts.heroFile, { density: 144 }).resize(W, H, { fit: 'cover' }).toBuffer();
+  const onDisk = typeof opts.heroFile !== 'string' || fs.existsSync(opts.heroFile);
+  const base = onDisk ? await sharp(opts.heroFile, { density: 144 }).resize(W, H, { fit: 'cover' }).toBuffer() : await sharp({ create: { width: W, height: H, channels: 3, background: opts.brand } }).png().toBuffer();
   const name = truncateWords(opts.name, 42);
   const size = name.length > 26 ? 56 : 68;
   const overlay = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">

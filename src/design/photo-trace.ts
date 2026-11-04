@@ -40,7 +40,8 @@ export interface PhotoTrace {
 
 /** Asset files the pages reference (src, srcset, inline background urls). */
 export function assetRefs(html: string): string[] {
-  return [...html.matchAll(/assets\/[A-Za-z0-9._-]+\.(?:webp|jpe?g|png|avif)/g)].map((m) => m[0]);
+  // the site's own files, and Google listing photos linked live (/gphoto/<place>/<n>?s=WxH, see google-live.ts)
+  return [...html.matchAll(/assets\/[A-Za-z0-9._-]+\.(?:webp|jpe?g|png|avif)|\/gphoto\/[A-Za-z0-9_%-]+\/\d+\?s=\d+x\d+/g)].map((m) => m[0]);
 }
 
 export function tracePhotos(i: {

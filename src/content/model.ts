@@ -2,6 +2,7 @@ import type { Theme } from '../theme/schema.js';
 import type { BrandResult, Business, Facts, ServiceItem } from '../types.js';
 import type { SiteImage } from '../brand/photos.js';
 import { digits, fillPlaceholders, titleCase, truncateWords } from '../util/text.js';
+import { isLiveMarker } from '../sources/google-live.js';
 import type { DesignModel } from '../design/compose.js';
 
 /** What the business's own website contributes beyond Google: its booking page, story and videos, with how well each was read. */
@@ -165,7 +166,7 @@ export function buildModel(i: ModelInputs): SiteModel {
   const showRating = (b.rating || 0) >= (pr.minRating ?? 4) && (b.reviewCount || 0) >= (pr.minReviews ?? 5);
   const quotes = showRating && pr.showQuotes !== false
     ? b.reviews
-        .filter((r) => r.rating >= 4 && r.text.length >= 40)
+        .filter((r) => r.rating >= 4 && (r.text.length >= 40 || isLiveMarker(r.text)))
         .sort((a, c) => c.rating - a.rating || Math.abs(a.text.length - 140) - Math.abs(c.text.length - 140))
         .slice(0, pr.maxQuotes ?? 2)
         .map((r) => ({ text: truncateWords(r.text, pr.maxQuoteChars ?? 160), author: r.author, rating: r.rating }))
@@ -173,7 +174,7 @@ export function buildModel(i: ModelInputs): SiteModel {
   // the slider shows all of them (Google returns up to 5); long ones are clamped with a Read more
   const reviews = showRating && pr.showQuotes !== false
     ? b.reviews
-        .filter((r) => r.rating >= 4 && r.text.trim().length >= 40)
+        .filter((r) => r.rating >= 4 && (r.text.trim().length >= 40 || isLiveMarker(r.text)))
         .sort((a, c) => c.rating - a.rating || c.text.length - a.text.length)
         .slice(0, 8)
         .map((r) => ({ text: truncateWords(r.text.trim(), 700), author: r.author, rating: r.rating, when: r.relativeTime }))

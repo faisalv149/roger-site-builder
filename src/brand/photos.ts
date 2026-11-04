@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import type { Theme } from '../theme/schema.js';
 import type { Business, Photo } from '../types.js';
 import { downloadPhoto } from '../sources/places.js';
+import { livePhotoPath, photoCreditMarker } from '../sources/google-live.js';
 
 export interface SiteImage {
   publicPath: string;
@@ -84,6 +85,8 @@ export async function processPhotos(
     }
   });
   const good = processed.filter(Boolean) as { p: Photo; raw: Buffer; i: number }[];
+  // a listing photo's place among the listing's own photos (Google's order): how /gphoto/ finds it again
+  const googleOnly = b.photos.filter((p) => p.source !== 'website');
 
   // Hero: prefer a wide owner photo.
   // (only a picture big enough for a hero frame leads; otherwise no picture is stretched to fill it)
@@ -97,6 +100,15 @@ export async function processPhotos(
     const g = good[k];
     const isHero = k === heroIdx;
     if (!isHero) n++;
+    // a Google listing photo is never copied (Maps Platform terms): the page links to /gphoto/, which fetches Google's
+    // image for each view, and its credit is filled in when the page is served (src/sources/google-live.ts)
+    const listingN = g.p.source !== 'website' && b.source === 'places' ? googleOnly.indexOf(g.p) : -1;
+    if (listingN >= 0) {
+      const img: SiteImage = { publicPath: livePhotoPath(b.placeId, listingN, g.p.width, g.p.height), width: g.p.width, height: g.p.height, alt: `Photo of ${b.name}`, credit: photoCreditMarker(b.placeId, listingN, g.p.width, g.p.height), source: 'google' };
+      if (isHero) hero = img; else images.push(img);
+      items.push({ image: img, photo: g.p, raw: g.raw });
+      continue;
+    }
     const enc = await encodeUnder(g.raw, isHero ? 1920 : 1200, rules.maxFileKb);
     const name = `${isHero ? 'hero' : `photo-${n}`}.webp`;
     fs.writeFileSync(path.join(opts.outDir, name), enc.data);

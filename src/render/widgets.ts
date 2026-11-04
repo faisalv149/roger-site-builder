@@ -65,8 +65,8 @@ export function rogerWidget(m: SiteModel): string {
   const booking = m.source?.booking && m.source.booking.kind === 'online' ? m.source.booking : undefined;
   const field = (id: string, label: string, type: string, auto: string) => `<label class="rw-f" for="${id}">${label}<input id="${id}" name="${type === 'tel' ? 'phone' : 'name'}" type="${type}" autocomplete="${auto}" required${type === 'tel' ? ' inputmode="tel"' : ''}></label>`;
   const panelHead = (id: string, title: string, sub = '') => `<header class="rw-ph"><span class="rw-ava" aria-hidden="true">R</span><span class="rw-pt"><b id="${id}">${title}</b>${sub ? `<small>${sub}</small>` : ''}</span><button type="button" class="rw-x" data-rw-close aria-label="Close">${icon('x', { size: 20 })}</button></header>`;
-  return `<div class="rw" data-rw data-state="closed">
-  <section class="rw-panel" data-panel="book" role="dialog" aria-labelledby="rw-book-h" hidden>
+  return `<div class="rw" data-rw data-state="min">
+  ${booking ? `<section class="rw-panel" data-panel="book" role="dialog" aria-labelledby="rw-book-h" hidden>
     ${panelHead('rw-book-h', booking ? 'Book an appointment' : 'Request an appointment', `with ${name}`)}
     <div class="rw-pb">
       ${booking ? `<a class="rw-cta" href="${esc(booking.url)}" target="_blank" rel="noopener" data-ev="book">${icon('calendar-days', { size: 18 })} ${esc(booking.label)}</a><p class="rw-status">Opens ${name}'s own ${booking.platform ? `${esc(booking.platform)} ` : ''}booking page.</p><p class="rw-step">Or send a request</p>` : `<p class="rw-status">Tell ${name} when suits you. This is a request, not a booking: the business contacts you to confirm a time.</p>`}
@@ -78,7 +78,7 @@ export function rogerWidget(m: SiteModel): string {
       </form>
       <div class="rw-ok" data-rw-ok hidden>${icon('circle-check', { size: 40 })}<b>Request sent</b><span>${name} will contact you to confirm a time. Nothing is booked until they do.</span></div>
     </div>
-  </section>
+  </section>` : ''}
   <section class="rw-panel" data-panel="chat" role="dialog" aria-labelledby="rw-chat-h" hidden>
     ${panelHead('rw-chat-h', 'Message', `Leave a message for ${name}`)}
     <div class="rw-msgs" data-rw-msgs aria-live="polite"></div>
@@ -99,12 +99,12 @@ export function rogerWidget(m: SiteModel): string {
     </div>
   </section>
   <div class="rw-dock" role="toolbar" aria-label="Contact ${name}">
-    <button type="button" class="rw-btn" data-open="book" aria-expanded="false">${icon('calendar-days', { size: 24 })}<span>Book</span></button>
+    ${booking ? `<button type="button" class="rw-btn" data-open="book" aria-expanded="false">${icon('calendar-days', { size: 24 })}<span>Book</span></button>` : ''}
     <button type="button" class="rw-btn" data-open="chat" aria-expanded="false">${icon('message-circle-more', { size: 24 })}<span>Chat</span><i class="rw-dot" aria-hidden="true"></i></button>
     <button type="button" class="rw-btn" data-open="call" aria-expanded="false">${icon('phone-call', { size: 24 })}<span>${phone ? 'Call' : 'Call back'}</span></button>
     <button type="button" class="rw-min" data-rw-min aria-label="Minimize">${icon('minus', { size: 16 })}</button>
   </div>
-  <button type="button" class="rw-launch" data-rw-max aria-label="Book, chat or call ${name}">${icon('message-circle-more', { size: 26 })}<i class="rw-dot" aria-hidden="true"></i></button>
+  <button type="button" class="rw-launch" data-rw-max aria-label="${booking ? 'Book, chat or call' : 'Chat with or call'} ${name}">${icon('message-circle-more', { size: 26 })}<i class="rw-dot" aria-hidden="true"></i></button>
 </div>`;
 }
 
@@ -258,6 +258,8 @@ export const WIDGETS_JS = (m: SiteModel) => {
     endpoint: m.urls.leadEndpoint,
     hours: m.hours.compact.map((h) => `${h.days}: ${h.time}`),
     services: m.services.items.slice(0, 4).map((s) => s.label),
+    // appointments are offered only when the business takes bookings online (its own booking page)
+    book: !!(m.source?.booking && m.source.booking.kind === 'online'),
   };
   return `
 (function(){
@@ -335,7 +337,7 @@ export const WIDGETS_JS = (m: SiteModel) => {
   /* Roger widget */
   var rw=$('[data-rw]'); if(!rw) return;
   var C=${JSON.stringify(cfg).replace(/</g, '\\u003c')}, KEY='roger-widget:'+location.pathname, opened=null, trigger=null;
-  try{ if(localStorage.getItem(KEY)==='min') rw.setAttribute('data-state','min') }catch(e){}
+  try{ if(localStorage.getItem(KEY)==='open') rw.setAttribute('data-state','closed') }catch(e){}
   function remember(v){try{localStorage.setItem(KEY,v)}catch(e){}}
   function panel(n){return $('[data-panel="'+n+'"]',rw)}
   function open(n,from){ /* a booking panel needs no setup */ if(opened===n){close();return} close(true); opened=n; trigger=from||null; var p=panel(n); p.hidden=false;
@@ -382,14 +384,14 @@ export const WIDGETS_JS = (m: SiteModel) => {
       msgs.appendChild(f);msgs.scrollTop=1e9;f.querySelector('input').focus();
       wire(f,'Chat',function(){return talk.join('\\n')},function(n){f.remove();bubble('Sent','u');roger('Thanks '+String(n).split(' ')[0]+'! '+C.name+' has your message and will reach out soon.')})})}
   function userSays(t){bubble(t,'u');var s=t.toLowerCase();
-    if(/hour|open|close/.test(s)) roger(C.hours.length?'The hours listed are:\\n'+C.hours.join('\\n'):C.phone?'No hours are listed here. Call '+C.phone+' to ask.':'No hours are listed here. Leave your number and the business will tell you.',function(){chips(['Request an appointment','Send a message','Call me back'])});
-    else if(/book|visit|appoint|schedul/.test(s)) roger('I can open the appointment request. The business confirms the time with you.',function(){setTimeout(function(){open('book')},500)});
+    if(/hour|open|close/.test(s)) roger(C.hours.length?'The hours listed are:\\n'+C.hours.join('\\n'):C.phone?'No hours are listed here. Call '+C.phone+' to ask.':'No hours are listed here. Leave your number and the business will tell you.',function(){chips(C.book?['Request an appointment','Send a message','Call me back']:['Send a message','Call me back'])});
+    else if(C.book&&/book|visit|appoint|schedul/.test(s)) roger('I can open the appointment request. The business confirms the time with you.',function(){setTimeout(function(){open('book')},500)});
     else if(/quote|price|cost|estimate/.test(s)&&!asked) roger('Happy to help. What do you need?',function(){chips(C.services.concat(['Something else']))});
     else if(/call|phone|ring/.test(s)) roger(C.phone?'You can call us at '+C.phone+', or I can have someone call you back.':'Leave your number and someone will call you back.',askContact);
     else askContact();
   }
   function chatStart(){ if(chatReady) return; chatReady=true;
-    roger("Hi, I'm Roger, an assistant on "+C.name+"'s website. I can pass a message to the business, show the hours it has listed, or send an appointment request. What would you like?",function(){chips(['Send a message','Request an appointment','Hours','Call me back'])}) }
+    roger("Hi, I'm Roger, an assistant on "+C.name+"'s website. I can pass a message to the business, show the hours it has listed"+(C.book?", or send an appointment request":"")+". What would you like?",function(){chips(C.book?['Send a message','Request an appointment','Hours','Call me back']:['Send a message','Hours','Call me back'])}) }
   $('[data-rw-say]',rw).addEventListener('submit',function(e){e.preventDefault();var i=$('input',e.currentTarget),t=i.value.trim();if(!t) return;i.value='';userSays(t)});
 })();`;
 };
