@@ -190,7 +190,7 @@ export function parseAddresses(text: string): ParsedAddress[] {
 const sameAddress = (a: ParsedAddress, b: ParsedAddress) => a.zip === b.zip && nameKey(a.street) === nameKey(b.street);
 
 // ───────────────────────── JSON-LD ─────────────────────────
-function ldNodes($: $): any[] {
+export function ldNodes($: $): any[] {
   const out: any[] = [];
   const visit = (n: any) => {
     if (!n || typeof n !== 'object') return;
@@ -208,7 +208,8 @@ const ldTypes = (n: any): string[] => [].concat(n['@type'] || []).map(String);
 // ───────────────────────── identity ─────────────────────────
 const GENERIC_NAME = /^(home|homepage|welcome|untitled|index|just another|my (blog|site|website)|coming soon|under construction|wix|site)\b/i;
 function pushName(map: Map<string, { name: string; sources: Set<string>; weight: number }>, raw: string | undefined, source: string, weight: number) {
-  const name = clean(raw).replace(/^["'“”]+|["'“”.|:,]+$/g, '').trim();
+  // the alt text of a logo names the business with the word "logo" ("Acme Plumbing logo")
+  const name = clean(raw).replace(/^["'“”]+|["'“”.|:,]+$/g, '').trim().replace(/[\s,|–-]+(logo|logotype|brand ?mark)$/i, '').replace(/^(logo|logotype)[\s:|–-]+/i, '').trim();
   if (!name || name.length < 3 || name.length > 60 || GENERIC_NAME.test(name) || /^https?:/i.test(name) || /^\d+$/.test(name)) return;
   const key = nameKey(name);
   if (!key) return;
@@ -259,7 +260,7 @@ const BOOKING_HOSTS: [RegExp, string][] = [
   [/opentable/i, 'OpenTable'], [/resy\.com/i, 'Resy'], [/exploretock|tock\.com/i, 'Tock'], [/housecallpro/i, 'Housecall Pro'], [/jobber/i, 'Jobber'], [/glossgenius/i, 'GlossGenius'], [/joinblvd|boulevard/i, 'Boulevard'],
   [/simplepractice/i, 'SimplePractice'], [/healthie|solutionreach|patientpop|nextech|clinicsense/i, 'online scheduling'],
 ];
-const platformOf = (url: string) => BOOKING_HOSTS.find(([re]) => re.test(url))?.[1];
+export const platformOf = (url: string) => BOOKING_HOSTS.find(([re]) => re.test(url))?.[1];
 function normaliseLink(href: string, base: string): string | undefined {
   try {
     const u = new URL(href, base);

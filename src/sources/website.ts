@@ -20,7 +20,7 @@ const GENERIC_FONTS = new Set([
   'font awesome 6 free', 'dashicons', 'icomoon', 'eicons', 'var(--font)', 'unset',
 ]);
 
-function colorsFromCss(css: string, into: Map<string, number>, weight = 1) {
+export function colorsFromCss(css: string, into: Map<string, number>, weight = 1) {
   const re = /(--[\w-]*(?:primary|brand|main|accent|theme)[\w-]*\s*:\s*)?(#[0-9a-f]{3,8}\b|rgba?\([^)]+\))/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(css))) {
@@ -32,13 +32,46 @@ function colorsFromCss(css: string, into: Map<string, number>, weight = 1) {
   }
 }
 
-function fontsFromCss(css: string, into: Map<string, number>) {
+export function fontsFromCss(css: string, into: Map<string, number>) {
   const re = /font-family\s*:\s*([^;}{]+)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(css))) {
     const first = m[1].split(',')[0].trim().replace(/["']/g, '').replace(/\s*!important/, '');
     if (first && !GENERIC_FONTS.has(first.toLowerCase()) && !first.startsWith('var(')) into.set(first, (into.get(first) || 0) + 1);
   }
+}
+
+/** Pictures on a page that could be its logo, best first: a logo in the header, JSON-LD, touch icons, favicons, og:image. */
+export function logoCandidatesOf($: cheerio.CheerioAPI, baseUrl: string): WebsiteScan['logoCandidates'] {
+  const abs = (h?: string) => {
+    if (!h) return undefined;
+    try { return new URL(h, baseUrl).toString(); } catch { return undefined; }
+  };
+  const cands: WebsiteScan['logoCandidates'] = [];
+  const isLogo = (el: any) => /logo|brand/i.test([$(el).attr('src'), $(el).attr('alt'), $(el).attr('class'), $(el).attr('id'), $(el).parent().attr('class'), $(el).parent().attr('id')].join(' '));
+  $('img').each((i, el) => {
+    const src = abs($(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src'));
+    if (!src || src.startsWith('data:image/gif')) return;
+    const inHeader = $(el).closest('header, nav, .header, #header, .navbar, .site-header').length > 0;
+    if (isLogo(el)) cands.push({ url: src, score: inHeader ? 10 : 7, reason: inHeader ? 'logo <img> in header' : 'logo <img>' });
+    else if (inHeader && i < 5) cands.push({ url: src, score: 4, reason: 'first image in header' });
+  });
+  $('script[type="application/ld+json"]').each((_, el) => {
+    const m = $(el).text().match(/"logo"\s*:\s*(?:\{[^}]*"url"\s*:\s*)?"([^"]+)"/);
+    if (m) { const u = abs(m[1]); if (u) cands.push({ url: u, score: 8, reason: 'JSON-LD logo' }); }
+  });
+  $('link[rel~="apple-touch-icon"]').each((_, el) => { const u = abs($(el).attr('href')); if (u) cands.push({ url: u, score: 4, reason: 'apple-touch-icon' }); });
+  $('link[rel~="icon"]').each((_, el) => {
+    const u = abs($(el).attr('href'));
+    if (!u) return;
+    const size = Number(($(el).attr('sizes') || '').split('x')[0]) || 0;
+    cands.push({ url: u, score: u.endsWith('.svg') ? 3.5 : size >= 96 ? 3 : 1.5, reason: `favicon${size ? ` ${size}px` : ''}` });
+  });
+  const og = abs($('meta[property="og:image"]').attr('content'));
+  if (og) cands.push({ url: og, score: 1, reason: 'og:image' });
+  try { cands.push({ url: new URL('/favicon.ico', baseUrl).toString(), score: 0.5, reason: '/favicon.ico' }); } catch { /* no base */ }
+  const seen = new Set<string>();
+  return cands.sort((a, b) => b.score - a.score).filter((c) => (seen.has(c.url) ? false : (seen.add(c.url), true)));
 }
 
 export function googleFontFamilies(href: string): string[] {
@@ -75,31 +108,7 @@ export async function scanWebsite(input: string, opts: { extraPages?: number; re
   if (tc) { const rgb = parseColor(tc); if (rgb) scan.themeColor = toHex(rgb); }
 
   // ── logo candidates ──
-  const cands: WebsiteScan['logoCandidates'] = [];
-  const isLogo = (el: any) => /logo|brand/i.test([$(el).attr('src'), $(el).attr('alt'), $(el).attr('class'), $(el).attr('id'), $(el).parent().attr('class'), $(el).parent().attr('id')].join(' '));
-  $('img').each((i, el) => {
-    const src = abs($(el).attr('src') || $(el).attr('data-src') || $(el).attr('data-lazy-src'));
-    if (!src || src.startsWith('data:image/gif')) return;
-    const inHeader = $(el).closest('header, nav, .header, #header, .navbar, .site-header').length > 0;
-    if (isLogo(el)) cands.push({ url: src, score: inHeader ? 10 : 7, reason: inHeader ? 'logo <img> in header' : 'logo <img>' });
-    else if (inHeader && i < 5) cands.push({ url: src, score: 4, reason: 'first image in header' });
-  });
-  $('script[type="application/ld+json"]').each((_, el) => {
-    const m = $(el).text().match(/"logo"\s*:\s*(?:\{[^}]*"url"\s*:\s*)?"([^"]+)"/);
-    if (m) { const u = abs(m[1]); if (u) cands.push({ url: u, score: 8, reason: 'JSON-LD logo' }); }
-  });
-  $('link[rel~="apple-touch-icon"]').each((_, el) => { const u = abs($(el).attr('href')); if (u) cands.push({ url: u, score: 4, reason: 'apple-touch-icon' }); });
-  $('link[rel~="icon"]').each((_, el) => {
-    const u = abs($(el).attr('href'));
-    if (!u) return;
-    const size = Number(($(el).attr('sizes') || '').split('x')[0]) || 0;
-    cands.push({ url: u, score: u.endsWith('.svg') ? 3.5 : size >= 96 ? 3 : 1.5, reason: `favicon${size ? ` ${size}px` : ''}` });
-  });
-  const og = abs($('meta[property="og:image"]').attr('content'));
-  if (og) cands.push({ url: og, score: 1, reason: 'og:image' });
-  cands.push({ url: new URL('/favicon.ico', res.url).toString(), score: 0.5, reason: '/favicon.ico' });
-  const seen = new Set<string>();
-  scan.logoCandidates = cands.sort((a, b) => b.score - a.score).filter((c) => (seen.has(c.url) ? false : (seen.add(c.url), true)));
+  scan.logoCandidates = logoCandidatesOf($, res.url);
 
   // ── images (for audit) ──
   $('img').each((_, el) => {

@@ -110,7 +110,10 @@ export interface PublishRecord {
   pages?: number;
 }
 
-type Collection = 'builds' | 'conversations' | 'publishes' | 'leads' | 'drafts' | 'orders';
+/** the design studio's jobs, their work in progress, source snapshots, page bodies, briefs and inventories (src/studio) */
+export type StudioCollection = 'studio-jobs' | 'studio-work' | 'studio-snapshots' | 'studio-bodies' | 'studio-briefs' | 'studio-inventories' | 'studio-index' | 'studio-ai'
+  | 'studio-reviews' | 'studio-concept-jobs' | 'studio-concept-sets' | 'studio-ai-usage' | 'studio-shares';
+type Collection = 'builds' | 'conversations' | 'publishes' | 'leads' | 'drafts' | 'orders' | StudioCollection;
 
 // One tiny document store, two backends: JSON files (local) or Redis keys "<collection>:<id>" (Vercel).
 const docs = {
@@ -147,6 +150,15 @@ export const draftDocs = {
   put: (col: 'drafts' | 'orders', id: string, data: unknown) => docs.put(col, id, data),
   del: (col: 'drafts' | 'orders', id: string) => docs.del(col, id),
   list: <T>(col: 'drafts' | 'orders') => docs.list<T>(col),
+};
+
+/** Raw document access for the design studio (src/studio); ids are file-name safe. */
+const studioId = (id: string) => /^[A-Za-z0-9_.-]{1,160}$/.test(id);
+export const studioDocs = {
+  get: <T>(col: StudioCollection, id: string) => (studioId(id) ? docs.get<T>(col, id) : Promise.resolve(undefined)),
+  put: (col: StudioCollection, id: string, data: unknown) => { if (!studioId(id)) throw new Error(`Bad studio document id: ${id}`); return docs.put(col, id, data); },
+  del: (col: StudioCollection, id: string) => docs.del(col, id),
+  list: <T>(col: StudioCollection) => docs.list<T>(col),
 };
 
 export async function saveBuild(rec: BuildRecord) {

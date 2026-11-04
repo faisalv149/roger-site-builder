@@ -36,6 +36,9 @@ export const usesOf = (width: number, height: number): Use[] => (['hero', 'card'
 export function graphicKind(url: string, opts: { width: number; height: number; places?: string[] }): 'icon' | 'map' | 'graphic' | undefined {
   const file = (() => { try { return decodeURIComponent(new URL(url).pathname.split('/').pop() || ''); } catch { return url; } })().toLowerCase();
   if (/\.svg$/.test(file) || Math.max(opts.width, opts.height) <= 200) return 'icon';
+  // a thumbnail size in the file name ("bbb-150x150.png"): an icon or badge, whatever was downloaded
+  const named = file.match(/[-_](\d{2,4})x(\d{2,4})(?=[-_.])/);
+  if (named && Math.max(Number(named[1]), Number(named[2])) <= 200) return 'icon';
   if (/(^|[\/_-])(map|google-search)/.test(file)) return 'map';
   // a place name as the whole file name, on a screenshot-shaped picture, is a map of that place
   const stem = file.replace(/\.[a-z0-9]+$/, '').replace(/[-_ ]*\d+x\d+$/, '').replace(/[-_]+/g, ' ').trim();

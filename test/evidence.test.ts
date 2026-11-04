@@ -128,6 +128,8 @@ test('an edited About section may not add facts: numbers, names and claims must 
   assert.equal(faithful(SOURCE, good, 'Acme Roofing'), undefined);
   assert.match(faithful(SOURCE, [good[0], 'The company has served more than 500 homes since 1998 and is licensed and insured throughout Texas.'], 'Acme Roofing')!, /number|claim/);
   assert.match(faithful(SOURCE, [good[0], 'Bob Smith leads every crew himself and inspects each roof before the work is signed off on.'], 'Acme Roofing')!, /not in the source/);
+  // a number at the end of a sentence is the number, not the number and its full stop
+  assert.equal(faithful(`In 2008, ${SOURCE}`, [`${good[0]} The business began in 2008.`], 'Acme Roofing'), undefined);
   assert.equal(tidyHeading('About ACME ROOFING', 'Acme Roofing'), 'About Acme Roofing');
   assert.equal(tidyHeading('OUR STORY', 'Acme Roofing'), 'Our story');
 });

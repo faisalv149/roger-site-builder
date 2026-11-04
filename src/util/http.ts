@@ -10,6 +10,8 @@ export interface FetchResult {
   ttfbMs: number;
   totalMs: number;
   error?: string;
+  /** the body was cut off at maxBytes */
+  truncated?: boolean;
 }
 
 /** Some CDNs (Wix, Squarespace) reset connections from unknown clients; a browser's identity is what a visitor's request looks like. */
@@ -59,14 +61,15 @@ async function fetchOnce(
       res.headers.forEach((v, k) => (headers[k] = v));
       const chunks: Buffer[] = [];
       let size = 0;
+      let truncated = false;
       if (res.body) {
         for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
           size += chunk.length;
-          if (size > maxBytes) break;
+          if (size > maxBytes) { truncated = true; break; }
           chunks.push(Buffer.from(chunk));
         }
       }
-      return { ok: res.ok, status: res.status, url: current, redirects, headers, body: Buffer.concat(chunks), ttfbMs, totalMs: Date.now() - started };
+      return { ok: res.ok, status: res.status, url: current, redirects, headers, body: Buffer.concat(chunks), ttfbMs, totalMs: Date.now() - started, ...(truncated ? { truncated } : {}) };
     }
     return { ok: false, status: 0, url: current, redirects, headers: {}, body: Buffer.alloc(0), ttfbMs: 0, totalMs: Date.now() - started, error: 'too many redirects' };
   } catch (e) {

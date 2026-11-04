@@ -63,7 +63,7 @@ async function disallowed(origin: string): Promise<string[]> {
   return out;
 }
 
-function summarise(html: string, url: string): Omit<CrawledPage, 'ok' | 'status' | 'error'> {
+export function summarisePage(html: string, url: string): Omit<CrawledPage, 'ok' | 'status' | 'error'> {
   const $ = cheerio.load(html);
   const h1 = spacedText($, $('h1').first()).replace(/(\w)&/g, '$1 &');
   const headings = $('h2, h3').filter((_, e) => !$(e).closest('nav, footer, header, form').length).map((_, e) => spacedText($, $(e))).get().filter((t) => t.length >= 3 && t.length <= 80).slice(0, 24);
@@ -120,7 +120,7 @@ export async function crawlSite(homeUrl: string, links: string[], opts: { pages?
       const t = todo[next++];
       const r = await fetchRaw(t.url, { timeoutMs: 9000, maxBytes: 3_000_000 });
       if (!r.ok) { pages.push({ url: t.url, type: pageTypeOf(t.url), ok: false, status: r.status, error: r.error || `HTTP ${r.status}`, headings: [], cards: [], images: [] }); continue; }
-      try { pages.push({ ...summarise(r.body.toString('utf8'), r.url), ok: true, status: r.status }); }
+      try { pages.push({ ...summarisePage(r.body.toString('utf8'), r.url), ok: true, status: r.status }); }
       catch (e) { pages.push({ url: t.url, type: pageTypeOf(t.url), ok: false, status: r.status, error: (e as Error).message.slice(0, 80), headings: [], cards: [], images: [] }); }
       await new Promise((res) => setTimeout(res, 150));
     }

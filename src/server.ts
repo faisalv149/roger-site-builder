@@ -25,6 +25,9 @@ import { publishReadiness } from './design/content.js';
 import { deleteOut, readOut } from './files.js';
 import { remote } from './remote.js';
 import { ownerRoutes, studioDraftRoutes } from './owner-api.js';
+import { studioRoutes } from './studio/routes.js';
+import { resumeInterruptedJobs } from './studio/jobs.js';
+import { shareRoutes } from './studio/concepts/share.js';
 import { claudeEnabled, claudeKeyStatus, claudeToolMode, claudeVia } from './content/claude.js';
 
 const app = express();
@@ -44,7 +47,8 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 // stock images stay public (owners, site visitors and iMessage link previews fetch them), as do the lead form
 // endpoint the sites post to and the health check the host pings.
 // the owner editor (/owner) and its API (/api/owner) use the owner's own key per draft, not the Studio password
-const OPEN = /^\/(sites|cards|reports|stock|demo-sites|owner)\/|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
+// /p/<token>/: a client's preview link for one chosen concept (src/studio/concepts/share.ts)
+const OPEN = /^\/(sites|cards|reports|stock|demo-sites|owner|p)\/|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
 // sites post their quote form here from any origin; reading leads (GET) still needs the password
 const isLeadPost = (req: Request) => /^\/api\/leads\/[^/]+$/.test(req.path) && (req.method === 'POST' || req.method === 'OPTIONS');
 const sha = (s: string) => createHash('sha256').update(s).digest();
@@ -227,6 +231,12 @@ app.post('/api/imessage/reset', wrap(async (req, res) => { await resetSession(St
 
 // ── owner editor API (own key per draft) and the Studio's owner-link controls ──
 app.use('/api/owner', ownerRoutes);
+app.use('/api/studio', studioRoutes); // design studio: business briefs (phase 1) and concept sets (phase 2), src/studio
+// concept previews: each set's HTML, photos and screenshots (noindex; previews are never published from here)
+app.use('/studio-previews', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex' }); next(); }, express.static(path.join(config.dirs.out, 'studio-concepts')),
+  // on a serverless host the files may be on another instance: the remote store has every finished set
+  async (req, res, next) => { const data = await readOut(`studio-concepts${decodeURIComponent(req.path)}`).catch(() => undefined); if (!data) return next(); res.type(path.extname(req.path) || 'html').send(data); });
+app.use('/p', shareRoutes);
 app.use('/api', studioDraftRoutes);
 
 // ── saved history (data/builds, data/conversations). No auth: fine locally, add it before this is public. ──
@@ -345,5 +355,7 @@ app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: 
 export default app;
 if (!process.env.VERCEL) app.listen(config.port, () => {
   console.log(`Roger Site Builder on ${config.publicBaseUrl}  (mock=${config.mock}, claude=${claudeVia() ?? 'off'}, screenshots=${screenshotsAvailable()}, themes=${loadThemes().size}, password=${config.studioPassword ? 'on' : 'off'}, publish=${config.vercelToken ? 'vercel' : 'off'})`);
+  // studio jobs that were running when the server stopped continue where they were
+  resumeInterruptedJobs().then((ids) => { if (ids.length) console.log(`[studio] resuming ${ids.length} interrupted job(s): ${ids.join(', ')}`); }).catch((e) => console.warn('[studio] resume failed', e));
   if (!config.studioPassword && !/\/\/(localhost|127\.0\.0\.1)\b/.test(config.publicBaseUrl)) console.warn('[security] STUDIO_PASSWORD is not set: anyone who finds this URL can run builds on your API keys and read conversations.');
 });

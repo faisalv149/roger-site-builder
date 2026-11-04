@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Business brief · Roger Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F172A'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/app/studio.css">
+<style>
+  .bf{max-width:1080px;margin:0 auto;padding:24px 20px 80px;display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+  .grid2>*,.card{min-width:0}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-sm);padding:20px}
+  .card h2{font-size:16px;margin:0 0 4px}.card .sub{color:var(--muted);margin:0 0 14px}
+  .start{display:grid;gap:12px}
+  .route{display:flex;gap:8px;flex-wrap:wrap}
+  .route label{display:flex;gap:8px;align-items:center;padding:8px 12px;border:1px solid var(--line);border-radius:99px;cursor:pointer;font-weight:600}
+  .route label input[type=radio][name=route]{width:16px;height:16px;padding:0;margin:0;border:0;box-shadow:none;accent-color:var(--accent);flex:none}
+  .start input[type=text]{font:inherit;padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r-sm);width:100%}
+  .start button,.btnx{font:inherit;font-weight:600;padding:10px 16px;border-radius:var(--r-sm);border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;justify-self:start}
+  .btnx.ghost{background:var(--surface);color:var(--ink-2);border-color:var(--line-2)}
+  .err{color:var(--bad);font-weight:600;margin:0}
+  .jobhead{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline}
+  .jobhead code{font-size:12px}
+  .stages{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+  .st{display:grid;grid-template-columns:22px 150px 1fr;gap:10px;align-items:start;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--surface-2)}
+  .st .ic{width:18px;height:18px;border-radius:50%;margin-top:1px;border:2px solid var(--line-2)}
+  .st.done .ic{background:var(--ok);border-color:var(--ok)}
+  .st.running .ic{border-color:var(--accent);border-top-color:transparent;animation:spin 1s linear infinite}
+  .st.failed .ic{background:var(--bad);border-color:var(--bad)}
+  .st.skipped .ic{background:var(--line-2)}
+  @media (prefers-reduced-motion:reduce){.st.running .ic{animation:none;background:var(--accent-100)}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .st b{font-weight:600}.st .meta{color:var(--muted);font-size:13px}
+  .st .notes{margin:4px 0 0;padding-left:16px;color:var(--ink-2);font-size:13px}
+  .st .e{color:var(--bad);font-weight:600;font-size:13px}
+  .bar{height:6px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:var(--accent)}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+  .kv{display:grid;grid-template-columns:140px 1fr;gap:4px 12px;margin:0}
+  .kv dt{color:var(--muted)}.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+  .recent a{overflow-wrap:anywhere}
+  .jobhead code,.sub{overflow-wrap:anywhere}
+  @media (max-width:640px){.st{grid-template-columns:22px 1fr}.st>span:last-child{grid-column:2}.kv{grid-template-columns:1fr}.kv dt{margin-top:8px}.grid2{grid-template-columns:1fr}.bf{padding:16px 12px 60px}}
+  .pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600;background:var(--surface-2);border:1px solid var(--line)}
+  .pill.verified,.pill.read,.pill.pass,.pill.done{background:var(--ok-50);border-color:var(--ok-200);color:var(--ok)}
+  .pill.conflicting,.pill.failed,.pill.fail{background:var(--bad-50);border-color:#FECACA;color:var(--bad)}
+  .pill.needs_review,.pill.unknown,.pill.skipped,.pill.needs-review,.pill.rendered{background:var(--warn-50);border-color:#FDE68A;color:var(--warn)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600}
+  .scroll{overflow-x:auto}
+  ul.plain{margin:0;padding-left:18px}ul.plain li{margin:4px 0}
+  .q{padding:8px 10px;border-left:3px solid var(--line-2);background:var(--surface-2);border-radius:6px;margin:6px 0}
+  .q.blocking{border-left-color:var(--bad)}
+  .conflict{padding:10px 12px;border:1px solid #FECACA;background:var(--bad-50);border-radius:var(--r-sm);margin:8px 0}
+  .muted{color:var(--muted)}
+  .recent a{display:inline-block;margin:0 8px 6px 0}
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/app/"><span class="logo">R</span><span><b>Business brief</b><span class="sub">Design studio · phase 1</span></span></a>
+  <div class="top-acts"><a class="btn ghost sm" href="/app/concepts.html">Concepts</a> <a class="btn ghost sm" href="/app/review.html">Owner review</a> <a class="btn ghost sm" href="/app/">Back to Studio</a></div>
+</header>
+<main class="bf">
+  <section class="card" aria-labelledby="start-h">
+    <h2 id="start-h">Read a business</h2>
+    <p class="sub">Start from the business's website, or from its Google Business Profile (a Maps link, or its name and address). Roger reads what is there, records where each fact came from, and asks the owner about the rest.</p>
+    <form class="start" id="start">
+      <div class="route" role="radiogroup" aria-label="Start from">
+        <label><input type="radio" name="route" value="website" checked> Website</label>
+        <label><input type="radio" name="route" value="google"> Google Business Profile</label>
+      </div>
+      <label for="input" class="muted" id="inputLabel">Website address</label>
+      <input type="text" id="input" placeholder="https://example.com" autocomplete="off" required>
+      <button type="submit">Start</button>
+      <p class="err" id="startErr" hidden></p>
+    </form>
+    <div class="recent" id="recent"></div>
+  </section>
+
+  <section class="card" id="jobCard" hidden aria-live="polite">
+    <div class="jobhead"><h2>Job <code id="jobId"></code></h2><span id="jobStatus" class="pill"></span></div>
+    <p class="sub" id="jobInput"></p>
+    <ol class="stages" id="stages"></ol>
+    <p style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btnx ghost" id="resume" hidden type="button">Resume from where it stopped</button>
+      <button class="btnx ghost" id="rebuild" hidden type="button">Rebuild from the saved snapshot</button>
+    </p>
+  </section>
+
+  <section id="result" hidden></section>
+</main>
+<script src="/app/brief.js"></script>
+</body>
+</html>

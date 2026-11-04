@@ -26,7 +26,8 @@ export function faithful(source: string, paragraphs: string[], name: string): st
   const src = new Set(words(`${source} ${name}`));
   for (const p of paragraphs) {
     if (p.length < 40 || p.length > 420) return 'a paragraph is too short or too long';
-    for (const n of p.match(/\d[\d,.]*/g) ?? []) if (!source.includes(n)) return `the number ${n} is not in the source`;
+    // a number ends where its sentence or clause does ("in 2008." is 2008)
+    for (const n of (p.match(/\d[\d,.]*/g) ?? []).map((x) => x.replace(/[.,]+$/, ''))) if (!source.includes(n)) return `the number ${n} is not in the source`;
     for (const w of p.match(/(?<=[a-z,;]\s)[A-Z][a-z]{2,}/g) ?? []) if (!src.has(w.toLowerCase())) return `"${w}" is not in the source`;
     if (CLAIM.test(p) && !CLAIM.test(source)) return 'a claim the source does not make';
   }

@@ -70,7 +70,7 @@ export async function looksLikeArtwork(buf: Buffer): Promise<boolean> {
 }
 
 /** A 9×8 brightness fingerprint: the same picture at another size or crop lands within a few bits. */
-async function fingerprint(buf: Buffer): Promise<bigint> {
+export async function fingerprint(buf: Buffer): Promise<bigint> {
   const px = await sharp(buf).rotate().greyscale().resize(9, 8, { fit: 'fill' }).raw().toBuffer();
   let bits = 0n;
   for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) bits = (bits << 1n) | (px[y * 9 + x] < px[y * 9 + x + 1] ? 1n : 0n);
