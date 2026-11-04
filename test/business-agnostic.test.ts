@@ -299,3 +299,45 @@ test('the contact widget starts small and offers Book only when the business tak
   assert.ok(!/data-open="book"/.test(html), 'Book offered without evidence of bookings');
   assert.ok(!/data-panel="book"/.test(html));
 });
+
+// ───────────────────────── the product flow: brief → three concepts → a chosen one becomes the full site ─────────────────────────
+test('a chosen concept becomes the full site in its design; refining keeps it; "another design" cycles the three saved concepts only', { timeout: 400_000 }, async () => {
+  const { startSiteJob, getSiteJob, nextConcept, conceptDesign } = await import('../src/studio/concepts/site.js');
+  const { getDraft, saveDraft } = await import('../src/drafts.js');
+  const c = CASES[3];
+  const brief = await waitForStudioJob((await startStudioJob({ google: placeId(c) })).id);
+  const judge: typeof judgeListingPhotos = (pid, business) => judgeListingPhotos(pid, business, { label: async (items) => ({ kinds: items.map((_, i) => (i === 5 ? 'other' : 'work')), seen: items.map(() => 'work'), source: 'vision' }) });
+  const cj = await waitForConceptJob((await startConceptJob({ businessKey: brief.businessKey! }, { transport: null, judgeListing: judge })).id);
+  const set = (await getConceptSet(cj.setId))!;
+  assert.equal(set.concepts.length, 3, 'exactly three concepts');
+  const designs = set.concepts.map((x) => JSON.stringify(conceptDesign(x)));
+  assert.equal(new Set(designs).size, 3, 'the three concepts map to three different designs');
+  const wait = async (id: string) => { for (;;) { const j = (await getSiteJob(id))!; if (j.status === 'done' || j.status === 'failed') return j; await new Promise((r) => setTimeout(r, 200)); } };
+  const job = await wait((await startSiteJob(set.id, 'b')).id);
+  assert.equal(job.status, 'done', job.error ?? '');
+  assert.ok(job.stages.some((s) => /Apply concept B/.test(s.name)) && job.stages.some((s) => s.name === 'Render site'), job.stages.map((s) => s.name).join(', '));
+  const d = (await getDraft(job.draftId!))!;
+  assert.deepEqual(d.concept, { setId: set.id, conceptId: 'b' });
+  const want = conceptDesign(set.concepts[1]);
+  assert.equal(d.plan.direction, want.layout.direction);
+  assert.equal(d.appearance.font, want.appearance.font);
+  assert.ok(d.plan.locks.includes('direction'), `locks: ${d.plan.locks.join(', ')}`);
+  // full pages, served with Google content filled per view
+  assert.ok((d.sitePlan?.pages.length ?? 1) >= 1);
+  if (screenshotsAvailable()) {
+    const b = await inBrowser(job.siteUrl!);
+    for (const [label, m] of Object.entries(b)) { assert.equal(m.overflow, false, label); assert.ok(m.images >= 1, `${label}: ${m.images} photos`); }
+  }
+  // refine (an owner edit) keeps the concept's layout, type and colour
+  const refined = await saveDraft(d, { revision: d.revision, appearance: { ...d.appearance, textSize: 'comfortable' } });
+  assert.equal(refined.plan.direction, d.plan.direction);
+  assert.equal(refined.appearance.font, d.appearance.font);
+  assert.equal(refined.appearance.color?.accent, d.appearance.color?.accent);
+  // another design: the next saved concept, and the job for it re-renders rather than rebuilding
+  assert.equal((await nextConcept({ setId: set.id, conceptId: 'c' }))!.id, 'a');
+  const sw = await wait((await startSiteJob(set.id, 'c')).id);
+  assert.equal(sw.status, 'done', sw.error ?? '');
+  assert.equal(sw.switched, true);
+  assert.equal(sw.draftId, job.draftId);
+  assert.deepEqual((await getDraft(sw.draftId!))!.concept, { setId: set.id, conceptId: 'c' });
+});

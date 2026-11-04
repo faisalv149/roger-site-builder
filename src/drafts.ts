@@ -77,6 +77,8 @@ export interface DraftBase {
 }
 
 export interface DraftRecord {
+  /** the Phase 2 concept this draft's design comes from: "Try another design" switches among its set's concepts */
+  concept?: { setId: string; conceptId: string };
   v: number;
   id: string;
   slug: string;

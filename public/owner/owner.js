@@ -552,11 +552,13 @@
     api('/generate', 'POST', renderState()).then(function (r) {
       S.work.planId = r.planId; S.work.layout = {};
       S.plan = r.plan; S.options = Object.assign({}, S.options, r.options);
+      // a site made from a concept set switches to the set's next concept, saved as chosen
+      if (r.saved) { S.saved = Object.assign({}, S.saved, { planId: r.planId, revision: r.revision }); S.work = { planId: r.planId, layout: {} }; }
       S.rendered = renderState();
       persistLocal(); refreshDirty();
       setFrame(r.html);
       renderTab();
-      toast('New design: ' + r.plan.directionLabel + ', ' + (HEROES[r.plan.hero] || r.plan.hero).toLowerCase() + '. Save it to keep it.', { action: { label: 'Undo', run: function () { $('#o-undo').click(); } } });
+      toast(r.concept ? 'Design ' + r.concept.id.toUpperCase() + ', "' + r.concept.name + '": saved. Try another design to see the next of your three.' : 'New design: ' + r.plan.directionLabel + ', ' + (HEROES[r.plan.hero] || r.plan.hero).toLowerCase() + '. Save it to keep it.', r.concept ? {} : { action: { label: 'Undo', run: function () { $('#o-undo').click(); } } });
     }).catch(function (e) { S.undo.pop(); showLoading(false); toast(e.message, { bad: true }); renderTab(); });
   }
 

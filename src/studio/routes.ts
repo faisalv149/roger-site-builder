@@ -11,6 +11,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { getConceptJob, getConceptSet, resumeConceptIfStale, startConceptJob } from './concepts/jobs.js';
 import { createShare, shareUrl } from './concepts/share.js';
+import { getSiteJob, resumeSiteIfStale, startSiteJob } from './concepts/site.js';
 import { IdentityError } from '../sources/website-business.js';
 
 /**
@@ -190,4 +191,21 @@ studioRoutes.post('/concept-sets/:id/share', wrap(async (req, res) => {
   if (!set.concepts.some((c) => c.id === conceptId)) return res.status(400).json({ error: 'conceptId must be a, b or c of this set' });
   const share = await createShare({ setId: set.id, conceptId, businessKey: set.brief.businessKey, revision: set.brief.revision });
   res.status(201).json({ url: shareUrl(share.token), token: share.token, setId: set.id, conceptId, kind: 'homepage preview (not a published website)' });
+}));
+
+/**
+ *   POST /api/studio/concept-sets/:id/site   { conceptId } → 202 { id }: the chosen concept becomes the full site (home and
+ *        inner pages) through the builder; a business already built from this set only switches design
+ *   GET  /api/studio/site-jobs/:id           → stages as they happen, then siteUrl, ownerUrl and the review checks
+ */
+studioRoutes.post('/concept-sets/:id/site', wrap(async (req, res) => {
+  try {
+    const job = await startSiteJob(String(req.params.id), String((req.body || {}).conceptId || ''));
+    res.status(202).json({ id: job.id, url: `/api/studio/site-jobs/${job.id}` });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+}));
+studioRoutes.get('/site-jobs/:id', wrap(async (req, res) => {
+  const found = await getSiteJob(String(req.params.id));
+  if (!found) return res.status(404).json({ error: 'No such site job' });
+  res.json(await resumeSiteIfStale(found));
 }));

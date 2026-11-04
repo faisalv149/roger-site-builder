@@ -114,7 +114,7 @@ export interface PublishRecord {
 
 /** the design studio's jobs, their work in progress, source snapshots, page bodies, briefs and inventories (src/studio) */
 export type StudioCollection = 'studio-jobs' | 'studio-work' | 'studio-snapshots' | 'studio-bodies' | 'studio-briefs' | 'studio-inventories' | 'studio-index' | 'studio-ai'
-  | 'studio-reviews' | 'studio-concept-jobs' | 'studio-concept-sets' | 'studio-ai-usage' | 'studio-shares';
+  | 'studio-reviews' | 'studio-concept-jobs' | 'studio-concept-sets' | 'studio-ai-usage' | 'studio-shares' | 'studio-site-jobs';
 type Collection = 'builds' | 'conversations' | 'publishes' | 'leads' | 'drafts' | 'orders' | StudioCollection;
 
 // One tiny document store, two backends: JSON files (local) or Redis keys "<collection>:<id>" (Vercel).

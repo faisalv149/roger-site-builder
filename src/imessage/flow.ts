@@ -11,6 +11,7 @@ import { personaliseInfo, startRefinement } from '../design/refine.js';
 import { profileFor, type Category } from '../design/categories.js';
 import { getDraft, issueOwnerKey, ownerUrl, putDraft, withDraftLock } from '../drafts.js';
 import { channelFor } from '../channels.js';
+import { applyConcept, nextConcept } from '../studio/concepts/site.js';
 import { addComparisonToReport, canScoreNewSite, scoreMessage, scoreNewSite } from '../audit/compare.js';
 import { saveBuild } from '../store.js';
 import type { Job } from '../jobs.js';
@@ -303,7 +304,17 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
   }
 
   if (s.state === 'done' && s.lastBuildId && s.lastSiteUrl) {
-    if (ALTERNATIVE.test(msg) || RETRY.test(msg)) return refine(from, ctx, s.lastBuildId, {}, true);
+    if (ALTERNATIVE.test(msg) || RETRY.test(msg)) {
+      // a site made from a concept set: the next of its three concepts, never a random fourth
+      const rec = await getBuild(s.lastBuildId);
+      const d = rec?.result?.draftId ? await getDraft(rec.result.draftId) : undefined;
+      const next = d?.concept ? await nextConcept(d.concept) : undefined;
+      if (d?.concept && next) {
+        await applyConcept(d.id, d.concept.setId, next);
+        return [{ text: `Here's design ${next.id.toUpperCase()}, "${next.name}": ${s.lastSiteUrl}`, url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
+      }
+      return refine(from, ctx, s.lastBuildId, {}, true);
+    }
     if (PERSONALISE.test(msg)) return startPersonalise(s);
     if (PUBLISH.test(msg)) return goLive(s);
     if (CHECK.test(msg)) return checkDetails(s);
