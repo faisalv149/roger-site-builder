@@ -66,11 +66,18 @@ export function parseLookupInput(input: string): LookupIntent {
   return { kind: 'text', query: raw, lat, lng };
 }
 
+/**
+ * maps.app.goo.gl answers a browser with a script page that has no address in it (it loads the place later), but
+ * answers a plain client with a 302 to the long Google Maps URL. So short links are followed as a plain client.
+ */
+export const LINK_CLIENT_UA = 'RogerSiteBuilder/1.0 (link expander)';
+
 /** Follow a short link (maps.app.goo.gl/…) to the long Google Maps URL, then parse it. */
 export async function resolveLookupInput(input: string): Promise<LookupIntent> {
   let intent = parseLookupInput(input);
   for (let i = 0; i < 2 && intent.kind === 'short'; i++) {
-    const res = await fetchRaw(intent.url, { timeoutMs: 8000, maxBytes: 200_000 });
+    let res = await fetchRaw(intent.url, { timeoutMs: 8000, maxBytes: 200_000, headers: { 'user-agent': LINK_CLIENT_UA } });
+    if (res.url === intent.url && !res.status) res = await fetchRaw(intent.url, { timeoutMs: 8000, maxBytes: 200_000, asBrowser: true });
     let target = res.url;
     if (target === intent.url) {
       // Some short links use a JS/meta redirect instead of a 30x
