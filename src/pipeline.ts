@@ -51,6 +51,7 @@ import { detectCategory, profileFor } from './design/categories.js';
 import { offeringsFrom, type Offering } from './design/offerings.js';
 import { toMeta, type PhotoInfo } from './design/photos.js';
 import type { Appearance } from './design/schema.js';
+import { withLiveReviews } from './sources/google-live.js';
 import { composeModel, findDraft, newDraftId, putDraft, tokensFor, type DraftBase, type DraftRecord } from './drafts.js';
 
 export interface BuildInput {
@@ -292,6 +293,8 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     doAudit ? timed(steps, emit, 'Audit existing website', () => auditWebsite(scan!, b), (r) => `score ${r.score}/100 · ${r.issues.length} issues`) : Promise.resolve(undefined),
     labelsP,
   ]);
+  // Google's review text, authors and ages are not kept: from here on they are markers filled when a page is served
+  b.reviews = withLiveReviews(b).reviews;
   for (const r of logoRes.rejected) warnings.push(`Logo candidate rejected: ${r.reason}`);
   for (const r of photos.rejected) warnings.push(`Photo rejected: ${r.reason}`);
 
@@ -436,6 +439,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       photos: infos.map(toMeta), evidence, advice: factsRes.design, currency, source: sourceBundle, brandProfile,
     };
     planOut = planDesign({
+      sourceText: [scan?.ok ? scan.text : '', sourceBundle?.booking ? `book online ${sourceBundle.booking.url}` : ''].join('\n'),
       businessKey: b.placeId, business: b, facts: factsRes.facts, category, services: services.items, servicesSource: services.source, offerings, photos: infos, evidence,
       preferences: prefs, previous: previous?.ok ? previous.plan : undefined, alternative: input.design?.alternative, recent: savedDraft?.history, advice: factsRes.design, story: !!sourceBundle?.story,
       tokens: tokensFor(base),

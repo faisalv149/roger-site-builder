@@ -8,6 +8,7 @@ import {
 } from './schema.js';
 import { profileFor } from './categories.js';
 import type { Offering } from './offerings.js';
+import { unsupportedActions } from '../content/action-claims.js';
 import { assignPhotos, photoLedOk, type PhotoInfo, type PhotoMeta, type PhotoRoles } from './photos.js';
 
 /**
@@ -30,6 +31,8 @@ export interface Evidence {
 }
 
 export interface PlanInput {
+  /** the business's own words (website text, booking link): what action claims in copy are checked against */
+  sourceText?: string;
   businessKey: string;
   business: Business;
   facts: Facts;
@@ -88,9 +91,11 @@ export function matchService(label: string, services: { id: string; label: strin
  * Words a headline or subline may only use when the data backs them. Returns the unsupported claims found.
  * Owner-typed service names are not checked (the owner states them), only generated copy.
  */
-export function claimProblems(text: string, ctx: { facts: Facts; emergency: boolean; evidence: Evidence }): string[] {
+export function claimProblems(text: string, ctx: { facts: Facts; emergency: boolean; evidence: Evidence; source?: string }): string[] {
   const t = text.toLowerCase();
   const out: string[] = [];
+  // reservations, bookings, delivery, availability, discounts, online orders: only what the business's own sources say
+  for (const u of unsupportedActions(text, ctx.source ?? '')) out.push(u.label);
   if (/(24\/7|24-7|24 hours|around the clock|emergenc)/.test(t) && !ctx.emergency) out.push('emergency / 24h');
   if (/\blicen[sc]ed\b/.test(t) && !ctx.facts.licensed) out.push('licensed');
   if (/\binsured\b/.test(t) && !ctx.facts.insured) out.push('insured');
@@ -451,7 +456,7 @@ function planOnce(i: PlanInput, gen?: { seed: string; variation: number; generat
 
   // ── copy ──
   const rules = rulesCopy(direction, goal, service.label, { ...i, emergency, category });
-  const ctx = { facts: i.facts, emergency, evidence: ev };
+  const ctx = { facts: i.facts, emergency, evidence: ev, source: i.sourceText };
   let copy: DesignPlan['copy'] = { ...rules, source: 'rules' };
   const a = i.advice;
   // saved copy is kept so a rebuild doesn't rewrite what the owner saw; but copy the rules wrote because Claude was unavailable is replaced once Claude's suggestion exists

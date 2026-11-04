@@ -306,6 +306,7 @@ body.has-bar{padding-bottom:64px}
 @media (min-width:${DESK}px){.bubble{bottom:24px}.bubble .t{display:inline}}
 @media (max-width:${DESK - 1}px){.has-bar .bubble{display:none}}
 .credit{opacity:.75}
+img[src^="/gphoto/"]{object-fit:cover}
 ${WIDGETS_CSS(DESK)}
 ${m.design ? designCss(m, DESK) : ''}
 

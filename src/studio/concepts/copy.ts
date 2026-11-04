@@ -1,5 +1,6 @@
 import { faithful } from '../../content/story.js';
 import type { Catalog } from './review.js';
+import { unsupportedActions } from '../../content/action-claims.js';
 
 /**
  * Checks on the words a concept adds (headlines, eyebrows, section titles and intros, the shortened story). Written
@@ -41,6 +42,8 @@ export function checkCopy(text: string, slot: string, cat: Catalog, evidence = e
   }
   const evClaims = claimForm(ev);
   for (const m of text.matchAll(CLAIM)) if (!new RegExp(`\\b${claimForm(m[1]).replace(/[#/]/g, (c) => `\\${c}`)}\\b`, 'i').test(evClaims)) out.push(`${slot}: "${m[1]}" is a claim the business does not make`);
+  // what the business does for customers (reserve, book, deliver, discount...) only when its own sources say it
+  for (const u of unsupportedActions(text, [evidence, ...cat.actions.map((a) => a.label)].join('\n'))) out.push(`${slot}: "${u.said}" claims ${u.label}, which the business's own sources don't state`);
   for (const p of cat.forbidden.phones) if (text.replace(/\D/g, '').includes(p.replace(/\D/g, '').slice(-7))) out.push(`${slot}: mentions a disputed phone number`);
   return [...new Set(out)];
 }

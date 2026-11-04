@@ -32,7 +32,7 @@ function image(c: RenderCtx, id: string | undefined, cls = '', eager = false) {
   c.used.add(id!);
   // a Google listing photo: its image and its credit (photographer, Google Maps) are filled in each time it is served
   const g = im.photo.url.match(/^google-listing:([A-Za-z0-9_-]+#\d+)$/)?.[1];
-  return `<img class="${cls}" src="${esc(im.src)}" width="${im.width}" height="${im.height}" alt="${esc(im.alt)}"${eager ? ' fetchpriority="high"' : ''} data-asset="${esc(id!)}"${g ? ` data-gphoto="${g}"` : ''}>${g ? `<span class="gcredit" data-gcredit="${g}"></span>` : ''}`;
+  return `<img class="${cls}" src="${esc(im.src)}" width="${im.width}" height="${im.height}" alt="${esc(im.alt)}"${eager ? ' fetchpriority="high"' : ''} data-asset="${esc(id!)}"${g ? ` data-gphoto="${g}" data-gsize="${im.photo.width}x${im.photo.height}"` : ''}>${g ? `<span class="gcredit" data-gcredit="${g}"></span>` : ''}`;
 }
 const stars = (v: number) => `<span class="stars" aria-hidden="true">${Array.from({ length: 5 }, (_, i) => `<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 1.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6L10 15l-5.4 3 1.2-6L1.3 7.8l6.1-.7z" fill="${i + 0.5 <= v ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.2"/></svg>`).join('')}</span>`;
 const fmt = (n: number) => n.toLocaleString('en-US');

@@ -34,7 +34,8 @@ export async function confirmBusinessCard(c: BusinessCandidate): Promise<IMessag
   const url = `${config.publicBaseUrl}/cards/${id}/`;
   const image = `${url}card.jpg`;
   let photo: Buffer | undefined;
-  if (c.photoRef) photo = await downloadPhoto(c.photoRef, 1200).catch(() => undefined);
+  // a Google photo may not be stored, so it isn't composited into the card image (Maps Platform terms)
+  void downloadPhoto;
   const base = photo
     ? await sharp(photo).resize(1200, 630, { fit: 'cover' }).toBuffer()
     : await sharp({ create: { width: 1200, height: 630, channels: 3, background: '#1E293B' } }).png().toBuffer();

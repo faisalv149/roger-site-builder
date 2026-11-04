@@ -12,7 +12,7 @@ import { emptyReview, getReview, publicationGate, resolveCatalog, saveReview, St
 import { checkConcept, distinctness } from './validate.js';
 import { HEARTBEAT_MS, keepAlive, STALE_MS } from '../keepalive.js';
 import { persistDir, restoreDir } from '../../files.js';
-import { isListing, judgeListingPhotos, parseListing, type ListingJudgement } from './listing-photos.js';
+import { isListing, judgeListingPhotos, matchLive, parseListing, type ListingJudgement } from './listing-photos.js';
 import type { Concept, ConceptSet, DirectionPlan, UsageRecord } from './types.js';
 
 /**
@@ -131,7 +131,7 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
             const j = await (hooks.judgeListing ?? judgeListingPhotos)(placeId, { name: cat.business.name, category: cat.business.category ?? undefined }).catch((e) => { note(`the Google listing's photos could not be looked at (${(e as Error).message}); none are used`); return undefined; });
             if (j) {
               const byN = new Map(j.items.map((x) => [x.n, x]));
-              fits = listed.filter((p) => byN.get(parseListing(p.url)!.n)?.eligible).map((p) => p.id);
+              fits = listed.filter((p) => matchLive(j.items, parseListing(p.url)!.n, `${p.width}x${p.height}`)?.eligible).map((p) => p.id);
               job.work.listing = { labelled: j.labelled, ...(j.note ? { note: j.note } : {}), items: j.items };
               const out = j.items.filter((x) => !x.eligible);
               note(`${j.items.length} Google listing photo(s) looked at (${j.labelled === 'vision' ? 'by Claude' : j.labelled === 'fixture' ? 'sample labels' : 'not labelled: ranked by size only'}): ${fits.length} fit the business${out.length ? `; left out: ${out.map((x) => `#${x.n} ${x.reason}`).join('; ')}` : ''}. Shown live with credit; preview only.`);

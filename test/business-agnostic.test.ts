@@ -24,6 +24,19 @@ const { startConceptJob, waitForConceptJob, getConceptSet } = await import('../s
 const { setDir } = await import('../src/studio/concepts/render.js');
 const { fillListingPhotos, judgeListingPhotos } = await import('../src/studio/concepts/listing-photos.js');
 const { screenshotsAvailable } = await import('../src/render/og.js');
+const { fillGoogleContent, googlePhotoRoute } = await import('../src/sources/google-live.js');
+// pages are opened as the app serves them: Google photos through /gphoto/, credits and reviews filled per view
+const express = (await import('express')).default;
+const web = express();
+web.get('/gphoto/:placeId/:n', (req, res, next) => { googlePhotoRoute(req, res).catch(next); });
+web.use('/sites', async (req, res, next) => {
+  const file = path.join(config.dirs.sites, decodeURIComponent(req.path), req.path.endsWith('/') ? 'index.html' : '');
+  if (!/(\.html|\/)$/.test(req.path) || !fs.existsSync(file)) return next();
+  res.type('html').send(await fillGoogleContent(fs.readFileSync(file, 'utf8')));
+});
+web.use('/sites', express.static(config.dirs.sites));
+const server = web.listen(4994);
+test.after(() => server.close());
 
 // ───────────────────────── sample listings, written for this test and removed after ─────────────────────────
 const PHOTO_DIR = path.join(ROOT, 'out', 'test-agnostic-photos');
@@ -67,14 +80,14 @@ for (const [ci, c] of CASES.entries()) {
 test.after(() => { for (const c of CASES) fs.rmSync(fixtureFile(c), { force: true }); fs.rmSync(PHOTO_DIR, { recursive: true, force: true }); });
 
 /** the finished page in Chrome at desktop and phone width: pictures actually visible, no sideways scroll */
-async function inBrowser(file: string) {
+async function inBrowser(url: string) {
   const { chromium } = await import('playwright-core');
   const browser = await chromium.launch({ executablePath: config.chromiumPath });
   const out: Record<string, { images: number; overflow: boolean; h1: string; headings: string[]; text: string }> = {};
   try {
     for (const [label, opts] of [['desktop', { viewport: { width: 1440, height: 900 } }], ['mobile', { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }]] as const) {
       const page = await browser.newPage(opts);
-      await page.goto(`file://${file.split(path.sep).join('/')}`, { waitUntil: 'load' });
+      await page.goto(url, { waitUntil: 'load' });
       await page.evaluate(async () => { for (let y = 0; y < document.body.scrollHeight; y += 700) { window.scrollTo(0, y); await new Promise((r) => setTimeout(r, 40)); } window.scrollTo(0, 0); });
       await page.waitForTimeout(300);
       out[label] = await page.evaluate(() => ({
@@ -114,7 +127,7 @@ for (const c of CASES) {
     assert.ok(!/Neighbourtown|Othertown/.test(html), 'a nearby town appears on the page');
     if (c.primaryType !== 'plumber' && c.primaryType !== 'roofing_contractor') assert.ok(!/Nothing is booked until you agree/.test(html), 'trade wording on a non-trade page');
     if (screenshotsAvailable()) {
-      const b = await inBrowser(path.join(r.siteDir, 'index.html'));
+      const b = await inBrowser(r.siteUrl);
       for (const [label, m] of Object.entries(b)) {
         assert.ok(m.images >= 3, `${c.id} ${label}: ${m.images} visible photos`);
         assert.equal(m.overflow, false, `${c.id} ${label} scrolls sideways`);
@@ -139,7 +152,7 @@ test('live builder: a saved plan from the old classifier with no photos is recon
   assert.ok(again.photoTrace!.counts.rendered >= 3, `${again.photoTrace!.counts.rendered} photos after the rebuild`);
   assert.ok(!/Shinwari Karahi/.test(`${again.design!.copy.headline} ${again.design!.copy.subline}`), 'the review-only dish headline survived the rebuild');
   if (screenshotsAvailable()) {
-    const b = await inBrowser(path.join(again.siteDir, 'index.html'));
+    const b = await inBrowser(again.siteUrl);
     assert.ok(b.desktop.images >= 3 && b.mobile.images >= 3, JSON.stringify({ d: b.desktop.images, m: b.mobile.images }));
   }
 });
@@ -237,4 +250,52 @@ test('Phase 2 with no usable photo at all: the concepts say so (review), never a
   const set = (await getConceptSet(cj.setId))!;
   assert.equal(set.photos!.listing!.fit, 0);
   for (const concept of set.concepts) assert.equal(concept.checks.find((x) => x.id === 'photos')!.level, 'review', `${concept.id}: a photo-free concept is presented as finished`);
+});
+
+// ───────────────────────── display defects ─────────────────────────
+test('the address is shown once, as people read it: a repeated block and a split district are tidied, nothing else changes', async () => {
+  const { displayAddress } = await import('../src/sources/places.js');
+  assert.equal(displayAddress('96 Mall MM Alam Rd, Block B2 Block B 2 Gulberg, III, Pakistan'), '96 Mall MM Alam Rd, Block B2 Gulberg III, Pakistan');
+  assert.equal(displayAddress('2417 S Lamar Blvd, Austin, TX 78704, USA'), '2417 S Lamar Blvd, Austin, TX 78704, USA');
+  assert.equal(displayAddress('Plot 5 Block 5, Lahore, Pakistan'), 'Plot 5 Block 5, Lahore, Pakistan');
+});
+
+test('copy may not offer reservations, bookings, delivery, availability, discounts or online orders the business never stated', async () => {
+  const { unsupportedActions } = await import('../src/content/action-claims.js');
+  assert.deepEqual(unsupportedActions('See the space first, then call to reserve your evening.', 'Afghan restaurant on MM Alam Road').map((x) => x.id), ['reservations']);
+  for (const t of ['Free delivery across Lahore', 'Walk-ins welcome', '20% off your first visit', 'Book an appointment today', 'Order online for pickup']) assert.ok(unsupportedActions(t, 'A barber shop in Leeds').length, t);
+  assert.deepEqual(unsupportedActions('Call to reserve a table.', 'Reservations: call us or book a table online.'), []);
+  assert.deepEqual(unsupportedActions('Afghan dining, up on the rooftop. Open from noon.', ''), []);
+});
+
+test('a saved Google photo position never shows a different photo after Google reorders the listing', async () => {
+  const { matchLive } = await import('../src/studio/concepts/listing-photos.js');
+  const live = [{ id: 'x', width: 4000, height: 3000 }, { id: 'y', width: 3024, height: 4032 }, { id: 'z', width: 1600, height: 1067 }];
+  assert.equal(matchLive(live, 1, '3024x4032')?.id, 'y');
+  assert.equal(matchLive(live, 0, '3024x4032')?.id, 'y', 'moved: found by its size');
+  assert.equal(matchLive(live, 0, '800x600'), undefined, 'gone: nothing shown in its place');
+  assert.equal(matchLive([...live, { id: 'w', width: 4000, height: 3000 }], 2, '4000x3000'), undefined, 'two of that size: none is guessed');
+});
+
+test('Google review text, authors and photo credits are filled per view, never saved; a review Google no longer returns is hidden', async () => {
+  const c = CASES[2];
+  const r = await buildSite({ placeId: placeId(c), audit: false, screenshot: false });
+  const saved = fs.readFileSync(path.join(r.siteDir, 'index.html'), 'utf8');
+  assert.ok(!saved.includes('skin fade') && !saved.includes('A. Guest') && !saved.includes('Guest 1'), 'Google review text, an author or a photo credit was saved');
+  const files = fs.readdirSync(path.join(r.siteDir, 'assets'));
+  assert.ok(!files.some((f) => /^(hero|photo-\d+)\.webp$/.test(f)), `a Google photo was copied: ${files.join(', ')}`);
+  const shown = await fillGoogleContent(saved);
+  assert.ok(!shown.includes('⟦g:'), 'a marker was left unfilled');
+  if (/⟦g:t:/.test(saved)) assert.match(shown, /skin fade/);
+  assert.match(shown, /Photo: <a href="https:\/\/maps\.google\.com\/contrib\/\d"[^>]*>Guest \d<\/a>/);
+  const gone = await fillGoogleContent(saved, { reviews: async () => ({ reviews: [] }) });
+  assert.ok(!/skin fade/.test(gone));
+});
+
+test('the contact widget starts small and offers Book only when the business takes bookings online', async () => {
+  const r = await buildSite({ placeId: placeId(CASES[0]), audit: false, screenshot: false });
+  const html = fs.readFileSync(path.join(r.siteDir, 'index.html'), 'utf8');
+  assert.match(html, /class="rw" data-rw data-state="min"/);
+  assert.ok(!/data-open="book"/.test(html), 'Book offered without evidence of bookings');
+  assert.ok(!/data-panel="book"/.test(html));
 });

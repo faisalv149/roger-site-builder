@@ -29,6 +29,21 @@ export function placeholderSrc(width: number, height: number): string {
   return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#d9dbe0"/></svg>`)}`;
 }
 
+/**
+ * The listing photo a saved position refers to, if Google still has it: positions move when Google reorders a
+ * listing, so the photo at position n is used only when its size matches the one judged and placed; otherwise the
+ * one photo of that exact size is used; otherwise none (never a different photo shown in its place).
+ */
+export function matchLive<T extends { width: number; height: number }>(live: T[] | null | undefined, n: number, size?: string): T | undefined {
+  if (!live) return undefined;
+  if (!size) return live[n];
+  const [w, h] = size.split('x').map(Number);
+  const same = (p: T) => p.width === w && p.height === h;
+  if (live[n] && same(live[n])) return live[n];
+  const all = live.filter(same);
+  return all.length === 1 ? all[0] : undefined;
+}
+
 export interface ListingJudgement { n: number; width: number; height: number; kind: string; seen?: string; eligible: boolean; reason?: string }
 
 /**
@@ -62,7 +77,8 @@ const escAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').re
  * Google Maps. A photo Google no longer returns stays a neutral stand-in, credited as unavailable. Nothing is kept.
  */
 export async function fillListingPhotos(html: string, deps: { photos?: typeof liveListingPhotos; uri?: typeof livePhotoUri } = {}): Promise<string> {
-  const refs = [...html.matchAll(/data-gphoto="([A-Za-z0-9_-]+)#(\d+)"/g)].map((m) => ({ placeId: m[1], n: Number(m[2]) }));
+  const refs = [...html.matchAll(/data-gphoto="([A-Za-z0-9_-]+)#(\d+)"(?: data-gsize="(\d+x\d+)")?/g)].map((m) => ({ placeId: m[1], n: Number(m[2]), size: m[3] }));
+  const sizeOf = new Map(refs.map((r) => [`${r.placeId}#${r.n}`, r.size]));
   if (!refs.length) return html;
   const byPlace = new Map<string, LivePhoto[] | null>();
   for (const placeId of new Set(refs.map((r) => r.placeId))) byPlace.set(placeId, await (deps.photos ?? liveListingPhotos)(placeId).catch(() => null));
@@ -70,7 +86,7 @@ export async function fillListingPhotos(html: string, deps: { photos?: typeof li
   for (const r of refs) {
     const k = `${r.placeId}#${r.n}`;
     if (uris.has(k)) continue;
-    const p = byPlace.get(r.placeId)?.[r.n];
+    const p = matchLive(byPlace.get(r.placeId), r.n, r.size);
     uris.set(k, p ? await (deps.uri ?? livePhotoUri)(p.name, 1600).catch(() => undefined) : undefined);
   }
   let out = html.replace(/(<img\b[^>]*?)\ssrc="data:image\/svg\+xml[^"]*"([^>]*?data-gphoto="([A-Za-z0-9_-]+)#(\d+)"[^>]*>)/g, (all, a: string, b: string, placeId: string, n: string) => {
@@ -78,7 +94,7 @@ export async function fillListingPhotos(html: string, deps: { photos?: typeof li
     return u ? `${a} src="${escAttr(u)}"${b}` : all;
   });
   out = out.replace(/<span class="gcredit" data-gcredit="([A-Za-z0-9_-]+)#(\d+)"><\/span>/g, (_all, placeId: string, n: string) => {
-    const p = byPlace.get(placeId)?.[Number(n)];
+    const p = matchLive(byPlace.get(placeId), Number(n), sizeOf.get(`${placeId}#${n}`));
     if (!p) return `<span class="gcredit" data-gcredit="${placeId}#${n}">Photo unavailable · Google Maps</span>`;
     const who = p.authors.length ? p.authors.map((a) => (a.uri ? `<a href="${escAttr(a.uri)}" target="_blank" rel="noopener">${escAttr(a.name)}</a>` : escAttr(a.name))).join(', ') : 'Google user';
     const maps = p.mapsUri ? `<a href="${escAttr(p.mapsUri)}" target="_blank" rel="noopener" translate="no">Google Maps</a>` : '<span translate="no">Google Maps</span>';

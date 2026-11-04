@@ -176,8 +176,8 @@ export async function getBusiness(placeId: string, opts: { skipTowns?: boolean }
     primaryType: p.primaryType,
     primaryTypeLabel: p.primaryTypeDisplayName?.text,
     types: p.types || [],
-    formattedAddress: p.formattedAddress,
-    shortAddress: p.shortFormattedAddress,
+    formattedAddress: displayAddress(p.formattedAddress),
+    shortAddress: displayAddress(p.shortFormattedAddress),
     street: [streetNo, route].filter(Boolean).join(' ') || undefined,
     // Sublocalities are districts (e.g. Gulberg III), not city names.
     city: cityFromComponents(ac),
@@ -254,6 +254,20 @@ export async function liveListingPhotos(placeId: string): Promise<LivePhoto[]> {
   const p = await fetchJson<any>(`${BASE}/places/${encodeURIComponent(placeId)}`, { headers: headers('photos') });
   return (p.photos || []).map((ph: any) => ({ name: ph.name, width: ph.widthPx, height: ph.heightPx, authors: (ph.authorAttributions || []).map((a: any) => ({ name: a.displayName, uri: a.uri })), mapsUri: ph.googleMapsUri }));
 }
+/** A listing's reviews as Google returns them now, for the page being served (never stored). */
+export interface LiveReview { author: string; authorUri?: string; text: string; rating: number; when?: string; mapsUri?: string }
+export async function liveReviews(placeId: string): Promise<{ reviews: LiveReview[]; mapsUri?: string }> {
+  if (config.mock) {
+    const hit = mockBusinesses().find((b) => b.placeId === placeId);
+    return { reviews: (hit?.reviews ?? []).map((r) => ({ author: r.author, authorUri: r.authorUri, text: r.text, rating: r.rating, when: r.relativeTime })), mapsUri: hit?.mapsUrl };
+  }
+  const p = await fetchJson<any>(`${BASE}/places/${encodeURIComponent(placeId)}`, { headers: headers('reviews,googleMapsUri') });
+  return {
+    mapsUri: p.googleMapsUri,
+    reviews: (p.reviews || []).map((r: any) => ({ author: r.authorAttribution?.displayName || 'Google user', authorUri: r.authorAttribution?.uri, text: r.text?.text || r.originalText?.text || '', rating: r.rating, when: r.relativePublishTimeDescription, mapsUri: r.googleMapsUri })),
+  };
+}
+
 /** The image's own short-lived address (Place Photos photoUri), for the response being sent now; never stored. */
 export async function livePhotoUri(name: string, maxWidthPx = 1600): Promise<string | undefined> {
   if (config.mock || /^(file:|https?:)/.test(name)) return undefined;
@@ -266,4 +280,28 @@ export function sameName(a: string | undefined, b: string | undefined): boolean 
   if (!a || !b) return false;
   const x = n(a), y = n(b);
   return !!x && !!y && (x === y || x.includes(y) || y.includes(x));
+}
+
+/**
+ * Google's address as people read it, without changing what it says: a part repeated in another spelling is shown
+ * once ("Block B2 Block B 2" → "Block B2"), and a bare numeral Google split off a district is joined back to it
+ * ("Gulberg, III" → "Gulberg III"). Every word that names a place stays.
+ */
+export function displayAddress(a: string | undefined): string | undefined {
+  if (!a) return a;
+  const key = (ws: string[]) => ws.join('').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const parts: string[] = [];
+  for (const raw of a.split(',').map((x) => x.trim()).filter(Boolean)) {
+    if (/^(?:[ivxlcdm]+|\d{1,2}[a-z]?|[a-z])$/i.test(raw) && parts.length) { parts[parts.length - 1] = `${parts[parts.length - 1]} ${raw}`; continue; }
+    const w = raw.split(/\s+/);
+    // drop a run of words that repeats the run just before it (spacing and case aside)
+    for (let i = 0; i < w.length; i++) {
+      for (let la = 1; la <= 3; la++) for (let lb = 1; lb <= 4; lb++) {
+        const A = w.slice(i, i + la), B = w.slice(i + la, i + la + lb);
+        if (B.length === lb && A.length === la && key(A).length >= 3 && key(A) === key(B)) { w.splice(i + la, lb); }
+      }
+    }
+    parts.push(w.join(' '));
+  }
+  return parts.join(', ');
 }

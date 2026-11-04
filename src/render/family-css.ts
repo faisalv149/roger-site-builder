@@ -52,6 +52,7 @@ a.f-book:hover,a.f-book:focus-visible{text-decoration:underline}
 :is(.fe-logo,.fw-logo,.fb-logo){display:inline-flex;align-items:center;min-height:44px}
 :is(.fe-foot,.fw-foot,.fb-foot) a[href^="tel:"]{display:inline-flex;align-items:center;min-height:44px}
 .credit{opacity:.85}
+img[src^="/gphoto/"]{object-fit:cover}
 .f-svc-also li span{font-weight:400;color:var(--ink-muted);margin-left:6px}
 /* image-led service cards */
 .f-svc{padding-block:var(--section-y)}
