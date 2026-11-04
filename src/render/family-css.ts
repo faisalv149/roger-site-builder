@@ -53,6 +53,7 @@ a.f-book:hover,a.f-book:focus-visible{text-decoration:underline}
 :is(.fe-foot,.fw-foot,.fb-foot) a[href^="tel:"]{display:inline-flex;align-items:center;min-height:44px}
 .credit{opacity:.85}
 img[src^="/gphoto/"]{object-fit:cover}
+figcaption a,.d-credit a,.lb-fig figcaption a{color:inherit;text-decoration:underline}
 .f-svc-also li span{font-weight:400;color:var(--ink-muted);margin-left:6px}
 /* image-led service cards */
 .f-svc{padding-block:var(--section-y)}
