@@ -8,6 +8,7 @@ import { launchBrowser } from '../../render/og.js';
 import type { Catalog } from './review.js';
 import { RENDERERS, VARIANT_CSS, baseCss, esc, siteFooter, siteHeader, type RenderCtx } from './library.js';
 import type { Concept } from './types.js';
+import { LISTING_CSS, isListing, placeholderSrc } from './listing-photos.js';
 
 /**
  * Rendering a concept set: the photos copied once into the set's folder (so a preview is local and does not hotlink
@@ -24,7 +25,8 @@ export async function preparePhotos(cat: Catalog, setId: string, fetchImage: (ur
   const dir = path.join(setDir(setId), 'img');
   fs.mkdirSync(dir, { recursive: true });
   const ok: string[] = [], failed: { id: string; reason: string }[] = [];
-  const photos = [...cat.photos].sort((a, b) => b.width * b.height - a.width * a.height || a.id.localeCompare(b.id)).slice(0, MAX_PHOTOS());
+  // Google listing photos are never copied (Maps Platform terms): they are shown live at serve time (listing-photos.ts)
+  const photos = [...cat.photos].filter((p) => !isListing(p)).sort((a, b) => b.width * b.height - a.width * a.height || a.id.localeCompare(b.id)).slice(0, MAX_PHOTOS());
   const jobs: { id: string; url: string; max: number }[] = [...photos.map((p) => ({ id: p.id, url: p.url, max: p.uses.includes('hero') ? 2000 : 1400 })), ...(cat.logo ? [{ id: 'logo', url: cat.logo.url, max: 600 }] : [])];
   // one copy per picture and address across every set: a later set reuses it instead of downloading again
   const cache = path.join(config.dirs.out, 'studio-concepts', '_photos');
@@ -67,6 +69,8 @@ export function conceptHtml(concept: Concept, cat: Catalog, setId: string): stri
     img: (id) => {
       if (id === 'logo') { const f = path.join(dir, 'logo.png'); return cat.logo && fs.existsSync(f) ? { src: 'img/logo.png', width: 200, height: 44, alt: `${cat.business.name} logo`, photo: { id: 'logo', url: cat.logo.url, width: 200, height: 44, orientation: 'landscape', uses: [], alt: '', services: [] } } : undefined; }
       const p = photo.get(id);
+      // a Google listing photo: a stand-in of its shape, filled with Google's image and its credit when served
+      if (p && isListing(p)) return { src: placeholderSrc(p.width, p.height), width: p.width, height: p.height, alt: p.alt, photo: p };
       if (!p || !fs.existsSync(path.join(dir, `${id}.jpg`))) return undefined;
       return { src: `img/${id}.jpg`, width: p.width, height: p.height, alt: p.alt || `Photo from ${cat.business.name}`, photo: p };
     },
@@ -74,7 +78,7 @@ export function conceptHtml(concept: Concept, cat: Catalog, setId: string): stri
   const hero = concept.sections[0]?.variant;
   const nav = concept.sections.filter((s) => s.kind !== 'hero').map((s) => ({ href: `#${s.id}`, label: NAV[s.kind](cat) }));
   const body = concept.sections.map((s) => RENDERERS[`${s.kind}:${s.variant}`](ctx, s)).join('\n');
-  const css = baseCss(concept.tokens) + concept.sections.map((s) => VARIANT_CSS[`${s.kind}:${s.variant}`] ?? '').join('\n');
+  const css = baseCss(concept.tokens) + concept.sections.map((s) => VARIANT_CSS[`${s.kind}:${s.variant}`] ?? '').join('\n') + (cat.photos.some(isListing) ? `\n${LISTING_CSS}` : '');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
 <title>${esc(cat.business.name)}: concept ${concept.id.toUpperCase()}, ${esc(concept.name)} (preview)</title>

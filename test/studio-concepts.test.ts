@@ -212,7 +212,7 @@ test('grounding, rights, links and accessibility catch fabricated numbers, borro
   assert.equal(rights(metrics({ images: [{ src: `img/${own}.jpg`, alt: 'x', asset: own, ok: true, fact: null }] }), cat, { images: [own] } as never).level, 'pass');
   const r = rights(metrics({ images: [{ src: 'https://lh3.googleusercontent.com/p/abc', alt: 'x', asset: null, ok: true, fact: null }, { src: 'img/img_other.jpg', alt: 'x', asset: 'img_other', ok: false, fact: null }] }), cat, { images: [] } as never);
   assert.equal(r.level, 'fail');
-  assert.ok(r.details!.some((d) => /Google listing photo/.test(d)) && r.details!.some((d) => /not one of the business's own/.test(d)));
+  assert.ok(r.details!.some((d) => /Google photo was copied or linked/.test(d)) && r.details!.some((d) => /not one of the business's own/.test(d)));
   const l = links(metrics({ links: [{ href: 'tel:+15127410188', text: 'Call', action: 'call', fact: null, where: 'hero' }, { href: '#nowhere', text: 'Jump', action: null, fact: null, where: 'body' }, { href: 'https://example.com/promo', text: 'Promo', action: null, fact: null, where: 'body' }] }), cat);
   assert.equal(l.level, 'fail');
   assert.ok(l.details!.some((d) => /not the business's agreed number/.test(d)) && l.details!.some((d) => /#nowhere/.test(d)) && l.details!.some((d) => /not one of the business's actions/.test(d)));

@@ -123,6 +123,25 @@ function comp(components: any[], type: string, short = false): string | undefine
   return c ? (short ? c.shortText : c.longText) : undefined;
 }
 
+/**
+ * A part of an address that can't be a town on its own: a bare numeral or block letter. Google sometimes splits a
+ * district's name and files its tail as the locality ("Gulberg" + "III" for Gulberg III, Lahore).
+ */
+const notAPlaceName = (s?: string) => !s || /^(?:[ivxlcdm]+|\d+[a-z]?|[a-z])\.?$/i.test(s.trim());
+/** administrative areas that are not a town: a county, district, division, cantonment... */
+const ADMIN_UNIT = /\b(county|district|division|parish|borough|region|province|department|municipality|prefecture|tehsil|cantt|cantonment|governorate|oblast)\b/i;
+
+/**
+ * The town or city of an address, from its structured parts: the locality (or postal town), never a sublocality or
+ * neighbourhood (a district such as Gulberg III is not the city). When the locality is missing or isn't a place name,
+ * the nearest administrative area named like a town is used ("Lahore"); a county or region never is. Unknown otherwise.
+ */
+export function cityFromComponents(components: { types?: string[]; longText?: string }[]): string | undefined {
+  for (const t of ['locality', 'postal_town']) { const v = comp(components, t); if (!notAPlaceName(v)) return v; }
+  for (const t of ['administrative_area_level_3', 'administrative_area_level_2']) { const v = comp(components, t); if (!notAPlaceName(v) && !ADMIN_UNIT.test(v!)) return v; }
+  return undefined;
+}
+
 export function is24h(periods: OpeningPeriod[] | undefined): boolean {
   if (!periods?.length) return false;
   if (periods.length === 1 && !periods[0].close && periods[0].open.hour === 0 && periods[0].open.minute === 0) return true;
@@ -160,7 +179,8 @@ export async function getBusiness(placeId: string, opts: { skipTowns?: boolean }
     formattedAddress: p.formattedAddress,
     shortAddress: p.shortFormattedAddress,
     street: [streetNo, route].filter(Boolean).join(' ') || undefined,
-    city: comp(ac, 'locality') || comp(ac, 'postal_town') || comp(ac, 'sublocality'),
+    // Sublocalities are districts (e.g. Gulberg III), not city names.
+    city: cityFromComponents(ac),
     state: comp(ac, 'administrative_area_level_1', true),
     zip: comp(ac, 'postal_code'),
     country: comp(ac, 'country', true),
@@ -190,9 +210,7 @@ export async function getBusiness(placeId: string, opts: { skipTowns?: boolean }
     nearbyTowns: [],
     source: 'places',
   };
-  if (!opts.skipTowns && b.lat !== undefined && b.lng !== undefined) {
-    b.nearbyTowns = await nearbyTowns(b.lat, b.lng).catch(() => []);
-  }
+  // Proximity is not a business-stated service area. Do not fetch nearby towns for website copy.
   return b;
 }
 
@@ -220,6 +238,27 @@ export async function downloadPhoto(ref: string, maxWidthPx = 1600): Promise<Buf
   const res = await fetchRaw(url, { timeoutMs: 15000, maxBytes: 15_000_000 });
   if (!res.ok) throw new Error(`photo ${res.status} ${res.error || ''}`);
   return res.body;
+}
+
+/**
+ * A listing's photos as Google returns them now, for showing on a page being served now: Google's photo names expire
+ * and may not be cached (Maps Platform terms 3.2.3, Service Specific Terms 14.3), so these are fetched per view and
+ * never stored. Order is the listing's own; mapsUri opens the photo on Google Maps (required access to the source).
+ */
+export interface LivePhoto { name: string; width: number; height: number; authors: { name: string; uri?: string }[]; mapsUri?: string }
+export async function liveListingPhotos(placeId: string): Promise<LivePhoto[]> {
+  if (config.mock) {
+    const hit = mockBusinesses().find((b) => b.placeId === placeId);
+    return (hit?.photos ?? []).filter((p) => p.source !== 'website').map((p) => ({ name: p.ref, width: p.width, height: p.height, authors: p.authors }));
+  }
+  const p = await fetchJson<any>(`${BASE}/places/${encodeURIComponent(placeId)}`, { headers: headers('photos') });
+  return (p.photos || []).map((ph: any) => ({ name: ph.name, width: ph.widthPx, height: ph.heightPx, authors: (ph.authorAttributions || []).map((a: any) => ({ name: a.displayName, uri: a.uri })), mapsUri: ph.googleMapsUri }));
+}
+/** The image's own short-lived address (Place Photos photoUri), for the response being sent now; never stored. */
+export async function livePhotoUri(name: string, maxWidthPx = 1600): Promise<string | undefined> {
+  if (config.mock || /^(file:|https?:)/.test(name)) return undefined;
+  const r = await fetchJson<{ photoUri?: string }>(`${BASE}/${name}/media?maxWidthPx=${maxWidthPx}&skipHttpRedirect=true&key=${encodeURIComponent(config.googleKey)}`);
+  return r.photoUri;
 }
 
 export function sameName(a: string | undefined, b: string | undefined): boolean {

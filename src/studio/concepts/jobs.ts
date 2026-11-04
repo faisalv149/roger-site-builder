@@ -12,6 +12,7 @@ import { emptyReview, getReview, publicationGate, resolveCatalog, saveReview, St
 import { checkConcept, distinctness } from './validate.js';
 import { HEARTBEAT_MS, keepAlive, STALE_MS } from '../keepalive.js';
 import { persistDir, restoreDir } from '../../files.js';
+import { isListing, judgeListingPhotos, parseListing, type ListingJudgement } from './listing-photos.js';
 import type { Concept, ConceptSet, DirectionPlan, UsageRecord } from './types.js';
 
 /**
@@ -27,11 +28,11 @@ export interface ConceptJob {
   input: { businessKey: string; revision: number; reviewId: string };
   setId: string;
   stages: { name: Stage; status: 'pending' | 'running' | 'done' | 'failed'; attempts: number; notes: string[]; error?: string; startedAt?: string; finishedAt?: string }[];
-  work: { photos?: string[]; plans?: DirectionPlan[]; planSource?: 'ai' | 'fallback'; concepts?: Concept[]; calls: UsageRecord[]; rendered?: Rendered[] };
+  work: { photos?: string[]; listing?: { labelled: string; note?: string; items: ListingJudgement[] }; plans?: DirectionPlan[]; planSource?: 'ai' | 'fallback'; concepts?: Concept[]; calls: UsageRecord[]; rendered?: Rendered[] };
   error?: string;
   resumes: number;
 }
-export interface ConceptHooks { transport?: AiTransport | null; fetchImage?: (url: string) => Promise<Buffer | null> }
+export interface ConceptHooks { transport?: AiTransport | null; fetchImage?: (url: string) => Promise<Buffer | null>; judgeListing?: typeof judgeListingPhotos }
 
 const now = () => new Date().toISOString();
 const save = (j: ConceptJob) => studioDocs.put('studio-concept-jobs', j.id, { ...j, updatedAt: now() });
@@ -120,8 +121,24 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
           break;
         case 'photos': {
           const r = await preparePhotos(cat, job.setId, hooks.fetchImage);
-          job.work.photos = r.ok.filter((x) => x !== 'logo');
-          note(`${job.work.photos.length} of the business's photos copied into the preview${r.failed.length ? `; ${r.failed.length} could not be: ${r.failed.map((f) => `${f.id} (${f.reason})`).join(', ')}` : ''}`);
+          const own = r.ok.filter((x) => x !== 'logo');
+          note(`${own.length} of the business's photos copied into the preview${r.failed.length ? `; ${r.failed.length} could not be: ${r.failed.map((f) => `${f.id} (${f.reason})`).join(', ')}` : ''}`);
+          // the Google listing's photos (only when the website gives too few): looked at once for relevance, never stored
+          const listed = cat.photos.filter(isListing);
+          let fits: string[] = [];
+          if (listed.length) {
+            const placeId = parseListing(listed[0].url)!.placeId;
+            const j = await (hooks.judgeListing ?? judgeListingPhotos)(placeId, { name: cat.business.name, category: cat.business.category ?? undefined }).catch((e) => { note(`the Google listing's photos could not be looked at (${(e as Error).message}); none are used`); return undefined; });
+            if (j) {
+              const byN = new Map(j.items.map((x) => [x.n, x]));
+              fits = listed.filter((p) => byN.get(parseListing(p.url)!.n)?.eligible).map((p) => p.id);
+              job.work.listing = { labelled: j.labelled, ...(j.note ? { note: j.note } : {}), items: j.items };
+              const out = j.items.filter((x) => !x.eligible);
+              note(`${j.items.length} Google listing photo(s) looked at (${j.labelled === 'vision' ? 'by Claude' : j.labelled === 'fixture' ? 'sample labels' : 'not labelled: ranked by size only'}): ${fits.length} fit the business${out.length ? `; left out: ${out.map((x) => `#${x.n} ${x.reason}`).join('; ')}` : ''}. Shown live with credit; preview only.`);
+            }
+          }
+          job.work.photos = [...own, ...fits];
+          if (!job.work.photos.length) note('no usable photos: the concepts will say so and need the owner\'s photos');
           break;
         }
         case 'directions': {
@@ -171,7 +188,7 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
           if (!fs.existsSync(rendered[0].desktop.hero)) await restoreDir(path.relative(config.dirs.out, setDir(job.setId)).split(path.sep).join('/'));
           for (const c of concepts) {
             const r = rendered.find((x) => x.conceptId === c.id)!;
-            c.checks = checkConcept(c, r, cat);
+            c.checks = checkConcept(c, r, cat, cat.photos.length);
             const rel = (f: string) => path.relative(setDir(job.setId), f).replace(/\\/g, '/');
             c.preview = { html: rel(r.html), desktop: rel(r.desktop.full), mobile: rel(r.mobile.full), desktopHero: rel(r.desktop.hero), mobileHero: rel(r.mobile.hero), desktopHeight: r.desktop.metrics.height, mobileHeight: r.mobile.metrics.height };
           }
@@ -186,6 +203,7 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
           const set: Omit<ConceptSet, 'setHash'> = {
             schema: 'roger.concept-set', version: 1, id: job.setId, brief: review.brief, reviewId: review.id, mode: 'preview', model: transport?.model ?? conceptModel(), promptVersion: PROMPT_VERSION, createdAt: job.createdAt,
             concepts, distinctness: dist, checks, cost: { capUsd: ledger.capUsd, spentUsd: ledger.spentUsd, calls: ledger.calls }, gate,
+            photos: photoTraceOf(cat, job.work.listing, concepts, rendered),
           };
           const setHash = sha256(stableStringify({ brief: set.brief, reviewId: set.reviewId, concepts: concepts.map((c) => ({ ...c, checks: undefined, preview: undefined })) }));
           await studioDocs.put('studio-concept-sets', job.setId, { ...set, setHash });
@@ -213,4 +231,22 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
   job.status = 'done';
   await save(job);
   return job;
+}
+
+/**
+ * The set's photo trace: what the website and the Google listing offered, what fitted, and what each concept shows
+ * (counted on the rendered page). Google photos are recorded by their place in the listing only.
+ */
+function photoTraceOf(cat: Catalog, listing: ConceptJob['work']['listing'], concepts: Concept[], rendered: Rendered[]): NonNullable<ConceptSet['photos']> {
+  const website = cat.photos.filter((p) => !isListing(p)).length;
+  const fit = cat.photos.filter(isListing).length;
+  return {
+    website,
+    listing: listing ? { found: listing.items.length, fit, labelled: listing.labelled, items: listing.items.map((x) => ({ n: x.n, size: `${x.width}×${x.height}`, kind: x.kind, ...(x.seen ? { seen: x.seen } : {}), eligible: x.eligible, ...(x.reason ? { reason: x.reason } : {}) })) } : undefined,
+    shown: Object.fromEntries(concepts.map((c) => {
+      const r = rendered.find((x) => x.conceptId === c.id)!;
+      const ids = new Set(r.desktop.metrics.images.map((i) => i.asset).filter((x): x is string => !!x && x !== 'logo'));
+      return [c.id, { total: ids.size, google: [...ids].filter((id) => cat.photos.some((p) => p.id === id && isListing(p))).length }];
+    })),
+  };
 }

@@ -127,8 +127,19 @@ export async function claudeVisionJson<T>(opts: {
   schema: Record<string, unknown>;
   timeoutMs?: number;
 }): Promise<{ data: T; ms: number } | null> {
-  if (claudeVia() !== 'api' || !opts.images.length) return null;
+  const via = claudeVia();
+  if (!via || !opts.images.length) return null;
   const started = Date.now();
+  if (via === 'cli') {
+    // the local Claude Code CLI takes images through its stream-json input (same prompt and schema as the API)
+    try {
+      const data = await cliVisionJson(opts.system, opts.prompt, opts.images, opts.schema, Math.max(opts.timeoutMs ?? 20_000, 120_000));
+      return { data: data as T, ms: Date.now() - started };
+    } catch (e) {
+      console.warn(`[claude cli] ${opts.toolName} failed: ${(e as Error).message}`);
+      return null;
+    }
+  }
   try {
     const content = [
       ...opts.images.flatMap((b, i) => [
@@ -145,6 +156,37 @@ export async function claudeVisionJson<T>(opts: {
     console.warn(`[claude api] ${opts.toolName} failed: ${(e as Error).message}`);
     return null;
   }
+}
+
+/** `claude -p` with pictures: one stream-json user message (each image numbered), the same isolation as cliJson. */
+function cliVisionJson(system: string, prompt: string, images: Buffer[], schema: Record<string, unknown>, timeoutMs: number): Promise<unknown> {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'roger-claude-'));
+  const env = { ...process.env };
+  if (!env.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
+  const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--json-schema', JSON.stringify(schema), '--system-prompt', system, '--model', config.anthropicModel,
+    '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--no-session-persistence'];
+  const content = [
+    ...images.flatMap((b, i) => [{ type: 'text', text: `Photo ${i}:` }, { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b.toString('base64') } }]),
+    { type: 'text', text: prompt },
+  ];
+  return new Promise((resolve, reject) => {
+    const child = spawn(config.claudeCliPath, args, { cwd, env, windowsHide: true });
+    let out = '';
+    let err = '';
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (err += d));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      fs.rmSync(cwd, { recursive: true, force: true });
+      const result = out.split('\n').map((l) => { try { return JSON.parse(l) as { type?: string; is_error?: boolean; result?: string; subtype?: string; structured_output?: unknown }; } catch { return undefined; } }).find((l) => l?.type === 'result');
+      if (!result) return reject(new Error(`exit ${code}: ${(err || out).trim().slice(0, 300) || 'no output'}`));
+      if (result.is_error || result.structured_output == null) return reject(new Error(String(result.result || result.subtype || 'no structured output').slice(0, 300)));
+      resolve(result.structured_output);
+    });
+    child.stdin.end(`${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`);
+  });
 }
 
 /**

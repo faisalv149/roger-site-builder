@@ -202,6 +202,13 @@ export function resolveCatalog(brief: BusinessBrief, inventory: SiteInventory, r
   const NOT_PHOTO = /\b(diagram|infographic|chart|illustration|graphic|logo|badge|icon|screenshot|map|flyer|poster|coupon|certificate)\b/i;
   const photos: Photo[] = inventory.assets.filter((a) => a.origin === 'website' && a.outcome === 'usable' && a.width && a.height && !['poster', 'logo', 'social', 'icon'].includes(a.role) && !NOT_PHOTO.test(`${a.alt ?? ''} ${a.context ?? ''}`))
     .map((a) => ({ id: a.id, url: a.url, width: a.width!, height: a.height!, orientation: a.width! / a.height! > 1.15 ? 'landscape' as const : a.height! / a.width! > 1.15 ? 'portrait' as const : 'square' as const, uses: a.uses, alt: meaningful(a.alt) ? a.alt! : meaningful(a.context) ? a.context! : '', services: a.services }));
+  // too few of the business's own photos: the Google listing's photos may fill the preview (shown live with their
+  // credits, never copied; preview-only, see listing-photos.ts). The concept job keeps only those that fit the business.
+  if (photos.length < 3) {
+    for (const a of inventory.assets.filter((x) => x.origin === 'google' && x.outcome === 'usable' && x.width && x.height && /^google-listing:/.test(x.url))) {
+      photos.push({ id: a.id, url: a.url, width: a.width!, height: a.height!, orientation: a.width! / a.height! > 1.15 ? 'landscape' : a.height! / a.width! > 1.15 ? 'portrait' : 'square', uses: a.uses, alt: `Photo of ${name} from Google Maps`, services: [] });
+    }
+  }
   const logo = brief.brand.logo.value ? { url: brief.brand.logo.value.url, colors: brief.brand.logo.value.colors ?? [] } : null;
 
   // a service's picture is evidence, not decoration: the website's own picture for that service alone, or the owner's choice
@@ -266,7 +273,11 @@ export function publicationGate(brief: BusinessBrief, catalog: Catalog, review: 
   else concepts = [concepts[chosen]];
   for (const q of brief.ownerQuestions.filter((x) => x.blocking && !review.answers[x.id])) blockers.push({ kind: 'open-question', what: q.question, questionId: q.id });
   const used = new Set(concepts.flatMap((c) => c.images));
-  const unapproved = [...used].filter((id) => !review.approvedAssets.includes(id));
+  // Google listing photos: shown in the preview with their credit, never published. Credit is not permission, and the
+  // owner approving one doesn't change that: the owner's own photo file replaces it before publishing
+  const google = [...used].filter((id) => catalog.photos.some((p) => p.id === id && p.url.startsWith('google-listing:')));
+  if (google.length) blockers.push({ kind: 'google-photos', what: `${google.length} photo(s) shown come from the Google listing: preview only, with their photographers' credit. Upload your own photos to replace them before publishing.`, questionId: 'q-photos-google' });
+  const unapproved = [...used].filter((id) => !google.includes(id) && !review.approvedAssets.includes(id));
   if (unapproved.length) blockers.push({ kind: 'unconfirmed-rights', what: `${unapproved.length} website photo(s) shown are not yet approved by the owner`, questionId: 'q-photos-rights' });
   const shownFacts = new Set(concepts.flatMap((c) => c.sections.flatMap((s) => s.factIds)));
   const claims = catalog.claims.filter((c) => shownFacts.has(c.id) && !review.approvedClaims.includes(c.text));

@@ -30,6 +30,8 @@ export interface CategoryProfile {
   proofTitle: (city?: string) => string;
   /** the steps of the request path (what the visitor does; never claims about quality) */
   process: (name: string) => { title: string; text: string }[];
+  /** the steps after "Call us" on a call-first page: what happens next for this kind of business (never claims) */
+  afterCall: (name: string) => { title: string; text: string }[];
   /** default presentation of offerings */
   offeringsVariant: 'cards' | 'price-list' | 'plans';
   /** opening hours matter more than a service area (food, shops, gyms) */
@@ -45,48 +47,56 @@ export const PROFILES: Record<Category, CategoryProfile> = {
     goals: ['call', 'quote', 'appointment'], actions: ACT(), galleryTitle: 'Recent work', offeringsVariant: 'cards', hoursFirst: false,
     areaTitle: (c) => (c ? `Serving ${c} and nearby` : 'Where we work'), proofTitle: (c) => (c ? `Trusted in ${c}` : 'What customers say'),
     process: (n) => steps('Send a request', `${n} gets back to you`, 'You decide', 'A few details about the job and where you are.', 'To talk the job through.', 'Nothing is booked until you agree the details.'),
+    afterCall: (n) => [{ title: 'Agree the details', text: 'Pick a time that suits you.' }, { title: 'Nothing is booked until you agree', text: 'The details are settled with you first.' }],
   },
   salon: {
     id: 'salon', label: 'Salon', offeringsTitle: 'Treatments and prices', noun: 'treatment', unknownPrice: 'Price on request',
     goals: ['appointment', 'call', 'enquiry'], actions: ACT({ appointment: 'Request an appointment' }), galleryTitle: 'Inside the salon', offeringsVariant: 'price-list', hoursFirst: true,
     areaTitle: () => 'Find us', proofTitle: () => 'What clients say',
     process: (n) => steps('Choose a treatment', 'Request a time', `${n} confirms`, 'Pick from the list above.', 'Send a preferred day and time of day.', 'Your appointment is confirmed by text or phone.'),
+    afterCall: (n) => [{ title: 'Ask for a time', text: 'A day and time of day that suit you.' }, { title: `${n} confirms`, text: 'Your appointment is confirmed by text or phone.' }],
   },
   food: {
     id: 'food', label: 'Food & drink', offeringsTitle: 'Menu', noun: 'item', unknownPrice: 'Ask in store',
-    goals: ['call', 'order', 'enquiry'], actions: ACT({ call: 'Call us', order: 'Order enquiry' }), galleryTitle: 'From the kitchen', offeringsVariant: 'price-list', hoursFirst: true,
+    goals: ['call', 'order', 'enquiry'], actions: ACT({ call: 'Call us', order: 'Order enquiry' }), galleryTitle: 'Photos', offeringsVariant: 'price-list', hoursFirst: true,
     areaTitle: () => 'Visit us', proofTitle: () => 'What guests say',
     process: (n) => steps('Send an order enquiry', `${n} replies`, 'Collect or visit', 'What you would like and when.', 'To confirm what is available.', 'At the time you agreed.'),
+    afterCall: (n) => [{ title: 'Ask about an order or a visit', text: 'What you would like and when.' }, { title: 'Collect or visit', text: 'At the time you agreed.' }],
   },
   fitness: {
     id: 'fitness', label: 'Fitness', offeringsTitle: 'Memberships and classes', noun: 'membership', unknownPrice: 'Ask about pricing',
     goals: ['enquiry', 'appointment', 'call'], actions: ACT({ enquiry: 'Ask about membership', appointment: 'Request a class' }), galleryTitle: 'The space', offeringsVariant: 'plans', hoursFirst: true,
     areaTitle: () => 'Find us', proofTitle: () => 'What members say',
     process: (n) => steps('Ask about joining', `${n} gets back to you`, 'Choose what suits you', 'Tell us what you are looking for.', 'With options and times.', 'Nothing is charged until you sign up.'),
+    afterCall: (n) => [{ title: 'Ask about joining', text: 'Options and times.' }, { title: 'Choose what suits you', text: 'Nothing is charged until you sign up.' }],
   },
   professional: {
     id: 'professional', label: 'Professional services', offeringsTitle: 'Services and packages', noun: 'service', unknownPrice: 'Price on request',
     goals: ['enquiry', 'appointment', 'call'], actions: ACT({ appointment: 'Request a consultation' }), galleryTitle: 'Our work', offeringsVariant: 'cards', hoursFirst: false,
     areaTitle: () => 'Where to find us', proofTitle: () => 'What clients say',
     process: (n) => steps('Send an enquiry', 'Initial conversation', 'A clear proposal', 'A short note about what you need.', `${n} gets in touch to understand it.`, 'Scope and fees agreed before any work.'),
+    afterCall: (n) => [{ title: 'A first conversation', text: 'About what you need.' }, { title: 'A clear proposal', text: 'Scope and fees agreed before any work.' }],
   },
   shop: {
     id: 'shop', label: 'Shop', offeringsTitle: 'What we stock', noun: 'product', unknownPrice: 'Price on request',
     goals: ['enquiry', 'order', 'call'], actions: ACT({ enquiry: 'Ask about an item', order: 'Order enquiry' }), galleryTitle: 'In store', offeringsVariant: 'cards', hoursFirst: true,
     areaTitle: () => 'Visit the shop', proofTitle: () => 'What customers say',
     process: (n) => steps('Ask about an item', `${n} checks`, 'Collect or arrange', 'Tell us what you are after.', 'And replies with what is available.', 'Details agreed with you.'),
+    afterCall: (n) => [{ title: 'Ask about an item', text: 'What is in stock.' }, { title: 'Collect or arrange', text: 'Details agreed with you.' }],
   },
   health: {
     id: 'health', label: 'Health clinic', offeringsTitle: 'Services', noun: 'service', unknownPrice: 'Ask the clinic',
     goals: ['appointment', 'call', 'enquiry'], actions: ACT({ appointment: 'Book an appointment', enquiry: 'Ask a question' }), galleryTitle: 'Inside the clinic', offeringsVariant: 'cards', hoursFirst: true,
     areaTitle: () => 'Visit the clinic', proofTitle: () => 'What patients say',
     process: (n) => steps('Choose a service', 'Book a visit', `${n} sees you`, 'Pick from the list above.', 'Use the online booking page, or call.', 'At the time you chose.'),
+    afterCall: (n) => [{ title: 'Ask about a visit', text: 'What is available and when.' }, { title: 'Your appointment', text: 'At the time you agreed.' }],
   },
   general: {
     id: 'general', label: 'Local business', offeringsTitle: 'What we offer', noun: 'service', unknownPrice: 'Price on request',
     goals: ['enquiry', 'call', 'appointment'], actions: ACT({ call: 'Call us' }), galleryTitle: 'Photos', offeringsVariant: 'cards', hoursFirst: false,
     areaTitle: () => 'Where to find us', proofTitle: () => 'What customers say',
     process: (n) => steps('Get in touch', `${n} replies`, 'Next steps', 'Send a short message.', 'To answer your questions.', 'Agreed with you.'),
+    afterCall: (n) => [{ title: 'Ask your question', text: 'About what you need.' }, { title: 'Next steps', text: 'Agreed with you.' }],
   },
 };
 

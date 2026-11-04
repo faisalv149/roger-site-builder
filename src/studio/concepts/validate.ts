@@ -1,14 +1,18 @@
+import fs from 'node:fs';
 import sharp from 'sharp';
 import { findAddresses } from '../address.js';
 import type { Catalog } from './review.js';
 import type { PageMetrics, Rendered } from './render.js';
+import { isListing } from './listing-photos.js';
 import type { Check, Concept } from './types.js';
 
 /**
  * Checks on rendered concepts, from what Chrome actually drew:
  *   grounding  every phone number, email, address, price and number on the page is a fact the catalog allows;
  *              nothing the preview must leave out (a disputed number, a held action, an unconfirmed price) appears
- *   rights     every picture is one of the business's own website photos, copied into the set (no Google photos)
+ *   rights     every picture is one of the business's own website photos copied into the set, or a Google listing photo
+ *              as a stand-in with its credit slot, filled live when served (never copied)
+ *   photos     usable photos and none shown fails; none usable at all needs review (the owner's photos are needed)
  *   links      every link goes to a catalog action, a section on the page, or the business's phone or email
  *   a11y       text contrast (worst case over photographs), tap targets, alt text, one h1, heading order, no sideways scroll
  *   distinct   (for the set) the first screens and the whole pages differ, measured on the screenshots' structure
@@ -48,18 +52,36 @@ export function grounding(m: PageMetrics, cat: Catalog): Check {
   return { id: 'grounding', level: out.length ? 'fail' : 'pass', message: out.length ? `${out.length} statement(s) on the page are not grounded` : 'Every number, phone, email, address and price on the page is a fact the catalog allows; nothing left out appears.', ...(out.length ? { details: out.slice(0, 20) } : {}) };
 }
 
-export function rights(m: PageMetrics, cat: Catalog, concept: Concept): Check {
+export function rights(m: PageMetrics, cat: Catalog, concept: Concept, html = ''): Check {
   const errs: string[] = [];
   const own = new Set(cat.photos.map((p) => p.id));
+  const listing = new Set(cat.photos.filter(isListing).map((p) => p.id));
   for (const i of m.images) {
-    if (/google-photo:|googleusercontent|maps\.googleapis/.test(i.src)) errs.push(`a Google listing photo is used (${i.src.slice(0, 60)})`);
-    else if (!i.asset || (i.asset !== 'logo' && !own.has(i.asset))) errs.push(`picture ${i.src} is not one of the business's own website photos`);
+    // Google's photos may not be stored or rehosted: a saved page carries only a stand-in, filled in when served
+    if (/google-photo:|googleusercontent|maps\.googleapis|places\.googleapis/.test(i.src)) errs.push(`a Google photo was copied or linked into the saved page (${i.src.slice(0, 60)})`);
+    else if (i.asset && listing.has(i.asset)) {
+      if (!/^data:image\/svg/.test(i.src)) errs.push(`Google listing photo ${i.asset} is not a stand-in filled at serve time`);
+    } else if (!i.asset || (i.asset !== 'logo' && !own.has(i.asset))) errs.push(`picture ${i.src} is not one of the business's own website photos`);
     else if (!/^img\//.test(i.src)) errs.push(`picture ${i.asset} is not served from the set's own copy`);
-    if (!i.ok) errs.push(`picture ${i.src} did not load`);
+    if (!i.ok) errs.push(`picture ${i.src.slice(0, 60)} did not load`);
   }
+  // each Google photo has its credit slot beside it (photographer and Google Maps, filled when served)
+  for (const m2 of html.matchAll(/data-gphoto="([^"]+)"/g)) if (!html.includes(`data-gcredit="${m2[1]}"`)) errs.push(`Google photo ${m2[1]} has no credit beside it`);
   const used = new Set(m.images.map((i) => i.asset).filter((x): x is string => !!x && x !== 'logo'));
   for (const id of used) if (!concept.images.includes(id) && !cat.services.some((s) => s.imageId === id)) errs.push(`picture ${id} is on the page but not recorded in the concept`);
-  return { id: 'rights', level: errs.length ? 'fail' : 'pass', message: errs.length ? `${errs.length} picture problem(s)` : `${used.size} of the business's own website photos (copied into the preview; to be approved by the owner before publishing); no Google photos.`, ...(errs.length ? { details: errs } : {}) };
+  const g = [...used].filter((id) => listing.has(id)).length;
+  return { id: 'rights', level: errs.length ? 'fail' : 'pass', message: errs.length ? `${errs.length} picture problem(s)` : `${used.size - g} of the business's own website photos (copied into the preview; to be approved by the owner before publishing)${g ? `; ${g} Google listing photo(s) shown live with their photographers' credit and Google Maps attribution (preview only, never published)` : '; no Google photos'}.`, ...(errs.length ? { details: errs } : {}) };
+}
+
+/**
+ * Photos available and none on the page is a failure, never a clean success; no usable photos at all is a warning
+ * (the concept is not finished: the owner's photos are needed).
+ */
+export function photosShown(m: PageMetrics, cat: Catalog, available: number): Check {
+  const shown = new Set(m.images.map((i) => i.asset).filter((x): x is string => !!x && x !== 'logo')).size;
+  if (!available) return { id: 'photos', level: 'review', message: 'No usable photos: neither the website nor the Google listing gave one that fits. This concept needs photos from the owner before it is finished.' };
+  if (!shown) return { id: 'photos', level: 'fail', message: `${available} usable photo(s) available, but this concept shows none.` };
+  return { id: 'photos', level: 'pass', message: `${shown} of ${available} usable photo(s) shown.` };
 }
 
 export function links(m: PageMetrics, cat: Catalog): Check {
@@ -118,8 +140,9 @@ export function accessibility(d: PageMetrics, mob: PageMetrics): Check {
   return { id: 'accessibility', level: out.length ? 'fail' : 'pass', message: out.length ? `${out.length} accessibility problem(s)` : `${n} text runs meet WCAG AA contrast (worst case over photos); every tap target is at least 44×44; alt text, one h1, heading order and no sideways scroll on mobile.`, ...(out.length ? { details: out.slice(0, 20) } : {}) };
 }
 
-export function checkConcept(concept: Concept, r: Rendered, cat: Catalog): Check[] {
-  return [grounding(r.desktop.metrics, cat), grounding(r.mobile.metrics, cat), rights(r.desktop.metrics, cat, concept), links(r.desktop.metrics, cat), links(r.mobile.metrics, cat), imagery(r.desktop.metrics, cat), accessibility(r.desktop.metrics, r.mobile.metrics)]
+export function checkConcept(concept: Concept, r: Rendered, cat: Catalog, availablePhotos = cat.photos.length): Check[] {
+  const html = fs.existsSync(r.html) ? fs.readFileSync(r.html, 'utf8') : '';
+  return [grounding(r.desktop.metrics, cat), grounding(r.mobile.metrics, cat), rights(r.desktop.metrics, cat, concept, html), links(r.desktop.metrics, cat), links(r.mobile.metrics, cat), imagery(r.desktop.metrics, cat), photosShown(r.desktop.metrics, cat, availablePhotos), accessibility(r.desktop.metrics, r.mobile.metrics)]
     .reduce<Check[]>((acc, c) => { const prev = acc.find((x) => x.id === c.id); if (!prev) acc.push(c); else if (c.level === 'fail') { prev.level = 'fail'; prev.message = c.message; prev.details = [...new Set([...(prev.details ?? []), ...(c.details ?? [])])]; } return acc; }, []);
 }
 

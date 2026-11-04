@@ -56,7 +56,7 @@ export async function processPhotos(
   b: Business,
   theme: Theme,
   opts: { outDir: string; publicPrefix: string },
-): Promise<{ hero?: SiteImage; gallery: SiteImage[]; rejected: { ref: string; reason: string }[]; usable: number; items: ProcessedPhoto[] }> {
+): Promise<{ hero?: SiteImage; gallery: SiteImage[]; rejected: { ref: string; reason: string }[]; skipped: { ref: string; reason: string }[]; usable: number; items: ProcessedPhoto[] }> {
   const rules = theme.images;
   const rejected: { ref: string; reason: string }[] = [];
   const sized = b.photos.filter((p) => {
@@ -66,7 +66,11 @@ export async function processPhotos(
     return ok;
   });
   // Business-uploaded photos first; customer photos after (they need a visible credit).
-  const ordered = [...sized.filter((p) => p.isOwner), ...sized.filter((p) => !p.isOwner)].slice(0, rules.maxGallery + 3);
+  const all = [...sized.filter((p) => p.isOwner), ...sized.filter((p) => !p.isOwner)];
+  const limit = rules.maxGallery + 3;
+  const ordered = all.slice(0, limit);
+  // not a judgement on the photo: only the first ones are downloaded (recorded for the photo trace, not as a warning)
+  const skipped = all.slice(limit).map((p) => ({ ref: p.ref, reason: `not downloaded: the first ${limit} usable photos are enough for this layout` }));
   fs.mkdirSync(opts.outDir, { recursive: true });
 
   const processed = await mapLimit(ordered, 4, async (p: Photo, i) => {
@@ -100,7 +104,7 @@ export async function processPhotos(
       publicPath: `${opts.publicPrefix}/${name}`,
       width: enc.width,
       height: enc.height,
-      alt: g.p.source === 'website' ? (g.p.origin?.alt || `${b.name}${b.city ? `, ${b.city}` : ''}: photo ${isHero ? 1 : n + 1}`) : isHero ? `${b.name} at work` : `Project photo from ${b.name}`,
+      alt: g.p.source === 'website' ? (g.p.origin?.alt || `${b.name}${b.city ? `, ${b.city}` : ''}: photo ${isHero ? 1 : n + 1}`) : `Photo of ${b.name}`,
       // the business's own website photos are its own; Google requires a credit on every Places photo
       credit: g.p.source === 'website' ? undefined : g.p.authors[0]?.name ? `Photo: ${g.p.authors[0].name} via Google` : 'Photo via Google',
       source: g.p.source === 'website' ? 'website' : 'google',
@@ -111,8 +115,8 @@ export async function processPhotos(
   }
   // If the gallery would fall short of its minimum, let the hero photo appear there too.
   const minPhotos = ((theme.sectionRules.gallery || {}) as { minPhotos?: number }).minPhotos ?? 3;
-  if (hero && images.length < minPhotos && images.length + 1 >= minPhotos) images.unshift({ ...hero, alt: `Project photo from ${b.name}` });
-  return { hero, gallery: images.slice(0, rules.maxGallery), rejected, usable: good.length, items };
+  if (hero && images.length < minPhotos && images.length + 1 >= minPhotos) images.unshift({ ...hero, alt: `Photo of ${b.name}` });
+  return { hero, gallery: images.slice(0, rules.maxGallery), rejected, skipped, usable: good.length, items };
 }
 
 /** A kept photo with its downloaded original, for the design planner's ranking and art-directed crops (src/design/photos.ts). */

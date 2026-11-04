@@ -134,6 +134,8 @@ export interface UsageRecord {
 export interface PublicationGate { publishable: boolean; blockers: { kind: string; what: string; questionId?: string }[] }
 
 export interface ConceptSet {
+  /** photos: the website's own, the Google listing's (looked at for relevance, shown live, preview-only) and what each concept shows */
+  photos?: { website: number; listing?: { found: number; fit: number; labelled: string; items: { n: number; size: string; kind: string; seen?: string; eligible: boolean; reason?: string }[] }; shown: Record<string, { total: number; google: number }> };
   schema: 'roger.concept-set';
   version: 1;
   id: string;

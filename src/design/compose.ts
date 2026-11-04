@@ -72,11 +72,7 @@ export const requestTitle = (goal: Goal, p: CategoryProfile) => (goal === 'call'
 
 /** The steps of the request path for the chosen goal: what the visitor does, never claims about the work. */
 export function processSteps(goal: Goal, name: string, phone: string | undefined, p: CategoryProfile): { title: string; text: string }[] {
-  if (goal === 'call' && phone) return [
-    { title: `Call ${phone}`, text: `Talk to ${name} about what you need.` },
-    { title: 'Agree the details', text: 'Pick a time that suits you.' },
-    { title: 'Nothing is booked until you agree', text: 'The details are settled with you first.' },
-  ];
+  if (goal === 'call' && phone) return [{ title: `Call ${phone}`, text: `Talk to ${name} about what you need.` }, ...p.afterCall(name)];
   if (goal === 'appointment') return [
     { title: 'Request a time', text: 'Choose a preferred day and time of day.' },
     { title: `${name} confirms`, text: 'Your request is confirmed by text or phone; it isn\'t booked until then.' },
@@ -137,9 +133,12 @@ export async function finishModel(m: SiteModel, plan: DesignPlan, opts: FinishOp
   // offerings replace the theme's service list (the lead form's choices too); the focus item comes first
   const items = opts.offerings.length ? toServiceItems(opts.offerings) : m.services.items;
   let focus = matchService(plan.service.label, items, plan.service.source === 'owner') as ServiceItem | undefined;
+  // with no verified offerings, the plan's focus is only a description of the business ("Afghan restaurant"):
+  // it isn't listed as something to order or book, unless the owner named it
+  const described = !focus && !items.length && plan.service.source !== 'owner';
   if (!focus) focus = { id: slugify(plan.service.label) || 'service', label: plan.service.label, icon: plan.category === 'trades' ? 'wrench' : 'sparkles', hits: 0 };
   const others = items.filter((s) => s.id !== focus!.id).slice(0, 11);
-  m.services = { ...m.services, items: [focus, ...others], overflow: false };
+  m.services = { ...m.services, items: described ? [] : [focus, ...others], overflow: false };
   const order = [focus.id, ...others.map((o) => o.id)];
   const rank = (id: string) => (order.includes(id) ? order.indexOf(id) : 999);
   const offerings: OfferingView[] = opts.offerings

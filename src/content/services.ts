@@ -18,8 +18,8 @@ export const SERVICE_ICONS = [
 
 /**
  * Services shown on the site. Google never returns a services list, so:
- *  1. the business's own services (Claude, from its website or reviews) when there are at least `min`;
- *  2. otherwise the theme's standard services, ranked by keyword hits in the website text + reviews
+ *  1. the business's own services from its website when there are at least `min`;
+ *  2. otherwise the theme's standard services, ranked by keyword hits in the website text
  *     (+ any ids Claude saw mentioned). General themes have none, so the section hides.
  */
 export function pickServices(
@@ -48,7 +48,9 @@ export function pickServices(
   }
 
   const site = scan?.ok ? scan.text : '';
-  const corpus = `${site}\n${b.editorialSummary || ''}\n${b.reviews.map((r) => r.text).join('\n')}`.toLowerCase();
+  // A listing's reviews may inform the design, but never establish that the business offers a particular item.
+  if (!site.trim() && b.source !== 'mock') return { items: [], matched: 0, overflow: false, hidden: true, source: 'theme' };
+  const corpus = site.toLowerCase();
   const scored = theme.services.defaults.map((s, idx) => {
     let hits = 0;
     for (const kw of s.keywords) {

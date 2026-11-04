@@ -239,7 +239,7 @@ test('Google route, no website: listing facts only; services, brand and story ar
   // Google photos: references, preview only, credited, never mixed with owner-approved pictures
   const g = inventory!.assets.filter((a) => a.origin === 'google');
   assert.ok(g.length > 0);
-  assert.ok(g.every((a) => a.rights === 'google-restricted' && a.url.startsWith('google-photo:')));
+  assert.ok(g.every((a) => a.rights === 'google-restricted' && /^google-listing:[A-Za-z0-9_-]+#\d+$/.test(a.url) && !a.attribution.length), 'a Google photo is kept as its place in the listing only: no photo name and no credit is stored');
   assert.equal(b.assets.website.usable, 0);
   assert.ok(b.ownerQuestions.some((q) => q.id === 'q-photos-google'));
   assert.equal(done.qa!.checks.find((c) => c.id === 'rights')!.level, 'pass');

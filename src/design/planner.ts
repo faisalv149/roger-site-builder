@@ -128,7 +128,8 @@ export function rulesCopy(direction: Direction, goal: Goal, service: string, i: 
   if (i.facts.years) facts.push(`${i.facts.years} years in business`);
   if (i.evidence.showRating) facts.push(`${i.evidence.rating?.toFixed(1)}★ from ${i.evidence.reviewCount} Google reviews`);
   const next = {
-    call: 'Call to talk it through.', quote: 'Request a quote online.', appointment: 'Request an appointment and the time is confirmed with you.',
+    // the call line fits any business: a job to talk through for a trade, a table or an order for a restaurant
+    call: trades ? 'Call to talk it through.' : 'Call with any questions.', quote: 'Request a quote online.', appointment: 'Request an appointment and the time is confirmed with you.',
     order: 'Send an order enquiry and it is confirmed with you.', enquiry: 'Send an enquiry online.',
   }[goal];
   // what the business offers, in its own list's words (offerings first: they carry the owner's and website's names)
@@ -465,6 +466,8 @@ function planOnce(i: PlanInput, gen?: { seed: string; variation: number; generat
     const p = claimProblems(`${ah} ${as}`, ctx);
     if (p.length) warnings.push(`Claude's headline was not used (unsupported: ${p.join(', ')})`);
   }
+  // An earlier plan may contain review-only offering copy. Rebuild it from verified facts.
+  if (!i.services.length && !(i.offerings?.length ?? 0)) copy = { ...rules, source: 'rules' };
 
   // ── images ──
   const used = new Set<string>(slideKeys);
