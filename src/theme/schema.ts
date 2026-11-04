@@ -180,7 +180,7 @@ export const themeSchema = z
     placeholders: z.array(z.string()).default(['{business}', '{city}', '{state}', '{zip}', '{rating}', '{reviewCount}', '{years}']),
     services: z.object({
       defaults: z
-        // may be empty (general themes): then services come only from the business's own website/reviews
+        // may be empty (general themes): then services come only from a business-owned source
         .array(z.object({ id: z.string(), label: z.string(), icon: z.string(), keywords: z.array(z.string()) }).passthrough()),
     }).passthrough(),
     trust: z.object({ max: z.number().default(4), templates: z.record(z.string()) }).passthrough(),

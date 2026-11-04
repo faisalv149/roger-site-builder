@@ -56,7 +56,9 @@ function listingOf(b: Business): ListingSnapshot {
     placeId: b.placeId, name: b.name, primaryType: b.primaryType, primaryTypeLabel: b.primaryTypeLabel, types: b.types, formattedAddress: b.formattedAddress,
     street: b.street, city: b.city, state: b.state, zip: b.zip, phone: b.phone, website: b.website, mapsUrl: b.mapsUrl, rating: b.rating, reviewCount: b.reviewCount,
     businessStatus: b.businessStatus, editorialSummary: b.editorialSummary, lat: b.lat, lng: b.lng, hours: b.hours?.weekdayText,
-    photos: (b.photos || []).map((p) => ({ ref: p.ref, width: p.width, height: p.height, authors: (p.authors || []).map((a) => a.name).filter(Boolean), isOwner: !!p.isOwner })),
+    // Google's photo names expire and may not be stored, nor may their credits (Maps Platform terms): only each photo's
+    // place in the listing and its size are kept; the image and its credit are fetched fresh when a preview is shown
+    photos: (b.photos || []).filter((p) => p.source !== 'website').map((p, n) => ({ ref: `#${n}`, width: p.width, height: p.height, authors: [], isOwner: !!p.isOwner })),
   };
 }
 

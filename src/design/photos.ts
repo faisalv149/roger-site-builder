@@ -66,36 +66,58 @@ export async function measure(raw: Buffer): Promise<{ sharpness: number; exposur
 }
 
 const KINDS: PhotoKind[] = ['team', 'work', 'vehicle', 'storefront', 'other'];
+/** at most this many photos are labelled in one vision call (the rest stay unknown: ranked by quality only) */
+export const LABEL_LIMIT = 16;
 
-/** What each photo shows. Fixture labels win (sample data); otherwise one vision call (API only) or unknown. */
-export async function labelPhotos(items: ProcessedPhoto[]): Promise<{ kinds: (PhotoKind | 'unknown')[]; source: 'fixture' | 'vision' | 'none'; ms?: number }> {
-  if (!items.length) return { kinds: [], source: 'none' };
-  if (items.some((i) => i.photo.analysis?.kind)) return { kinds: items.map((i) => i.photo.analysis?.kind ?? 'unknown'), source: 'fixture' };
-  const list = items.slice(0, 10);
+/**
+ * The classifier's instructions: the same for every kind of business. "work" is what the business offers, makes or
+ * does (a meal, a haircut, a finished roof, a dining room), so a restaurant's food is as relevant as a plumber's pipes;
+ * graphics, text and unrelated scenes are "other" and are kept off the page.
+ */
+export const LABEL_SYSTEM =
+  'Classify photos for a local business website. The business name and category are context, not proof of what a picture depicts. ' +
+  'Classify only what is visible. work: what the business offers, makes or does: its products, food and drink, treatments, services, ' +
+  'venue interiors, or finished work; for example a meal, a bakery display, a haircut, an installed pipe, a completed roof, or a dining room. ' +
+  'team: people visibly working for or representing the business; customers alone are not team. ' +
+  'vehicle: a business vehicle. storefront: the exterior, entrance or shopfront. ' +
+  'other: logos, menus, flyers, text, screenshots, receipts, maps, unrelated or uncertain scenes. ' +
+  'If uncertain about relevance, use other. Do not call relevant food, products, interiors or services other merely because they are not a trade job. ' +
+  'seen: what is visible, in at most 8 plain words (no guesses about who or where).';
+
+export interface PhotoLabels {
+  kinds: (PhotoKind | 'unknown')[];
+  /** what the classifier saw in each photo (for the photo trace), when it said */
+  seen: (string | undefined)[];
+  source: 'fixture' | 'vision' | 'none';
+  ms?: number;
+  /** why no labels: no Claude, or the call failed */
+  note?: string;
+}
+type Vision = <T>(opts: Parameters<typeof claudeVisionJson>[0]) => Promise<{ data: T; ms: number } | null>;
+
+/** What each photo shows. Fixture labels win (sample data); otherwise one vision call (Claude API or CLI) or unknown. */
+export async function labelPhotos(items: ProcessedPhoto[], business?: { name: string; category?: string }, vision: Vision = claudeVisionJson): Promise<PhotoLabels> {
+  if (!items.length) return { kinds: [], seen: [], source: 'none', note: 'no photos' };
+  if (items.some((i) => i.photo.analysis?.kind)) return { kinds: items.map((i) => i.photo.analysis?.kind ?? 'unknown'), seen: items.map(() => undefined), source: 'fixture' };
+  const list = items.slice(0, LABEL_LIMIT);
   const thumbs = await Promise.all(list.map((i) => sharp(i.raw).rotate().resize(384, 384, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer()));
-  const r = await claudeVisionJson<{ photos?: { index: number; kind: string }[] }>({
-    system:
-      'You label photos from a plumbing business\'s Google Business profile so its website can place them. Describe only what is visible. ' +
-      'team: one or more people who appear to work for the business (uniforms, posing as a crew, at work). ' +
-      'work: plumbing work itself: fixtures, pipes, water heaters, installations, a job in progress or finished. ' +
-      'vehicle: a work van or truck. storefront: the building, shopfront or office. ' +
-      'other: anything else (logos, flyers, text, screenshots, receipts, unrelated scenes).',
-    prompt: 'Label every photo above by its number.',
+  const r = await vision<{ photos?: { index: number; kind: string; seen?: string }[] }>({
+    system: LABEL_SYSTEM,
+    prompt: `Business: ${business?.name ?? 'local business'}; category: ${business?.category ?? 'unknown'}. Label every photo above by its number.`,
     images: thumbs,
     toolName: 'label_photos',
     toolDescription: 'Record what each photo shows.',
     schema: {
       type: 'object',
-      properties: { photos: { type: 'array', items: { type: 'object', properties: { index: { type: 'integer' }, kind: { type: 'string', enum: KINDS } }, required: ['index', 'kind'] } } },
+      properties: { photos: { type: 'array', items: { type: 'object', properties: { index: { type: 'integer' }, kind: { type: 'string', enum: KINDS }, seen: { type: 'string' } }, required: ['index', 'kind'] } } },
       required: ['photos'],
     },
   });
-  if (!r) return { kinds: items.map(() => 'unknown'), source: 'none' };
-  const kinds = items.map((_, i) => {
-    const hit = r.data.photos?.find((p) => p.index === i);
-    return hit && KINDS.includes(hit.kind as PhotoKind) ? (hit.kind as PhotoKind) : 'unknown';
-  });
-  return { kinds, source: 'vision', ms: r.ms };
+  if (!r) return { kinds: items.map(() => 'unknown'), seen: items.map(() => undefined), source: 'none', note: 'Claude did not label the photos (not configured, or the call failed)' };
+  const hits = items.map((_, i) => r.data.photos?.find((p) => p.index === i));
+  const kinds = hits.map((hit) => (hit && KINDS.includes(hit.kind as PhotoKind) ? (hit.kind as PhotoKind) : 'unknown'));
+  const seen = hits.map((hit) => (hit?.seen ? hit.seen.replace(/\s+/g, ' ').trim().slice(0, 80) : undefined));
+  return { kinds, seen, source: 'vision', ms: r.ms, ...(items.length > LABEL_LIMIT ? { note: `${items.length - LABEL_LIMIT} photos past the first ${LABEL_LIMIT} were not labelled` } : {}) };
 }
 
 export async function analyzePhotos(items: ProcessedPhoto[], kinds: (PhotoKind | 'unknown')[]): Promise<PhotoInfo[]> {
@@ -149,14 +171,15 @@ export function assignPhotos(infos: PhotoInfo[], saved?: { hero: string | null; 
     const team = saved.team ? byKey.get(saved.team) : undefined;
     const projects = saved.projects.map((k) => byKey.get(k)).filter(Boolean) as PhotoInfo[];
     const stillThere = (!saved.hero || hero) && (!saved.team || team) && projects.length === saved.projects.length;
-    if (stillThere) return { hero, team, projects, slides: slidesOf(hero, team) };
+    // An earlier bad classifier can save an empty plan despite relevant photos. Reconsider it on rebuild.
+    if (stillThere && (projects.length || !usable.some((p) => p !== hero && p !== team))) return { hero, team, projects, slides: slidesOf(hero, team) };
   }
   const team: PhotoInfo | undefined = usable.filter((p) => p.kind === 'team').sort((a, b) => b.quality - a.quality)[0];
   let hero: PhotoInfo | undefined = usable.filter((p) => p !== team).sort((a, b) => heroScore(b) - heroScore(a))[0];
   let t: PhotoInfo | undefined = team;
   if (!hero && team) { hero = team; t = undefined; } // only a team photo: it leads the page instead
   const projects = usable
-    .filter((p) => p !== hero && p !== t && (p.kind === 'work' || p.kind === 'unknown'))
+    .filter((p) => p !== hero && p !== t)
     .sort((a, b) => b.quality - a.quality)
     .slice(0, 6);
   return { hero, team: t, projects, slides: slidesOf(hero, t) };

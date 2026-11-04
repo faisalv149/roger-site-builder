@@ -44,7 +44,8 @@ import { persistDir } from './files.js';
 import { detectVertical } from './theme/select.js';
 import { findSavedPlan } from './store.js';
 import { DIRECTION_LABEL, GOAL_LABEL, HERO_LABEL, validatePlan, type DesignPlan, type DesignPreferences, type Direction, type Goal } from './design/schema.js';
-import { analyzePhotos, labelPhotos } from './design/photos.js';
+import { analyzePhotos, labelPhotos, type PhotoLabels } from './design/photos.js';
+import { photoFindings, tracePhotos, traceLine, type PhotoTrace } from './design/photo-trace.js';
 import { designApplies, planDesign, validPhone, type Evidence, type PlanOutput } from './design/planner.js';
 import { detectCategory, profileFor } from './design/categories.js';
 import { offeringsFrom, type Offering } from './design/offerings.js';
@@ -139,6 +140,8 @@ export interface BuildResult {
   newSite?: AuditResult;
   /** the routes written ("" is the home page) */
   pages?: string[];
+  /** every photo found, followed to the page (found → downloaded → classified → eligible → selected → rendered), with why each stopped */
+  photoTrace?: PhotoTrace;
 }
 
 export type Emit = (e: { type: 'step'; step: string; status: 'start' | 'done' | 'error'; ms?: number; note?: string }) => void;
@@ -174,7 +177,7 @@ function evidenceFor(theme: Theme, b: Business, facts: Facts, sourceAreas?: stri
     reviewCount: b.reviewCount,
     trust: facts.licensed || facts.insured || !!facts.years || facts.warranty,
     // the places the business itself says it serves come first, and alone when it names any
-    areas: sourceAreas?.length ? [...new Set(sourceAreas)].slice(0, 12) : [...new Set([facts.city, ...facts.serviceAreas, ...b.nearbyTowns].filter(Boolean) as string[])].slice(0, ar.maxPlaces ?? 8),
+    areas: sourceAreas?.length ? [...new Set(sourceAreas)].slice(0, 12) : [...new Set([facts.city, ...facts.serviceAreas].filter(Boolean) as string[])].slice(0, ar.maxPlaces ?? 8),
     address: b.formattedAddress,
   };
 }
@@ -278,7 +281,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   const photosP = timed(steps, emit, 'Process photos', () => processPhotos(b, theme, { outDir: assetDir, publicPrefix: 'assets' }), (r) => `${r.usable} usable · ${r.rejected.length} rejected`);
   // design builds: what each photo shows (vision / sample labels), while Claude reads the facts
   const labelsP = designOn
-    ? photosP.then((p) => timed(steps, emit, 'Read photos', () => labelPhotos(p.items).catch(() => ({ kinds: p.items.map(() => 'unknown' as const), source: 'none' as const })),
+    ? photosP.then((p) => timed(steps, emit, 'Read photos', () => labelPhotos(p.items, { name: b.name, category: b.primaryTypeLabel || b.primaryType }).catch((e): PhotoLabels => ({ kinds: p.items.map(() => 'unknown' as const), seen: p.items.map(() => undefined), source: 'none', note: `labelling failed: ${(e as Error).message}` })),
         (r) => (r.source === 'vision' ? `${r.kinds.filter((k) => k !== 'unknown').length} labelled by Claude` : r.source === 'fixture' ? 'sample-data labels' : 'no labels: ranking by quality only')))
     : Promise.resolve(undefined);
   const designAsk = designOn ? { design: { style: prefs?.style, service: prefs?.service, goal: prefs?.goal } } : {};
@@ -333,7 +336,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
 
   // 5) Services (before the design plan, which leads with one of them)
   const services = pickServices(theme, b, scan, factsRes.servicesMentioned, factsRes.serviceBlurbs, { emergencyOk: factsRes.facts.emergency || factsRes.facts.open24h, own: factsRes.services, ownFromWebsite: factsRes.services.some((x) => x.fromWebsite) });
-  emit({ type: 'step', step: 'Services', status: 'done', note: services.source === 'business' ? `${services.items.length} from the business's own website/reviews` : services.hidden ? 'none stated, section hidden' : `theme's standard list (${factsRes.services.length} own services found, need ${(theme.sectionRules.services as any)?.min ?? 3})` });
+  emit({ type: 'step', step: 'Services', status: 'done', note: services.source === 'business' ? `${services.items.length} from the business's own website` : services.hidden ? 'none verified, section hidden' : `theme's standard list (${factsRes.services.length} own services found, need ${(theme.sectionRules.services as any)?.min ?? 3})` });
   const evidence = evidenceFor(theme, b, factsRes.facts, content?.areas?.places);
   const personalise: PersonaliseInfo = {
     eligible: config.designPilot,
@@ -549,7 +552,22 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     serviceCardImages: (renderedAll.match(/class="f-svc-media"><img/g) || []).length,
   }) : [];
   if (storyEdit && storyEdit.method === 'extracted' && (content?.story?.text.length ?? 0) >= 200) evFindings.push({ id: 'story-unedited', level: 'review', message: "The About text is the website's own sentences, not an edited summary: read it before publishing." });
-  const reviewChecks = [...review0.checks, ...outputChecks, ...evFindings.map((f): BuildCheck => ({ id: f.id, level: f.level, message: f.message })), ...recovered.map((m): BuildCheck => ({ id: 'recovered', level: 'info', message: `Filled in ${m}.`, recovered: true }))];
+  // every photo followed to the finished pages: usable photos and none on the page is a finding, never a clean success
+  const photoTrace = tracePhotos({ found: b.photos, processed: photos, labels, infos: planOut ? infos : undefined, plan: planOut?.plan, html: renderedAll, planReasons: planOut?.plan.reasons });
+  steps.push({ name: 'Photo trace', ms: 0, ok: true, note: traceLine(photoTrace) });
+  emit({ type: 'step', step: 'Photo trace', status: 'done', note: traceLine(photoTrace) });
+  const selectionChecks: BuildCheck[] = photoFindings(photoTrace);
+  // offerings (a menu, a price list, services) come only from a source the business owns: its website, its own
+  // documents or the owner. Reviews and Google's listing don't establish them, so without one the section is left out
+  const prof = profileFor(planOut?.plan.category ?? detectCategory(b, entry.vertical));
+  if (!scan?.ok && !b.offerings?.length && b.source !== 'mock') {
+    selectionChecks.push({ id: 'offerings-unverified', level: 'review', message: `No ${prof.offeringsTitle.toLowerCase()} from a source the business owns (website, menu or price list, or the owner), so the page doesn't list any. Ask the owner for their ${prof.offeringsTitle.toLowerCase()}.` });
+  }
+  // without a website (or the owner's input) the brand is unknown: say so, rather than present a palette as theirs
+  if (!scan?.ok && !input.brandColor && b.source !== 'mock') {
+    selectionChecks.push({ id: 'brand-unknown', level: 'review', message: `No website or owner-provided brand: the logo and brand colours are unknown, so the preview uses a text wordmark and ${planOut ? 'the design plan\'s' : 'the theme\'s'} default colours. Ask the owner for their logo and colours.` });
+  }
+  const reviewChecks = [...review0.checks, ...selectionChecks, ...outputChecks, ...evFindings.map((f): BuildCheck => ({ id: f.id, level: f.level, message: f.message })), ...recovered.map((m): BuildCheck => ({ id: 'recovered', level: 'info', message: `Filled in ${m}.`, recovered: true }))];
   const review: BuildReview = { status: statusOf(reviewChecks), checks: reviewChecks };
   for (const c of review.checks.filter((x) => x.level !== 'info')) warnings.push(`Check: ${c.message}`);
   const extractors = [...(content?.report ?? []), ...(siteImages ? [siteImages.report] : []), ...(serviceImgs ? [extractorResult('service pictures', serviceImgs.byService.size === serviceImgs.records.length ? 'success' : serviceImgs.byService.size ? 'partial' : 'failed', `${serviceImgs.byService.size} of ${serviceImgs.records.length} service pictures fetched and cropped to 16:10${serviceImgs.records.some((r) => !r.ok) ? `; ${serviceImgs.records.filter((r) => !r.ok).map((r) => `${r.service}: ${r.skipped ?? r.error}`).slice(0, 2).join('; ')}` : ''}`, serviceImgs.byService.size, serviceImgs.records.length)] : []), ...(brandProfile ? [extractorResult('brand', brandProfile.method === 'rendered' && brandProfile.primary ? 'success' : brandProfile.primary ? 'partial' : 'failed', brandProfile.primary ? `${brandProfile.method}: primary ${brandProfile.primary.hex} (${brandProfile.primary.confidence})${brandProfile.secondary ? `, secondary ${brandProfile.secondary.hex} (${brandProfile.secondary.confidence})` : ''}${brandProfile.button ? `, buttons ${brandProfile.button.fill} with ${brandProfile.button.text} lettering` : ''}` : 'no brand colours could be read from the page or the logo')] : [])];
@@ -651,6 +669,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     draftId,
     newSite,
     pages: sitePlan?.pages.map((p) => p.route) ?? [''],
+    photoTrace,
   };
 }
 

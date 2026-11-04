@@ -92,7 +92,7 @@ export function leadForm(m: SiteModel, opts: { compact?: boolean; title?: string
     </div>
     ${opts.compact ? '' : `<div class="row2"><label for="${id}-email"><span>Email <span class="muted">(optional)</span></span><input id="${id}-email" name="email" type="email" autocomplete="email"></label>
     ${trades ? `<label for="${id}-zip">ZIP code<input id="${id}-zip" name="zip" inputmode="numeric" autocomplete="postal-code" maxlength="10"></label>` : ''}</div>`}
-    ${svc ? `<label for="${id}-svc">What do you need?<select id="${id}-svc" name="service"><option value="">Choose a ${esc(noun)}</option>${svc}<option>Something else</option></select></label>` : ''}
+    ${svc ? `<label for="${id}-svc">What do you need?<select id="${id}-svc" name="service"><option value="">Choose ${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${esc(noun)}</option>${svc}<option>Something else</option></select></label>` : ''}
     ${when}
     ${opts.compact ? '' : `<label for="${id}-msg"><span>Details <span class="muted">(optional)</span></span><textarea id="${id}-msg" name="message" rows="3"></textarea></label>`}
     ${kind}

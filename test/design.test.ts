@@ -99,6 +99,19 @@ test('planner: sparse data still makes a valid page (no photos → type-led, no 
   assert.ok(plan.reasons.some((r) => /No reviews section/.test(r)));
 });
 
+test('a Google-only business with no verified offerings does not use review-derived dish copy', () => {
+  const bare = input({
+    business: biz({ name: 'Rooftop Kitchen', primaryType: 'afghani_restaurant', primaryTypeLabel: 'Afghan restaurant', city: 'Lahore' }),
+    facts: facts({ city: 'Lahore' }), category: 'food', services: [], offerings: [], photos: [],
+    advice: { headline: 'Shinwari Karahi on the Rooftop', subline: 'Come for Shinwari Karahi.' },
+  });
+  const first = planDesign(bare).plan;
+  assert.ok(!/Shinwari Karahi/i.test(`${first.copy.headline} ${first.copy.subline}`));
+  const old = { ...first, copy: { headline: 'Shinwari Karahi on the Rooftop', subline: 'Come for Shinwari Karahi.', source: 'claude' as const } };
+  const rebuilt = planDesign({ ...bare, previous: old }).plan;
+  assert.ok(!/Shinwari Karahi/i.test(`${rebuilt.copy.headline} ${rebuilt.copy.subline}`));
+});
+
 test('planner: team photo gets a team section; hero, team and projects are different photos', () => {
   const { plan } = planDesign(input({ photos: [photo('p_t', 'team'), photo('p_a', 'work'), photo('p_b', 'work'), photo('p_c', 'work'), photo('p_d', 'work')] }));
   assert.equal(plan.direction, 'local-trusted');

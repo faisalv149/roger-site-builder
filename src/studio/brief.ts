@@ -176,12 +176,12 @@ function buildInventoryFrom(s: SourceSnapshot, loaded: Loaded[], docs: LoadedDoc
   // Google listing photos: references only (not downloaded); Google's terms limit their use
   // the photo's reference changes on every request to Google, so its id comes from what does not: its credit, size and order
   const seenPhoto = new Map<string, number>();
-  for (const ph of s.listing?.photos ?? []) {
+  for (const [order, ph] of (s.listing?.photos ?? []).entries()) {
     const base = `${s.listing!.placeId}|${ph.authors.join('|')}|${ph.width}x${ph.height}`;
     const n = (seenPhoto.get(base) ?? 0) + 1;
     seenPhoto.set(base, n);
     const id = `gph_${sha256(`${base}|${n}`).slice(0, 12)}`;
-    assets.set(id, { id, url: `google-photo:${ph.ref}`, origin: 'google', role: 'listing-photo', pages: [], services: [], outcome: usesOf(ph.width, ph.height).length ? 'usable' : 'undersized', examined: 'listing-reference', width: ph.width, height: ph.height, uses: usesOf(ph.width, ph.height), rights: 'google-restricted', attribution: ph.authors });
+    assets.set(id, { id, url: `google-listing:${s.listing!.placeId}#${order}`, origin: 'google', role: 'listing-photo', pages: [], services: [], outcome: usesOf(ph.width, ph.height).length ? 'usable' : 'undersized', examined: 'listing-reference', width: ph.width, height: ph.height, uses: usesOf(ph.width, ph.height), rights: 'google-restricted', attribution: ph.authors });
   }
   const assetList = [...assets.values()].sort((a, b) => a.id.localeCompare(b.id)).map((a) => ({ ...a, pages: [...a.pages].sort(), services: [...a.services].sort() }));
   const assetSummary = summarizeAssets(assetList);

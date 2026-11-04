@@ -3,6 +3,7 @@ import express from 'express';
 import { config } from '../../config.js';
 import { readOut } from '../../files.js';
 import { studioDocs } from '../../store.js';
+import { fillListingPhotos } from './listing-photos.js';
 
 /**
  * A client's preview link for one chosen concept: /p/<token>/. The token is random (128 bits) and is the only key:
@@ -43,5 +44,7 @@ shareRoutes.get('/:token', async (req, res) => {
   if (!req.originalUrl.split('?')[0].endsWith('/')) return res.redirect(301, `/p/${share.token}/`);
   const html = await readOut(`studio-concepts/${share.setId}/${share.conceptId}.html`);
   if (!html) return res.status(404).send('This preview is no longer available.');
-  res.set(headers).type('html').send(html.toString('utf8').replace(/<body>/, `<body>${BAR}`));
+  // Google listing photos and their credits are fetched for this view only (never stored)
+  const page = await fillListingPhotos(html.toString('utf8'));
+  res.set({ ...headers, 'cache-control': 'private, no-store' }).type('html').send(page.replace(/<body>/, `<body>${BAR}`));
 });

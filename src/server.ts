@@ -28,6 +28,7 @@ import { ownerRoutes, studioDraftRoutes } from './owner-api.js';
 import { studioRoutes } from './studio/routes.js';
 import { resumeInterruptedJobs } from './studio/jobs.js';
 import { shareRoutes } from './studio/concepts/share.js';
+import { fillListingPhotos } from './studio/concepts/listing-photos.js';
 import { claudeEnabled, claudeKeyStatus, claudeToolMode, claudeVia } from './content/claude.js';
 
 const app = express();
@@ -233,7 +234,16 @@ app.post('/api/imessage/reset', wrap(async (req, res) => { await resetSession(St
 app.use('/api/owner', ownerRoutes);
 app.use('/api/studio', studioRoutes); // design studio: business briefs (phase 1) and concept sets (phase 2), src/studio
 // concept previews: each set's HTML, photos and screenshots (noindex; previews are never published from here)
-app.use('/studio-previews', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex' }); next(); }, express.static(path.join(config.dirs.out, 'studio-concepts')),
+app.use('/studio-previews', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex' }); next(); },
+  // a concept page: its Google listing photos and their credits are fetched for this view (never stored), see listing-photos.ts
+  async (req, res, next) => {
+    if (!/^\/[A-Za-z0-9_-]+\/[a-c]\.html$/.test(req.path)) return next();
+    const local = path.join(config.dirs.out, 'studio-concepts', req.path);
+    const html = fs.existsSync(local) ? fs.readFileSync(local, 'utf8') : (await readOut(`studio-concepts${req.path}`).catch(() => undefined))?.toString('utf8');
+    if (!html) return next();
+    res.set({ 'cache-control': 'private, no-store' }).type('html').send(await fillListingPhotos(html));
+  },
+  express.static(path.join(config.dirs.out, 'studio-concepts')),
   // on a serverless host the files may be on another instance: the remote store has every finished set
   async (req, res, next) => { const data = await readOut(`studio-concepts${decodeURIComponent(req.path)}`).catch(() => undefined); if (!data) return next(); res.type(path.extname(req.path) || 'html').send(data); });
 app.use('/p', shareRoutes);

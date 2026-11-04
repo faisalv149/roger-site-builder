@@ -191,7 +191,8 @@ export function buildModel(i: ModelInputs): SiteModel {
 
   // ── areas ──
   const ar = (t.sectionRules.area || {}) as { maxPlaces?: number; showMap?: boolean };
-  const areas = [...new Set([facts.city, ...facts.serviceAreas, ...b.nearbyTowns].filter(Boolean) as string[])].slice(0, ar.maxPlaces ?? 8);
+  // Nearby places are not evidence that the business serves them.
+  const areas = [...new Set([facts.city, ...facts.serviceAreas].filter(Boolean) as string[])].slice(0, ar.maxPlaces ?? 8);
 
   // ── hours ──
   const hr = (t.sectionRules.hours || {}) as { showOpenNow?: boolean };

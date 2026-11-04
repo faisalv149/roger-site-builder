@@ -110,9 +110,9 @@ export function factStates(f: Facts, ctx: { hoursKnown: boolean }): FactStates {
 }
 
 const DESIGN_SYSTEM =
-  ' Also suggest a website design (design): style is one of local-trusted (warm, reviews, team, service area), bold-direct ' +
-  '(fast contact, practical; right for urgent work), modern-premium (editorial, large project photos, workmanship); mainService is the ' +
-  'one service the site should lead with, copied from your services list or themeServices; headline (max 9 words) names that service and ' +
+  ' Also suggest a website design (design): style is one of local-trusted (warm, reviews, people, location), bold-direct ' +
+  '(fast contact, practical), modern-premium (editorial, large relevant photos); mainService is the ' +
+  'one verified offering the site should lead with, copied from sourceServices or the business website; headline (max 9 words) names that offering when verified, otherwise the business category and location, and ' +
   'the city; subline (max 28 words) says plainly what the business does. Headline and subline may only use facts from the inputs: no ' +
   'superlatives, prices, phone numbers, "free", "best", "family-owned", "same-day", and no 24/7, emergency, licensed, insured, warranty ' +
   'or years unless those are stated, and nothing about appointments, walk-ins or availability. When designPreferences is given, follow it.';
@@ -149,7 +149,7 @@ export const iconFor = (name: string) => { const i = ICON_BY_WORD.find(([re]) =>
 /**
  * The services the page itself lists are the services. Claude may add a one-line description and an icon to those, but
  * it does not decide which services exist and it does not replace what the page says. When the page lists none, what
- * Claude returned is used only if the page text (or the reviews, for a site with no text) supports each name.
+ * Claude returned is used only if the business's own page text supports each name.
  */
 export function mergeServices(source: SourceService[], claude: OwnService[], opts: { siteText: string; reviewText: string }): OwnService[] {
   const key = nameKey;
@@ -161,7 +161,7 @@ export function mergeServices(source: SourceService[], claude: OwnService[], opt
       return { name: s.name, description: shorten(description || (note ? '' : c?.description) || '', 150), icon: c?.icon && SERVICE_ICONS.includes(c.icon) ? c.icon : iconFor(s.name), note, contact, fromWebsite: true, price: undefined };
     });
   }
-  const haystack = key(opts.siteText || opts.reviewText);
+  const haystack = key(opts.siteText);
   return claude.filter((c) => haystack.includes(key(c.name)));
 }
 
@@ -212,7 +212,7 @@ export async function extractFacts(b: Business, theme: Theme, scan?: WebsiteScan
       'Emergency service and maintenance plans may also be inferred from the business hours or customer reviews. ' +
       'services: the services or offerings the business itself lists on its own website, using its own names for them (short, 1-5 words). ' +
       'sourceServices, when given, are the services the page lists: return exactly those, in that order, and only add a description. ' +
-      'If there is no website text, include only services that customer reviews explicitly say this business provides. ' +
+      'If there is no website text or listed sourceServices, return no services. Customer reviews are opinions, not a verified catalogue of offerings. ' +
       'Never add services that are merely typical for the category, and return an empty list when none are stated. Most important first, at most 8. ' +
       'Each description is one plain sentence (max 14 words) about the service itself, written as copy for the business\'s own website: ' +
       'never mention reviews, reviewers or "the website". Use only details from the inputs; if they give none, return an empty description. ' +
@@ -245,7 +245,7 @@ export async function extractFacts(b: Business, theme: Theme, scan?: WebsiteScan
         services: {
           type: 'array',
           maxItems: 8,
-          description: 'The business\'s own services, from its website (or explicit mentions in reviews). Empty if none are stated.',
+          description: 'Offerings listed on the business website. Empty when no business-owned source lists them.',
           items: {
             type: 'object',
             properties: {
