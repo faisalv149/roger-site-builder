@@ -63,7 +63,7 @@ test('owner answers in iMessage map to the same preferences', () => {
 });
 
 test('planner: verified emergency → bold, call, emergency band; plan validates', () => {
-  const { plan } = planDesign(input({ facts: facts({ open24h: true }) }));
+  const { plan } = planDesign(input({ facts: facts({ emergency: true }) }));
   assert.equal(plan.direction, 'bold-direct');
   assert.equal(plan.goal, 'call');
   assert.ok(plan.emergency && ids(plan).includes('urgent'));

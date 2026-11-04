@@ -1,4 +1,4 @@
-import { searchCandidates } from '../sources/places.js';
+import { lookupCandidates } from '../sources/resolve.js';
 import type { BusinessCandidate } from '../types.js';
 import { parseLookupInput } from '../sources/maps-url.js';
 import { runAudit, type BuildResult } from '../pipeline.js';
@@ -192,11 +192,12 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
       if (!isGoogle) { s.website = url; query = msg.replace(url, '').replace(/^[\s,.;-]+|[\s,.;-]+$/g, '').trim(); }
       else query = url;
     }
-    if (!query) {
+    // a ZIP alone finds a postal code, not a business: with a website, Roger reads it and looks the business up by what it says
+    if (!query && !s.website) {
       s.state = 'need-business';
-      return [{ text: 'Thanks, got your website. What is the business name and ZIP code, so I can match your Google Business Profile?' }];
+      return [{ text: 'Thanks. What is the business name and ZIP code, so I can match your Google Business Profile?' }];
     }
-    const { candidates } = await searchCandidates(query, { limit: 5 });
+    const { candidates } = await lookupCandidates(query, { website: s.website, limit: 5 });
     if (!candidates.length) {
       s.state = 'need-business';
       return [{ text: "I couldn't find that on Google. Can you send the exact business name and ZIP, or a Google Maps link to your listing?" }];

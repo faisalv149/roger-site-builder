@@ -4,6 +4,30 @@ import type { SiteImage } from '../brand/photos.js';
 import { digits, fillPlaceholders, titleCase, truncateWords } from '../util/text.js';
 import type { DesignModel } from '../design/compose.js';
 
+/** What the business's own website contributes beyond Google: its booking page, story and videos, with how well each was read. */
+export interface SourceBundle {
+  /** the website everything here was read from */
+  website?: string;
+  booking?: { url: string; label: string; platform?: string; kind: 'online' | 'phone' | 'email' | 'page' };
+  story?: { heading: string; text: string; /** the edited About section: short paragraphs, faithful to the text */ paragraphs?: string[]; edited?: boolean };
+  /** the website's own main actions, kept: the label as it writes it and where it goes on this site */
+  cta?: { primary?: { label: string; to: 'form' | 'phone' | 'booking' | 'url'; href?: string; terms?: 'free'; /** the services (by serviceKey) the business shows this offer on: only these cards carry it */ eligibleServices?: string[]; /** the one eligible service whose card carries the offer button */ featuredService?: string }; secondary?: { label: string; to: 'gallery' | 'url'; href?: string } };
+  /** the title of the photo section: "Recent work" only where the website presents projects as its work */
+  galleryTitle?: string;
+  /** the region the business says it serves ("Central Texas") */
+  region?: string;
+  /** claims in the business's own words (a warranty line, "Locally & Family Owned") */
+  claims?: { key: string; text: string }[];
+  /** testimonials the website shows, with their authors */
+  testimonials?: { author: string; text: string }[];
+  /** the evidence behind the site: services, assets, claims, conflicts (src/evidence.ts) */
+  evidence?: import('../evidence.js').EvidenceModel;
+  videos: { title?: string; duration?: string; kind: 'file' | 'hls' | 'youtube' | 'vimeo' | 'embed'; url: string; pageUrl: string; poster?: { publicPath: string; width: number; height: number }; note?: string }[];
+  /** the extractors' results and the pre-delivery checks (kept with the draft, not rendered) */
+  extraction?: import('./extraction.js').ExtractionReport;
+  review?: import('./validate.js').BuildReview;
+}
+
 export interface SiteModel {
   slug: string;
   themeId: string;
@@ -31,7 +55,7 @@ export interface SiteModel {
     showRating: boolean;
     rating?: number;
     reviewCount?: number;
-    quotes: { text: string; author: string; rating: number }[];
+    quotes: { text: string; author: string; rating: number; /** where it is from: "Google review", or the business's own website */ from?: string }[];
     /** every review good enough to show, for the review slider (src/render/widgets.ts) */
     reviews: { text: string; author: string; rating: number; when?: string }[];
     stats: { value: string; label: string }[];
@@ -50,6 +74,8 @@ export interface SiteModel {
   warnings: string[];
   /** personalisation pilot: the design plan and what its renderers need (src/design/compose.ts) */
   design?: DesignModel;
+  /** the website's booking page, story and videos (src/sources/site-content.ts) */
+  source?: SourceBundle;
 }
 
 export interface ModelInputs {

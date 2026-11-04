@@ -50,6 +50,8 @@ export interface PlanInput {
   /** owner layout choices from the preview (each one locks its dimension) */
   layout?: LayoutChoice;
   advice?: DesignAdvice;
+  /** the business's own story, read from its website: it always gets a section, whatever the arrangement */
+  story?: boolean;
   /** brand tokens for a direction (the brand colour resolved against that direction's surfaces) */
   tokens: (direction: Direction, typography: TypePreset) => DesignPlan['tokens'];
   now?: string;
@@ -120,8 +122,7 @@ export function rulesCopy(direction: Direction, goal: Goal, service: string, i: 
   const s = subject.toLowerCase();
   const backed = i.services.filter((x) => (x.hits ?? 0) > 0 || x.description).map((x) => x.label.toLowerCase()).filter((x) => x !== service.toLowerCase()).slice(0, 2);
   const facts: string[] = [];
-  if (i.facts.open24h) facts.push('Open 24 hours');
-  else if (i.emergency && direction === 'bold-direct' && trades) facts.push('Emergency call-outs');
+  if (i.emergency && direction === 'bold-direct' && trades) facts.push('Emergency call-outs');
   if (i.facts.licensed && i.facts.insured) facts.push('Licensed and insured');
   else if (i.facts.licensed) facts.push('Licensed');
   if (i.facts.years) facts.push(`${i.facts.years} years in business`);
@@ -206,6 +207,8 @@ function recommendDirection(i: PlanInput, emergencyVerified: boolean, roles: Pho
     case 'professional':
       if (strongPhotos) return { d: 'modern-premium', why: 'professional services with strong photos: an editorial look' };
       return roles.hero ? { d: 'local-trusted', why: 'professional services where the people matter: warm and credible' } : { d: 'bold-direct', why: 'professional services without photos: a clear, type-led page' };
+    case 'health':
+      return { d: 'local-trusted', why: 'a health clinic: warm, clear and reassuring, with booking up front' };
     case 'shop':
       return strongPhotos ? { d: 'modern-premium', why: 'a shop with strong product photos' } : { d: 'local-trusted', why: 'a local shop: welcoming, with hours and location up front' };
     case 'general':
@@ -291,7 +294,8 @@ function planOnce(i: PlanInput, gen?: { seed: string; variation: number; generat
   const category = i.category;
   const profile = profileFor(category);
   const phoneOk = validPhone(i.business);
-  const emergencyVerified = category === 'trades' && (i.facts.open24h || i.facts.emergency);
+  // emergency service is what the business says it offers; opening hours on a listing don't promise dispatch
+  const emergencyVerified = category === 'trades' && !!i.facts.emergency;
   const emergency = category === 'trades' && (prefs.emergencyConfirmed === false ? false : emergencyVerified || prefs.emergencyConfirmed === true);
   const roles = assignPhotos(i.photos as PhotoInfo[], prev && !generated ? { hero: prev.images.hero, team: prev.images.team, projects: prev.images.gallery } : undefined);
 
@@ -410,7 +414,8 @@ function planOnce(i: PlanInput, gen?: { seed: string; variation: number; generat
   const proof = proofOk && S('proof', C.sections.proof![0]);
   const area = areaOk && S('area', C.sections.area![0] === 'coverage' && profile.hoursFirst && C.sections.area!.includes('compact') ? 'compact' : C.sections.area![0]);
   const intro = hasIntro && S('intro', introVariant);
-  const process = S('process', 'steps');
+  // a restaurant has no "how it works": its steps (call, agree the details) are a trade's, so it shows none unless it takes orders
+  const process = category === 'food' && goal !== 'order' ? false : S('process', 'steps');
   let sections: (DesignPlan['sections'][number] | false)[];
   if (direction === 'clean-professional') {
     sections = arrangement === 'a'
@@ -431,6 +436,11 @@ function planOnce(i: PlanInput, gen?: { seed: string; variation: number; generat
       : [S('hero', heroVariant), intro, services, gallery, proof, team, process, quote, area, S('footer', 'minimal')];
   }
   const list = sections.filter(Boolean) as DesignPlan['sections'];
+  // the business's own words are content to keep: if the arrangement left out the introduction, it goes after the offerings
+  if (i.story && C.sections.intro && !list.some((s) => s.id === 'intro')) {
+    const at = list.findIndex((s) => s.id === 'services' || s.id === 'focus');
+    list.splice(at >= 0 ? at + 1 : 1, 0, S('intro', introVariant));
+  }
   const ids = new Set(list.map((s) => s.id));
   if (!roles.team) reasons.push('No team section: no photo is confirmed to show the team');
   if (!ids.has('gallery')) reasons.push(`No gallery: ${pool.length} photo${pool.length === 1 ? '' : 's'} left for it`);
@@ -442,8 +452,9 @@ function planOnce(i: PlanInput, gen?: { seed: string; variation: number; generat
   const rules = rulesCopy(direction, goal, service.label, { ...i, emergency, category });
   const ctx = { facts: i.facts, emergency, evidence: ev };
   let copy: DesignPlan['copy'] = { ...rules, source: 'rules' };
-  const keepCopy = prev && prev.service.label === service.label && prev.direction === direction && prev.goal === goal && (!generated || locks.has('direction'));
   const a = i.advice;
+  // saved copy is kept so a rebuild doesn't rewrite what the owner saw; but copy the rules wrote because Claude was unavailable is replaced once Claude's suggestion exists
+  const keepCopy = prev && prev.service.label === service.label && prev.direction === direction && prev.goal === goal && (!generated || locks.has('direction')) && !(a?.headline && prev.copy.source === 'rules');
   const ah = a?.headline ? cleanText(a.headline, 90) : '';
   const as = a?.subline ? cleanText(a.subline, 220) : '';
   const mentions = (t: string) => category !== 'trades' || norm(t).includes(norm(service.label).split(' ')[0]);

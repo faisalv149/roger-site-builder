@@ -1,0 +1,17 @@
+{
+  "placeId": "mock-geo-78645",
+  "name": "78645",
+  "primaryType": "postal_code",
+  "primaryTypeLabel": "Postal Code",
+  "types": ["postal_code", "political"],
+  "formattedAddress": "Leander, TX 78645, USA",
+  "city": "Leander",
+  "state": "TX",
+  "zip": "78645",
+  "country": "US",
+  "reviews": [],
+  "photos": [],
+  "nearbyTowns": [],
+  "source": "mock",
+  "qaNote": "regression: Google returns a postal code for a ZIP search; it is a place, never a business"
+}

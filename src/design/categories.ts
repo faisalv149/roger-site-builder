@@ -5,7 +5,7 @@ import type { Business } from '../types.js';
  * (primaryType first), with a general fallback that works for anything. Themes still come from src/theme/select.ts;
  * this only shapes the design plan's labels and sections.
  */
-export const CATEGORIES = ['trades', 'salon', 'food', 'fitness', 'professional', 'shop', 'general'] as const;
+export const CATEGORIES = ['trades', 'salon', 'food', 'fitness', 'professional', 'shop', 'health', 'general'] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 /** What a site's main button can ask visitors to do. */
@@ -76,6 +76,12 @@ export const PROFILES: Record<Category, CategoryProfile> = {
     areaTitle: () => 'Visit the shop', proofTitle: () => 'What customers say',
     process: (n) => steps('Ask about an item', `${n} checks`, 'Collect or arrange', 'Tell us what you are after.', 'And replies with what is available.', 'Details agreed with you.'),
   },
+  health: {
+    id: 'health', label: 'Health clinic', offeringsTitle: 'Services', noun: 'service', unknownPrice: 'Ask the clinic',
+    goals: ['appointment', 'call', 'enquiry'], actions: ACT({ appointment: 'Book an appointment', enquiry: 'Ask a question' }), galleryTitle: 'Inside the clinic', offeringsVariant: 'cards', hoursFirst: true,
+    areaTitle: () => 'Visit the clinic', proofTitle: () => 'What patients say',
+    process: (n) => steps('Choose a service', 'Book a visit', `${n} sees you`, 'Pick from the list above.', 'Use the online booking page, or call.', 'At the time you chose.'),
+  },
   general: {
     id: 'general', label: 'Local business', offeringsTitle: 'What we offer', noun: 'service', unknownPrice: 'Price on request',
     goals: ['enquiry', 'call', 'appointment'], actions: ACT({ call: 'Call us' }), galleryTitle: 'Photos', offeringsVariant: 'cards', hoursFirst: false,
@@ -92,6 +98,7 @@ const TYPES: [Category, RegExp][] = [
   ['fitness', /^(gym|fitness_center|yoga_studio|pilates_studio|sports_club|martial_arts_school|boxing_gym|dance_school|sports_activity_location|swimming_pool)$/],
   ['professional', /^(consultant|accounting|lawyer|insurance_agency|real_estate_agency|financial_planner|marketing_agency|corporate_office|tax_preparer|architect|employment_agency|travel_agency|bookkeeper|business_consultant)$/],
   ['shop', /(_store$|^store$|^florist$|^shopping_mall$|^market$|^boutique$|^gift_shop$|^book_store$)/],
+  ['health', /^(chiropractor|dentist|dental_clinic|doctor|physiotherapist|physical_therapist|medical_clinic|health|optometrist|orthodontist|veterinary_care|acupuncturist|naturopath|pharmacy|hospital|medical_lab|psychologist|counselor|therapist|podiatrist|dermatologist)$/],
 ];
 
 /** Category from Google types; trade themes (roofing, plumbing...) are always trades. */

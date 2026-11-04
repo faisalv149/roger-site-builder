@@ -2,13 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { config } from './config.js';
+import { configuredChannels, ownerEmailOf } from './lead-delivery.js';
 import type { Business, Facts, ServiceItem, WebsiteScan } from './types.js';
 import type { Theme } from './theme/schema.js';
 import type { SiteImage } from './brand/photos.js';
 import type { LogoPick } from './brand/logo.js';
 import { cloneTheme } from './theme/load.js';
 import { resolveBrand, brandTextOnSurface } from './brand/brand.js';
-import { buildModel, type SiteModel } from './content/model.js';
+import { buildModel, type SiteModel, type SourceBundle } from './content/model.js';
+import { brandCss } from './sources/brand-profile.js';
+import { leadOf } from './design/compose.js';
 import { renderPage } from './render/page.js';
 import { isFamilyV2, renderFamilyPage } from './render/families.js';
 import { previewContext, renderSiteFiles, sitePlanFor, writeSiteFiles } from './site-render.js';
@@ -40,6 +43,10 @@ import type { PhotoInfo, PhotoMeta } from './design/photos.js';
 export const DRAFT_VERSION = 1;
 
 export interface DraftBase {
+  /** when a test enquiry last reached the lead inbox (and webhook): publishing needs one */
+  leadTestedAt?: string;
+  /** how that test enquiry was passed on: one entry per channel, with the receiver's answer */
+  leadDelivery?: { channel: string; status: string; at: string; detail?: string }[];
   slug: string;
   themeId: string;
   themeName: string;
@@ -63,6 +70,10 @@ export interface DraftBase {
   evidence: Evidence;
   advice?: DesignAdvice;
   currency: string;
+  /** from the business's own website: booking page, story, videos, and how well they were read */
+  source?: SourceBundle;
+  /** the business's brand as its website shows it: colour roles, button style, typefaces (src/sources/brand-profile.ts) */
+  brandProfile?: import('./sources/brand-profile.js').BrandProfile;
 }
 
 export interface DraftRecord {
@@ -196,9 +207,21 @@ export async function composeModel(base: DraftBase, plan0: DesignPlan, opts: { a
     email: base.email, baseUrl: config.publicBaseUrl, preview: base.preview,
   });
   if (base.heroIsStock) model.images.heroIsStock = true;
+  if (base.source) {
+    const s = base.source;
+    model.source = { website: s.website, booking: s.booking, story: s.story, videos: s.videos, cta: s.cta, galleryTitle: s.galleryTitle, region: s.region, claims: s.claims, testimonials: s.testimonials };
+    // claims in the business's own words replace the generic trust chips
+    if (s.claims?.length) model.trust = [...new Set(s.claims.filter((c) => ['warranty', 'guarantee', 'licensed', 'insured', 'ownership', 'experience'].includes(c.key)).map((c) => c.text))].slice(0, 4);
+    // testimonials the business shows itself, with their authors and whole sentences
+    if (s.testimonials && s.testimonials.length >= 2) {
+      const host = (() => { try { return new URL(s.website || '').hostname.replace(/^www\./, ''); } catch { return 'its website'; } })();
+      model.proof = { ...model.proof, quotes: s.testimonials.slice(0, 3).map((t) => ({ text: leadOf(t.text, 340), author: t.author, rating: 0, from: `Review on ${host}` })), reviews: [] };
+    }
+  }
   if (opts.publishing) {
     // Google's review text and rating stay with Google: a published page links to them instead
-    model.proof = { ...model.proof, quotes: [], reviews: [], showRating: false, stats: model.proof.stats.filter((s) => !/★|review/i.test(`${s.value} ${s.label}`)) };
+    // (the business's own testimonials stay: they are first-party)
+    model.proof = { ...model.proof, quotes: model.source?.testimonials && model.source.testimonials.length >= 2 ? model.proof.quotes : [], reviews: [], showRating: false, stats: model.proof.stats.filter((s) => !/★|review/i.test(`${s.value} ${s.label}`)) };
     model.preview = false;
   }
   const raw = async (p: PhotoMeta) => {
@@ -212,6 +235,16 @@ export async function composeModel(base: DraftBase, plan0: DesignPlan, opts: { a
     media: new Map((opts.content?.media ?? []).map((m) => [m.key, { focal: m.focal, alt: m.alt }])),
     reviewsLink: opts.publishing && base.business.mapsUrl && (base.business.reviewCount ?? 0) > 0 ? base.business.mapsUrl : undefined,
   });
+  // the business's own brand: its colours in their roles and its typeface (or one named substitute), unless the owner chose their own
+  if (base.brandProfile && base.brandProfile.method !== 'none') {
+    const bc = brandCss(base.brandProfile, { logoColors: base.brandProfile.logo?.colors });
+    if (bc.css) {
+      model.design.brandCss = bc.css;
+      model.design.brandNotes = bc.notes;
+      model.brand = { ...model.brand, brand: bc.tokens['--brand'], brandInk: bc.tokens['--brand-ink'] };
+      if (bc.fonts && !opts.appearance?.font) model.fonts = { heading: bc.fonts.heading, body: bc.fonts.body, faces: [{ family: 'Brand', url: bc.fonts.url }] };
+    }
+  }
   // a typography-led hero shows no photo, so the stock placeholder warning doesn't apply
   if (plan.hero.variant === 'type-led') model.warnings = model.warnings.filter((w) => !w.startsWith('No usable Google photo for the hero'));
   return model;
@@ -386,7 +419,7 @@ export function contentView(d: DraftRecord) {
   return {
     revision: c.revision, facts,
     media: c.media.slice().sort((a, b) => a.order - b.order).map((m) => ({ ...m, url: `/sites/${d.slug}/${m.publicPath}` })),
-    readiness: publishReadiness(c, d.offerings),
+    readiness: publishReadiness(c, d.offerings, { checks: d.base.source?.review?.checks, leadTested: !!d.base.leadTestedAt, leadNotified: configuredChannels(ownerEmailOf(d.content)).length > 0 }),
   };
 }
 

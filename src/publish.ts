@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { config } from './config.js';
+import { configuredChannels, ownerEmailOf } from './lead-delivery.js';
 import { deletePublish, getPublish, savePublish, type PublishRecord } from './store.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -162,7 +163,7 @@ export async function publishSite(slug: string): Promise<PublishRecord> {
     if (!exists) throw Object.assign(new Error(`No built site "${slug}"`), { status: 404 });
     throw new PublishBlocked('This site was built before business details could be reviewed. Rebuild it, have the owner review the details, then publish.', [{ key: 'content', message: 'No reviewed business details' }]);
   }
-  const blockers = publishReadiness(d.content, d.offerings).filter((x) => x.level === 'blocker');
+  const blockers = publishReadiness(d.content, d.offerings, { checks: d.base.source?.review?.checks, leadTested: !!d.base.leadTestedAt, leadNotified: configuredChannels(ownerEmailOf(d.content)).length > 0 }).filter((x) => x.level === 'blocker');
   if (blockers.length) throw new PublishBlocked(`Not ready to publish: ${blockers.length} item${blockers.length === 1 ? '' : 's'} to review.`, blockers);
   const name = projectName(slug);
   const rec = await getPublish(slug);

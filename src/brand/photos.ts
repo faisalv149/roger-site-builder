@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { FRAMES, fitFor, usesOf } from '../design/image-fit.js';
 import path from 'node:path';
 import sharp from 'sharp';
 import type { Theme } from '../theme/schema.js';
@@ -12,7 +13,7 @@ export interface SiteImage {
   alt: string;
   /** the photographer's credit; Google requires it on every Places photo, the business's own included */
   credit?: string;
-  source: 'google' | 'stock' | 'owner';
+  source: 'google' | 'stock' | 'owner' | 'website';
   kb?: number;
 }
 
@@ -59,8 +60,9 @@ export async function processPhotos(
   const rules = theme.images;
   const rejected: { ref: string; reason: string }[] = [];
   const sized = b.photos.filter((p) => {
-    const ok = p.width >= rules.minWidth && p.height >= rules.minHeight;
-    if (!ok) rejected.push({ ref: p.ref, reason: `below ${rules.minWidth}×${rules.minHeight} (${p.width}×${p.height})` });
+    // big enough for some frame it could fill (a gallery tile, a service card, a hero)? The frame decides, not one cut-off
+    const ok = usesOf(p.width, p.height).length > 0;
+    if (!ok) rejected.push({ ref: p.ref, reason: `too small for any frame (${p.width}×${p.height}: under ${FRAMES.gallery.css}px across once cropped)` });
     return ok;
   });
   // Business-uploaded photos first; customer photos after (they need a visible credit).
@@ -80,7 +82,9 @@ export async function processPhotos(
   const good = processed.filter(Boolean) as { p: Photo; raw: Buffer; i: number }[];
 
   // Hero: prefer a wide owner photo.
-  const heroIdx = Math.max(0, good.findIndex((g) => g.p.isOwner && g.p.width / g.p.height >= 1.25));
+  // (only a picture big enough for a hero frame leads; otherwise no picture is stretched to fill it)
+  const heroFits = (g: { p: Photo }) => fitFor(g.p.width, g.p.height, 'hero').level !== 'undersized';
+  const heroIdx = good.findIndex((g) => g.p.isOwner && g.p.width / g.p.height >= 1.25 && heroFits(g));
   const images: SiteImage[] = [];
   const items: ProcessedPhoto[] = [];
   let hero: SiteImage | undefined;
@@ -96,9 +100,10 @@ export async function processPhotos(
       publicPath: `${opts.publicPrefix}/${name}`,
       width: enc.width,
       height: enc.height,
-      alt: isHero ? `${b.name} at work` : `Project photo from ${b.name}`,
-      credit: g.p.authors[0]?.name ? `Photo: ${g.p.authors[0].name} via Google` : 'Photo via Google',
-      source: 'google',
+      alt: g.p.source === 'website' ? (g.p.origin?.alt || `${b.name}${b.city ? `, ${b.city}` : ''}: photo ${isHero ? 1 : n + 1}`) : isHero ? `${b.name} at work` : `Project photo from ${b.name}`,
+      // the business's own website photos are its own; Google requires a credit on every Places photo
+      credit: g.p.source === 'website' ? undefined : g.p.authors[0]?.name ? `Photo: ${g.p.authors[0].name} via Google` : 'Photo via Google',
+      source: g.p.source === 'website' ? 'website' : 'google',
       kb: Math.round(enc.data.length / 1024),
     };
     if (isHero) hero = img; else images.push(img);

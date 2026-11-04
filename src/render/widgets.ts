@@ -61,24 +61,26 @@ export function rogerWidget(m: SiteModel): string {
   const name = esc(m.business.name);
   // no phone on Google: no number is invented; the call panel offers a call back instead
   const phone = m.contact.phone && m.contact.tel ? { display: m.contact.phone, tel: m.contact.tel } : undefined;
+  // the business's own online booking page (from its website), when there is one
+  const booking = m.source?.booking && m.source.booking.kind === 'online' ? m.source.booking : undefined;
   const field = (id: string, label: string, type: string, auto: string) => `<label class="rw-f" for="${id}">${label}<input id="${id}" name="${type === 'tel' ? 'phone' : 'name'}" type="${type}" autocomplete="${auto}" required${type === 'tel' ? ' inputmode="tel"' : ''}></label>`;
   const panelHead = (id: string, title: string, sub = '') => `<header class="rw-ph"><span class="rw-ava" aria-hidden="true">R</span><span class="rw-pt"><b id="${id}">${title}</b>${sub ? `<small>${sub}</small>` : ''}</span><button type="button" class="rw-x" data-rw-close aria-label="Close">${icon('x', { size: 20 })}</button></header>`;
   return `<div class="rw" data-rw data-state="closed">
   <section class="rw-panel" data-panel="book" role="dialog" aria-labelledby="rw-book-h" hidden>
-    ${panelHead('rw-book-h', 'Book a visit', `with ${name}`)}
+    ${panelHead('rw-book-h', booking ? 'Book an appointment' : 'Request an appointment', `with ${name}`)}
     <div class="rw-pb">
-      <p class="rw-step">1. Pick a day</p><div class="rw-days" data-rw-days role="group" aria-label="Day"></div>
-      <p class="rw-step">2. Pick a time</p><div class="rw-slots" data-rw-slots role="group" aria-label="Time"></div>
-      <form class="rw-form" data-rw-form="booking" hidden>
-        <p class="rw-pick" data-rw-pick></p>
+      ${booking ? `<a class="rw-cta" href="${esc(booking.url)}" target="_blank" rel="noopener" data-ev="book">${icon('calendar-days', { size: 18 })} ${esc(booking.label)}</a><p class="rw-status">Opens ${name}'s own ${booking.platform ? `${esc(booking.platform)} ` : ''}booking page.</p><p class="rw-step">Or send a request</p>` : `<p class="rw-status">Tell ${name} when suits you. This is a request, not a booking: the business contacts you to confirm a time.</p>`}
+      <form class="rw-form" data-rw-form="booking">
         ${field('rw-bn', 'Your name', 'text', 'name')}${field('rw-bp', 'Mobile phone', 'tel', 'tel')}
-        <button class="rw-cta" type="submit">Request this time</button>
+        <label class="rw-f" for="rw-bd">Preferred day<input id="rw-bd" name="day" type="text" placeholder="For example: any weekday" maxlength="60"></label>
+        <label class="rw-f" for="rw-bt">Time of day<select id="rw-bt" name="time"><option>Any time</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></label>
+        <button class="rw-cta${booking ? ' ghost' : ''}" type="submit">Send request</button>
       </form>
-      <div class="rw-ok" data-rw-ok hidden>${icon('circle-check', { size: 40 })}<b>Request sent</b><span>${name} will text you to confirm your visit.</span></div>
+      <div class="rw-ok" data-rw-ok hidden>${icon('circle-check', { size: 40 })}<b>Request sent</b><span>${name} will contact you to confirm a time. Nothing is booked until they do.</span></div>
     </div>
   </section>
   <section class="rw-panel" data-panel="chat" role="dialog" aria-labelledby="rw-chat-h" hidden>
-    ${panelHead('rw-chat-h', 'Roger', `${name} · replies in minutes`)}
+    ${panelHead('rw-chat-h', 'Message', `Leave a message for ${name}`)}
     <div class="rw-msgs" data-rw-msgs aria-live="polite"></div>
     <div class="rw-quick" data-rw-quick></div>
     <form class="rw-say" data-rw-say><input name="t" type="text" placeholder="Type a message…" aria-label="Message" autocomplete="off"><button type="submit" aria-label="Send">${icon('send', { size: 18 })}</button></form>
@@ -194,19 +196,18 @@ html.lb-lock{overflow:hidden}
 .rw-x{width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:50%;background:rgba(255,255,255,.12);color:#fff;cursor:pointer}
 .rw-pb{padding:16px;overflow-y:auto;display:grid;gap:10px}
 .rw-step{margin:2px 0 0;font-size:12.5px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-muted)}
-.rw-days,.rw-slots,.rw-quick{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
-.rw-slots{flex-wrap:wrap}
+.rw-quick{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
 .rw-chip{flex:none;min-height:44px;padding:6px 12px;border:1px solid rgba(0,0,0,.14);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:14px;font-weight:600;cursor:pointer;transition:border-color .15s,background .15s,color .15s}
 .rw-chip small{display:block;font-weight:500;font-size:11.5px;color:var(--ink-muted)}
 .rw-chip:hover{border-color:var(--brand)}
 .rw-chip[aria-pressed=true]{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
 .rw-chip[aria-pressed=true] small{color:inherit;opacity:.85}
-.rw-chip:focus-visible,.rw-cta:focus-visible,.rw-say input:focus-visible,.rw-f input:focus-visible{outline:3px solid var(--brand);outline-offset:1px}
+.rw-chip:focus-visible,.rw-cta:focus-visible,.rw-say input:focus-visible,.rw-f input:focus-visible,.rw-f select:focus-visible{outline:3px solid var(--brand);outline-offset:1px}
 .rw-form{display:grid;gap:10px}
 .rw-form[hidden],.rw-ok[hidden]{display:none}
 .rw-pick{margin:4px 0 0;font-weight:700}
 .rw-f{display:grid;gap:4px;font-size:13px;font-weight:600}
-.rw-f input,.rw-say input{width:100%;min-height:44px;padding:8px 12px;border:1px solid rgba(0,0,0,.18);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:16px}
+.rw-f input,.rw-f select,.rw-say input{width:100%;min-height:44px;padding:8px 12px;border:1px solid rgba(0,0,0,.18);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;font-size:16px}
 .rw-cta{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;padding:10px 16px;border:0;border-radius:14px;background:var(--brand);color:var(--brand-ink);font:inherit;font-weight:700;text-decoration:none;cursor:pointer;transition:filter .2s,transform .15s}
 .rw-cta:hover{filter:brightness(1.06)}.rw-cta:active{transform:scale(.98)}
 .rw-cta.ghost{background:transparent;color:var(--ink);border:1px solid rgba(0,0,0,.18)}
@@ -319,15 +320,27 @@ export const WIDGETS_JS = (m: SiteModel) => {
     lb.addEventListener('touchend',function(e){if(sx===null) return;var dx=e.changedTouches[0].clientX-sx;if(Math.abs(dx)>50) lbShow(cur+(dx<0?1:-1));sx=null});
   }
 
+  /* the business's videos: nothing loads until a visitor presses play */
+  $$('[data-video]').forEach(function(box){
+    var btn=$('.f-video-play',box); if(!btn) return;
+    function fail(){ box.classList.add('is-failed'); var p=document.createElement('p'); p.className='f-video-fail'; p.innerHTML='This video can\u2019t play here right now. <a target="_blank" rel="noopener"></a>'; var a=$('a',p); a.href=box.dataset.page; a.textContent='Watch it on '+box.dataset.host; box.appendChild(p); btn.hidden=true }
+    btn.addEventListener('click',function(){
+      var kind=box.dataset.kind, src=box.dataset.src, el;
+      if(kind==='youtube'||kind==='vimeo'||kind==='embed'){ el=document.createElement('iframe'); el.src=src.replace('youtube.com','youtube-nocookie.com')+(src.indexOf('?')>-1?'&':'?')+'autoplay=1'; el.allow='autoplay; encrypted-media; picture-in-picture'; el.allowFullscreen=true; el.title=box.dataset.title; el.loading='lazy'; box.appendChild(el); btn.hidden=true; return }
+      el=document.createElement('video'); el.controls=true; el.playsInline=true; el.autoplay=true; el.setAttribute('aria-label',box.dataset.title);
+      if(kind==='hls'&&!el.canPlayType('application/vnd.apple.mpegurl')){ fail(); return }
+      el.addEventListener('error',fail); el.src=src; box.appendChild(el); btn.hidden=true; var pr=el.play(); if(pr&&pr.catch) pr.catch(function(){}) });
+  });
+
   /* Roger widget */
   var rw=$('[data-rw]'); if(!rw) return;
   var C=${JSON.stringify(cfg).replace(/</g, '\\u003c')}, KEY='roger-widget:'+location.pathname, opened=null, trigger=null;
   try{ if(localStorage.getItem(KEY)==='min') rw.setAttribute('data-state','min') }catch(e){}
   function remember(v){try{localStorage.setItem(KEY,v)}catch(e){}}
   function panel(n){return $('[data-panel="'+n+'"]',rw)}
-  function open(n,from){ if(opened===n){close();return} close(true); opened=n; trigger=from||null; var p=panel(n); p.hidden=false;
+  function open(n,from){ /* a booking panel needs no setup */ if(opened===n){close();return} close(true); opened=n; trigger=from||null; var p=panel(n); p.hidden=false;
     $$('.rw-btn',rw).forEach(function(b){b.setAttribute('aria-expanded',String(b.getAttribute('data-open')===n))});
-    rw.setAttribute('data-state','open'); if(n==='chat') chatStart(); if(n==='book') bookStart(); if(n==='call') callStatus();
+    rw.setAttribute('data-state','open'); if(n==='chat') chatStart();  if(n==='call') callStatus();
     var f=$(n==='chat'?'.rw-say input':'button,a,input',$('.rw-pb,.rw-say',p)||p); if(f&&matchMedia('(min-width:${900}px)').matches) f.focus() }
   function close(quiet){ if(!opened) return; panel(opened).hidden=true; opened=null; $$('.rw-btn',rw).forEach(function(b){b.setAttribute('aria-expanded','false')}); rw.setAttribute('data-state','closed'); if(!quiet&&trigger) trigger.focus() }
   $$('.rw-btn',rw).forEach(function(b){b.addEventListener('click',function(){open(b.getAttribute('data-open'),b)})});
@@ -350,22 +363,11 @@ export const WIDGETS_JS = (m: SiteModel) => {
 
   /* open now (shared with the hours section) */
   function openNow(){var el=document.querySelector('[data-open-now]');return el&&!el.hidden?el.classList.contains('is-open'):null}
-  function callStatus(){var s=$('[data-rw-status]',rw),o=openNow();s.className='rw-status'+(o?' open':'');s.textContent=o===null?'We usually answer right away.':o?'Open now. Calls are answered live.':'Closed right now. Leave a message or ask for a call back.'}
+  function callStatus(){var s=$('[data-rw-status]',rw),o=openNow();s.className='rw-status'+(o?' open':'');s.textContent=o===null?'':o?'Open now.':'Closed right now. Leave a message or ask for a call back.'}
 
-  /* book: next days and times (demo calendar; the request goes to Roger as a lead) */
-  var booked=null, bookReady=false;
-  function bookStart(){ if(bookReady) return; bookReady=true; var days=$('[data-rw-days]',rw), slots=$('[data-rw-slots]',rw), d=new Date(), made=0, names=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    for(var k=1;made<7&&k<14;k++){var day=new Date(d.getFullYear(),d.getMonth(),d.getDate()+k); if(day.getDay()===0) continue; made++; // demo calendar: next 7 days, no Sundays
-      var b=document.createElement('button');b.type='button';b.className='rw-chip';b.setAttribute('aria-pressed','false');b.innerHTML=names[day.getDay()]+'<small>'+day.toLocaleDateString(undefined,{month:'short',day:'numeric'})+'</small>';
-      b.dataset.d=day.toDateString();b.addEventListener('click',pickDay);days.appendChild(b)}
-    function pickDay(e){var b=e.currentTarget;$$('.rw-chip',days).forEach(function(x){x.setAttribute('aria-pressed',String(x===b))});booked={day:b.dataset.d};slots.innerHTML='';
-      var dom=new Date(b.dataset.d).getDate(); // demo availability: a couple of slots "taken", different each day
-      ['9:00 AM','10:30 AM','12:00 PM','1:30 PM','3:00 PM','4:30 PM'].forEach(function(t,i){ if((dom+i)%4===0) return; var s=document.createElement('button');s.type='button';s.className='rw-chip';s.setAttribute('aria-pressed','false');s.textContent=t;
-        s.addEventListener('click',function(){$$('.rw-chip',slots).forEach(function(x){x.setAttribute('aria-pressed',String(x===s))});booked.time=t;var f=$('[data-rw-form=booking]',rw);f.hidden=false;$('[data-rw-pick]',f).textContent=new Date(booked.day).toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})+' at '+t;$('input',f).focus()});slots.appendChild(s)})}
-    var f=$('[data-rw-form=booking]',rw);
-    wire(f,'Booking request',function(){return 'Requested time: '+booked.day+' at '+booked.time},function(){f.hidden=true;days.hidden=slots.hidden=true;$$('.rw-step',panel('book')).forEach(function(x){x.hidden=true});$('[data-rw-ok]',panel('book')).hidden=false});
-    $('.rw-chip',days).click();
-  }
+  /* book: an appointment request (no calendar: availability isn't known); it reaches the business as a lead */
+  var bf=$('[data-rw-form=booking]',rw);
+  if(bf) wire(bf,'Appointment request',function(){var fd=new FormData(bf);var d=String(fd.get('day')||'').trim();return 'Appointment request. Preferred day: '+(d||'any')+'. Time of day: '+(fd.get('time')||'any')+'.'},function(){bf.hidden=true;var ok=$('[data-rw-ok]',panel('book'));ok.hidden=false;var st=$('.rw-status',panel('book'));if(st) st.hidden=true;var cta=$('a.rw-cta',panel('book'));if(cta) cta.hidden=true;var sp=$('.rw-step',panel('book'));if(sp) sp.hidden=true});
   var cb=$('[data-rw-form=callback]',rw); wire(cb,'Call back request','',function(){cb.hidden=true;cb.nextElementSibling.hidden=false});
 
   /* chat: a scripted Roger (demo); what the visitor asks for is sent to Roger as a lead */
@@ -380,14 +382,14 @@ export const WIDGETS_JS = (m: SiteModel) => {
       msgs.appendChild(f);msgs.scrollTop=1e9;f.querySelector('input').focus();
       wire(f,'Chat',function(){return talk.join('\\n')},function(n){f.remove();bubble('Sent','u');roger('Thanks '+String(n).split(' ')[0]+'! '+C.name+' has your message and will reach out soon.')})})}
   function userSays(t){bubble(t,'u');var s=t.toLowerCase();
-    if(/hour|open|close/.test(s)) roger(C.hours.length?'Our hours:\\n'+C.hours.join('\\n'):C.phone?'Call us at '+C.phone+' and we will let you know.':'Leave your number and we will let you know.',function(){chips(['Book a visit','Get a quote','Call me back'])});
-    else if(/book|visit|appoint|schedul/.test(s)) roger('Sure. Pick a day and time and we will confirm by text.',function(){setTimeout(function(){open('book')},500)});
+    if(/hour|open|close/.test(s)) roger(C.hours.length?'The hours listed are:\\n'+C.hours.join('\\n'):C.phone?'No hours are listed here. Call '+C.phone+' to ask.':'No hours are listed here. Leave your number and the business will tell you.',function(){chips(['Request an appointment','Send a message','Call me back'])});
+    else if(/book|visit|appoint|schedul/.test(s)) roger('I can open the appointment request. The business confirms the time with you.',function(){setTimeout(function(){open('book')},500)});
     else if(/quote|price|cost|estimate/.test(s)&&!asked) roger('Happy to help. What do you need?',function(){chips(C.services.concat(['Something else']))});
     else if(/call|phone|ring/.test(s)) roger(C.phone?'You can call us at '+C.phone+', or I can have someone call you back.':'Leave your number and someone will call you back.',askContact);
     else askContact();
   }
   function chatStart(){ if(chatReady) return; chatReady=true;
-    roger("Hi, I'm Roger, "+C.name+"'s assistant. I can book a visit, share our hours or get you a quote. How can I help?",function(){chips(['Get a quote','Book a visit','Hours','Call me back'])}) }
+    roger("Hi, I'm Roger, an assistant on "+C.name+"'s website. I can pass a message to the business, show the hours it has listed, or send an appointment request. What would you like?",function(){chips(['Send a message','Request an appointment','Hours','Call me back'])}) }
   $('[data-rw-say]',rw).addEventListener('submit',function(e){e.preventDefault();var i=$('input',e.currentTarget),t=i.value.trim();if(!t) return;i.value='';userSays(t)});
 })();`;
 };

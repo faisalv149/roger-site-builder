@@ -31,11 +31,44 @@ export const priceSchema = z.object({
 });
 export type Price = z.infer<typeof priceSchema>;
 
+/** Where a visitor goes to book or ask about one offering when it differs from the business's main booking address. */
+export const contactSchema = z.object({
+  kind: z.enum(['online', 'phone', 'email', 'page']),
+  url: z.string().max(400).regex(/^(https?:\/\/|tel:|mailto:)/i),
+  label: TEXT(2, 40),
+}).strict();
+export type OfferingContact = z.infer<typeof contactSchema>;
+
+/** The picture on a service's own card, with its crop focus: kept together with the service. */
+export const serviceImageSchema = z.object({
+  path: z.string().max(200),
+  width: z.number().int().min(1).max(8000),
+  height: z.number().int().min(1).max(8000),
+  focal: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict(),
+  alt: TEXT(0, 160),
+  source: z.enum(['website', 'owner']),
+  /** the owner confirmed they may publish this picture (a picture found on their website is not proof of that by itself) */
+  confirmed: z.boolean().optional(),
+  original: z.string().max(200).optional(),
+  sourceUrl: z.string().max(600).optional(),
+}).strict();
+export type ServiceImage = z.infer<typeof serviceImageSchema>;
+
 export const offeringSchema = z.object({
   id: z.string().regex(/^[a-z0-9-]{1,60}$/),
   name: TEXT(2, 60),
   description: TEXT(0, 160).optional(),
   duration: TEXT(0, 24).optional(),
+  /** a short condition the source states ("By appointment only") */
+  note: TEXT(0, 80).optional(),
+  /** a booking or contact destination for this offering alone */
+  contact: contactSchema.optional(),
+  /** the picture on this offering's own card */
+  image: serviceImageSchema.optional(),
+  /** listed by the business but not one of the services it leads with */
+  secondary: z.boolean().optional(),
+  /** the business's own page about this service (its current website): where a card's "Learn more" goes when Roger has no page of its own for it */
+  page: z.string().max(400).regex(/^https?:\/\//).optional(),
   price: priceSchema,
   source: z.enum(SOURCES),
   icon: z.string().max(30).optional(),
@@ -75,7 +108,7 @@ type LoosePrice = { kind?: string; amount?: number; max?: number; unit?: string;
 /** Offerings for a build: the business's own list (with any stated prices), else the theme's services as quote-only. */
 export function offeringsFrom(opts: {
   business?: { name: string; description?: string; duration?: string; price?: LoosePrice; source?: Source }[];
-  own?: { name: string; description: string; icon: string; price?: LoosePrice | null }[];
+  own?: { name: string; description: string; icon: string; price?: LoosePrice | null; note?: string; contact?: { kind: string; url: string; label: string } | null; image?: ServiceImage | null; secondary?: boolean; page?: string; fromWebsite?: boolean }[];
   services: ServiceItem[];
   currency?: string;
 }): Offering[] {
@@ -88,7 +121,10 @@ export function offeringsFrom(opts: {
     const cand = { id, name, ...o };
     const r = offeringSchema.safeParse(cand);
     // an invalid stated price becomes "on request" rather than dropping the offering
-    const v = r.success ? r : offeringSchema.safeParse({ ...cand, price: { kind: 'quote', currency } });
+    let v = r.success ? r : offeringSchema.safeParse({ ...cand, price: { kind: 'quote', currency } });
+    // an offering the source lists is never dropped for an optional field: retry without them, then with only the name
+    if (!v.success) v = offeringSchema.safeParse({ ...cand, price: { kind: 'quote', currency }, description: (cand.description || '').slice(0, 157) || undefined, note: undefined, contact: undefined, image: undefined, secondary: undefined, page: undefined });
+    if (!v.success) v = offeringSchema.safeParse({ id, name: String(name).slice(0, 60), price: { kind: 'quote', currency }, source: cand.source });
     if (v.success) { ids.add(id); out.push(v.data); }
   };
   if (opts.business?.length) {
@@ -97,7 +133,7 @@ export function offeringsFrom(opts: {
   }
   const own = opts.own || [];
   if (own.length) {
-    for (const s of own) push(s.name, { description: s.description || undefined, price: s.price?.kind ? ({ currency, ...s.price } as unknown as Price) : { kind: 'quote', currency }, source: s.price?.kind && s.price.kind !== 'quote' ? 'website' : 'business', icon: s.icon });
+    for (const s of own) push(s.name, { description: s.description || undefined, note: s.note || undefined, contact: s.contact ? (s.contact as OfferingContact) : undefined, image: s.image || undefined, secondary: s.secondary || undefined, page: s.page || undefined, price: s.price?.kind ? ({ currency, ...s.price } as unknown as Price) : { kind: 'quote', currency }, source: s.fromWebsite || (s.price?.kind && s.price.kind !== 'quote') ? 'website' : 'business', icon: s.icon });
   }
   for (const s of opts.services) {
     if (out.some((o) => o.name.toLowerCase() === s.label.toLowerCase())) continue;
@@ -105,6 +141,9 @@ export function offeringsFrom(opts: {
   }
   return out.slice(0, 24);
 }
+
+/** The owner confirms they may publish the pictures found on their website (all of them, or the named services'). */
+export const confirmServiceImages = (o: Offering[], ids?: string[]): Offering[] => o.map((x) => (x.image && x.image.source === 'website' && (!ids || ids.includes(x.id)) ? { ...x, image: { ...x.image, confirmed: true } } : x));
 
 /** Back to the service items the regular renderers and the lead form use. */
 export const toServiceItems = (o: Offering[]): ServiceItem[] => o.map((x) => ({ id: x.id, label: x.name, icon: x.icon || 'circle-check', hits: x.source === 'theme' ? 0 : 1, description: x.description }));

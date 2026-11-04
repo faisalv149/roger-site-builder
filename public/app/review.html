@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Owner review · Roger Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230F172A'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/app/studio.css">
+<style>
+  .rv{max-width:1180px;margin:0 auto;padding:24px 20px 120px;display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-sm);padding:20px;min-width:0}
+  .card h2{font-size:17px;margin:0 0 4px}.card .sub{color:var(--muted);margin:0 0 14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  select,textarea{font:inherit;padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r-sm);max-width:100%}
+  textarea{width:100%;min-height:80px}
+  .btnx{font:inherit;font-weight:600;padding:10px 16px;border-radius:var(--r-sm);border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;min-height:44px;text-decoration:none;display:inline-flex;align-items:center}
+  .btnx.ghost{background:var(--surface);color:var(--ink-2);border-color:var(--line-2)}
+  .btnx[disabled]{opacity:.6;cursor:not-allowed}
+  fieldset{border:1px solid var(--line);border-radius:var(--r-sm);padding:14px 16px;margin:0 0 12px;min-width:0}
+  /* the Studio's sheet sizes every input to 100%: radios and checkboxes here stay small */
+  .rv input[type=radio],.rv input[type=checkbox]{width:20px!important;height:20px!important;padding:0!important;border:0!important;box-shadow:none!important;flex:none;accent-color:var(--accent)}
+  .svc>*,.ccard>*,.opt>span{min-width:0}.svc select{width:100%}
+  legend{font-weight:600;padding:0 6px}
+  .why{color:var(--muted);font-size:13px;margin:2px 0 10px}
+  .opt{display:flex;gap:10px;align-items:flex-start;padding:8px 0;min-height:44px}
+  .opt input{width:20px;height:20px;margin-top:2px;flex:none;accent-color:var(--accent)}
+  .srcs{display:block;color:var(--muted);font-size:12px;overflow-wrap:anywhere;white-space:normal}
+  .pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600;background:var(--surface-2);border:1px solid var(--line);vertical-align:2px}
+  .pill.block{background:var(--bad-50);border-color:#FECACA;color:var(--bad)}.pill.pass{background:var(--ok-50);border-color:var(--ok-200);color:var(--ok)}
+  .concepts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+  .ccard{border:2px solid var(--line);border-radius:var(--r);padding:12px;display:grid;gap:8px;cursor:pointer}
+  .ccard:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-100)}
+  .ccard .thumbs{display:grid;grid-template-columns:1fr 64px;gap:8px}.ccard img{width:100%;border:1px solid var(--line);border-radius:6px;display:block}
+  .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+  .ph{border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;display:grid}
+  .ph img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block}
+  .ph label{display:flex;gap:8px;align-items:center;padding:8px 10px;min-height:44px;font-size:13px;cursor:pointer}
+  .ph label input{width:20px;height:20px;accent-color:var(--accent)}
+  .ph:has(input:checked){border-color:var(--ok);box-shadow:0 0 0 2px var(--ok-200)}
+  .svc{display:grid;grid-template-columns:120px 1fr;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+  .svc img,.svc .none{width:120px;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:grid;place-items:center;color:var(--muted);font-size:12px;background:var(--surface-2)}
+  .bar{position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:12px 20px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between;box-shadow:0 -4px 16px rgba(15,23,42,.06);z-index:5}
+  .gate li{margin:4px 0}.muted{color:var(--muted)}.err{color:var(--bad);font-weight:600}
+  @media (max-width:900px){.concepts{grid-template-columns:1fr}}
+  @media (max-width:640px){.rv{padding:16px 12px 140px}.svc{grid-template-columns:1fr}select{width:100%}}
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/app/"><span class="logo">R</span><span><b>Owner review</b><span class="sub">Design studio · settle facts, choose a concept, approve pictures</span></span></a>
+  <div class="top-acts"><a class="btn ghost sm" href="/app/concepts.html">Concepts</a> <a class="btn ghost sm" href="/app/">Back to Studio</a></div>
+</header>
+<main class="rv" id="main">
+  <section class="card" aria-labelledby="pick-h">
+    <h2 id="pick-h">Business</h2>
+    <p class="sub">Answers are saved as a review of this exact brief revision. Saving a review never publishes anything: publishing is not built yet.</p>
+    <form class="row" id="pick"><label for="business" class="muted">Business</label><select id="business" required></select><button class="btnx ghost" type="submit">Load</button></form>
+    <p class="err" id="err" hidden></p>
+  </section>
+  <form id="review" hidden>
+    <section class="card" aria-labelledby="facts-h"><h2 id="facts-h">Facts to settle</h2><p class="sub">Until a fact is settled, previews leave it out (and any button that would act on it).</p><div id="facts"></div></section>
+    <section class="card" aria-labelledby="concept-h"><h2 id="concept-h">Choose a concept</h2><p class="sub">The direction to take forward to inner pages. You can change it later.</p><div id="concepts"></div></section>
+    <section class="card" aria-labelledby="photos-h"><h2 id="photos-h">Photos</h2><p class="sub">Tick each photo you own or have the right to publish. Unticked photos can appear in previews, never on a published site.</p>
+      <p class="row"><button type="button" class="btnx ghost" id="allPhotos">Tick all</button><button type="button" class="btnx ghost" id="noPhotos">Clear</button></p><div class="photos" id="photos"></div><div id="logo"></div></section>
+    <section class="card" aria-labelledby="pics-h"><h2 id="pics-h">Pictures for services and menu sections</h2><p class="sub">A service shows only its own picture: the one on its card or page on your website, or one you choose here. Without one, it shows none.</p><div id="pics"></div></section>
+    <section class="card" aria-labelledby="claims-h"><h2 id="claims-h">Claims and menu</h2><div id="claims"></div><div id="menu"></div></section>
+    <section class="card" id="result" hidden aria-live="polite"></section>
+  </form>
+</main>
+<div class="bar" id="bar" hidden><span class="muted" id="status">Not saved yet</span><span class="row"><button class="btnx" type="submit" form="review" id="save">Save review</button><button class="btnx ghost" type="button" id="make" disabled>Make new concepts with these answers</button></span></div>
+<script src="/app/review.js"></script>
+</body>
+</html>

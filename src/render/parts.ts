@@ -34,6 +34,7 @@ export function head(id: string, h: string, sub?: string, center = false) {
 }
 
 export function stars(n: number, size = 16) {
+  if (!n) return ''; // a testimonial with no rating shows no stars
   const full = Math.round(n);
   return `<span class="stars" role="img" aria-label="${n} out of 5 stars">${Array.from({ length: 5 }, (_, i) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true" fill="${i < full ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.5"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6L2.5 9.4l6.6-.8z"/></svg>`).join('')}</span>`;
@@ -77,10 +78,12 @@ export function leadForm(m: SiteModel, opts: { compact?: boolean; title?: string
   const when = appt ? `<div class="row2"><label for="${id}-day">Preferred day<input id="${id}-day" name="preferredDate" type="date" data-min-today></label>
     <label for="${id}-time">Time of day<select id="${id}-time" name="preferredTime"><option value="">Any time</option><option>Morning</option><option>Afternoon</option><option>Evening</option></select></label></div>` : '';
   const submit = appt ? 'Send appointment request' : goal === 'order' ? 'Send order enquiry' : goal === 'enquiry' ? 'Send enquiry' : m.copy.actionKind === 'form' ? m.copy.action : m.copy.quoteTitle;
+  // shown only when a delivery channel has acknowledged the enquiry; otherwise the page says what is known (it was saved) and how to be sure
   const ok = appt
     ? `Request sent. ${m.business.name} will contact you to confirm a time; nothing is booked until they do.`
-    : `Thanks! ${m.business.name} got your request and will reach out shortly.`;
-  return `<form class="form lead-form" method="post" action="${esc(m.urls.leadEndpoint)}" data-business="${esc(m.business.name)}">
+    : `Thanks! Your request was sent to ${m.business.name}, who will reach out shortly.`;
+  const saved = `Your request was saved, but we could not confirm that ${m.business.name} received it.${m.contact.phone ? ` Please call ${m.contact.phone} to be sure.` : ' Please contact them directly to be sure.'}`;
+  return `<form class="form lead-form" method="post" action="${esc(m.urls.leadEndpoint)}" data-business="${esc(m.business.name)}" data-saved="${esc(saved)}">
   ${opts.title ? `<h3 class="form-title h">${esc(opts.title)}</h3>` : ''}
   <div class="fields">
     <div class="row2">

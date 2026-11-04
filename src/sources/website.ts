@@ -2,6 +2,10 @@ import * as cheerio from 'cheerio';
 import type { WebsiteScan } from '../types.js';
 import { fetchRaw, normalizeUrl } from '../util/http.js';
 import { parseColor, toHex } from '../color/oklch.js';
+import { extractSiteContent, restoreName, type SiteContent } from './site-content.js';
+import { extractorResult } from '../content/extraction.js';
+import { measureBrand, renderPage } from './render-page.js';
+import { crawlSite } from './crawl.js';
 
 const SOCIAL: [string, RegExp][] = [
   ['facebook', /facebook\.com\//i], ['instagram', /instagram\.com\//i], ['x', /(twitter|x)\.com\//i],
@@ -16,7 +20,7 @@ const GENERIC_FONTS = new Set([
   'font awesome 6 free', 'dashicons', 'icomoon', 'eicons', 'var(--font)', 'unset',
 ]);
 
-function colorsFromCss(css: string, into: Map<string, number>, weight = 1) {
+export function colorsFromCss(css: string, into: Map<string, number>, weight = 1) {
   const re = /(--[\w-]*(?:primary|brand|main|accent|theme)[\w-]*\s*:\s*)?(#[0-9a-f]{3,8}\b|rgba?\([^)]+\))/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(css))) {
@@ -28,7 +32,7 @@ function colorsFromCss(css: string, into: Map<string, number>, weight = 1) {
   }
 }
 
-function fontsFromCss(css: string, into: Map<string, number>) {
+export function fontsFromCss(css: string, into: Map<string, number>) {
   const re = /font-family\s*:\s*([^;}{]+)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(css))) {
@@ -37,40 +41,12 @@ function fontsFromCss(css: string, into: Map<string, number>) {
   }
 }
 
-export function googleFontFamilies(href: string): string[] {
-  try {
-    const u = new URL(href, 'https://x');
-    if (!/fonts\.googleapis\.com/.test(u.hostname)) return [];
-    const fams = u.searchParams.getAll('family').flatMap((f) => f.split('|'));
-    return fams.map((f) => f.split(':')[0].replace(/\+/g, ' ').trim()).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-export async function scanWebsite(input: string, opts: { extraPages?: number } = {}): Promise<WebsiteScan> {
-  const url = normalizeUrl(input);
-  const res = await fetchRaw(url, { timeoutMs: 15000, maxBytes: 5_000_000 });
-  const html = res.body.toString('utf8');
-  const scan: WebsiteScan = {
-    url, finalUrl: res.url, ok: res.ok && html.length > 0, status: res.status, error: res.error,
-    timing: { ttfbMs: res.ttfbMs, totalMs: res.totalMs }, bytes: res.body.length, html, headers: res.headers, redirects: res.redirects,
-    text: '', logoCandidates: [], cssColors: [], fonts: [], phones: [], emails: [], socials: [], images: [],
-  };
-  if (!scan.ok) return scan;
-
-  const $ = cheerio.load(html);
+/** Pictures on a page that could be its logo, best first: a logo in the header, JSON-LD, touch icons, favicons, og:image. */
+export function logoCandidatesOf($: cheerio.CheerioAPI, baseUrl: string): WebsiteScan['logoCandidates'] {
   const abs = (h?: string) => {
     if (!h) return undefined;
-    try { return new URL(h, res.url).toString(); } catch { return undefined; }
+    try { return new URL(h, baseUrl).toString(); } catch { return undefined; }
   };
-
-  scan.title = $('title').first().text().trim() || undefined;
-  scan.description = $('meta[name="description"]').attr('content')?.trim() || undefined;
-  const tc = $('meta[name="theme-color"]').attr('content');
-  if (tc) { const rgb = parseColor(tc); if (rgb) scan.themeColor = toHex(rgb); }
-
-  // ── logo candidates ──
   const cands: WebsiteScan['logoCandidates'] = [];
   const isLogo = (el: any) => /logo|brand/i.test([$(el).attr('src'), $(el).attr('alt'), $(el).attr('class'), $(el).attr('id'), $(el).parent().attr('class'), $(el).parent().attr('id')].join(' '));
   $('img').each((i, el) => {
@@ -93,9 +69,46 @@ export async function scanWebsite(input: string, opts: { extraPages?: number } =
   });
   const og = abs($('meta[property="og:image"]').attr('content'));
   if (og) cands.push({ url: og, score: 1, reason: 'og:image' });
-  cands.push({ url: new URL('/favicon.ico', res.url).toString(), score: 0.5, reason: '/favicon.ico' });
+  try { cands.push({ url: new URL('/favicon.ico', baseUrl).toString(), score: 0.5, reason: '/favicon.ico' }); } catch { /* no base */ }
   const seen = new Set<string>();
-  scan.logoCandidates = cands.sort((a, b) => b.score - a.score).filter((c) => (seen.has(c.url) ? false : (seen.add(c.url), true)));
+  return cands.sort((a, b) => b.score - a.score).filter((c) => (seen.has(c.url) ? false : (seen.add(c.url), true)));
+}
+
+export function googleFontFamilies(href: string): string[] {
+  try {
+    const u = new URL(href, 'https://x');
+    if (!/fonts\.googleapis\.com/.test(u.hostname)) return [];
+    const fams = u.searchParams.getAll('family').flatMap((f) => f.split('|'));
+    return fams.map((f) => f.split(':')[0].replace(/\+/g, ' ').trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export async function scanWebsite(input: string, opts: { extraPages?: number; render?: 'auto' | 'never' | 'always'; brand?: boolean; crawl?: boolean } = {}): Promise<WebsiteScan> {
+  const url = normalizeUrl(input);
+  const res = await fetchRaw(url, { timeoutMs: 15000, maxBytes: 5_000_000 });
+  const html = res.body.toString('utf8');
+  const scan: WebsiteScan = {
+    url, finalUrl: res.url, ok: res.ok && html.length > 0, status: res.status, error: res.error,
+    timing: { ttfbMs: res.ttfbMs, totalMs: res.totalMs }, bytes: res.body.length, html, headers: res.headers, redirects: res.redirects,
+    text: '', logoCandidates: [], cssColors: [], fonts: [], phones: [], emails: [], socials: [], images: [],
+  };
+  if (!scan.ok) return scan;
+
+  const $ = cheerio.load(html);
+  const abs = (h?: string) => {
+    if (!h) return undefined;
+    try { return new URL(h, res.url).toString(); } catch { return undefined; }
+  };
+
+  scan.title = $('title').first().text().trim() || undefined;
+  scan.description = $('meta[name="description"]').attr('content')?.trim() || undefined;
+  const tc = $('meta[name="theme-color"]').attr('content');
+  if (tc) { const rgb = parseColor(tc); if (rgb) scan.themeColor = toHex(rgb); }
+
+  // ── logo candidates ──
+  scan.logoCandidates = logoCandidatesOf($, res.url);
 
   // ── images (for audit) ──
   $('img').each((_, el) => {
@@ -155,5 +168,59 @@ export async function scanWebsite(input: string, opts: { extraPages?: number } =
   for (const m of mainText.matchAll(/[\w.+-]+@[\w-]+\.[\w.-]+/g)) scan.emails.push(m[0]);
   scan.phones = [...new Set(scan.phones)].slice(0, 6);
   scan.emails = [...new Set(scan.emails)].slice(0, 4);
+
+  // what the page says about the business (identity, services, booking, story, media), read from the HTML as delivered
+  scan.content = extractSiteContent(html, res.url, { socials: scan.socials });
+  await recoverContent(scan, opts.render ?? 'auto');
+  await enrichServicePages(scan);
+  // the pages the menu and the service cards link to (budgeted, same site, robots honoured)
+  if (opts.crawl ?? process.env.CRAWL_PAGES !== '0') {
+    const links = [...scan.content!.nav.map((n) => n.href), ...scan.content!.services.map((s) => s.href || s.pageUrl || ''), ...(scan.content!.hero ? [scan.content!.hero.secondary?.href || ''] : [])].filter(Boolean);
+    const crawl = await crawlSite(scan.finalUrl, links);
+    scan.crawl = { pages: crawl.pages };
+    scan.content!.report.push(crawl.report);
+  }
+  // how the page is styled, measured in a browser (colours by use, buttons, typefaces)
+  if (opts.brand ?? process.env.BRAND_MEASURE !== '0') scan.brandRaw = await measureBrand(scan.finalUrl);
   return scan;
+}
+
+/** Few things found, or a page that is mostly script: read it again after its scripts have run, and keep the fuller result. */
+function thin(c: SiteContent, scan: WebsiteScan) {
+  const photos = c.images.filter((i) => i.role === 'content' || i.role === 'team').length;
+  const scripts = (scan.html.match(/<script\b/gi) || []).length;
+  return (!c.services.length && scan.text.length < 1500) || (photos === 0 && scripts > 6) || scan.text.length < 250;
+}
+async function recoverContent(scan: WebsiteScan, mode: 'auto' | 'never' | 'always') {
+  const c = scan.content!;
+  if (mode === 'never' || (mode === 'auto' && !thin(c, scan))) {
+    c.report.push(extractorResult('rendered page', 'skipped', mode === 'never' ? 'turned off' : 'the page HTML already held the content, so no browser was needed'));
+    return;
+  }
+  const r = await renderPage(scan.finalUrl);
+  if (!r.ok || !r.html) { c.report.push(extractorResult('rendered page', 'failed', `could not run the page's scripts: ${r.error}`)); return; }
+  const rendered = extractSiteContent(r.html, scan.finalUrl, { socials: scan.socials, rendered: true });
+  const score = (x: SiteContent) => x.services.length * 3 + x.images.length + x.videos.length * 2 + (x.story ? 2 : 0) + (x.phones.primary ? 1 : 0) + (x.address ? 1 : 0);
+  if (score(rendered) > score(c)) {
+    rendered.report.push(extractorResult('rendered page', 'success', `read after running the page's scripts (${r.ms} ms): found more than the HTML alone`));
+    scan.content = rendered;
+    scan.rendered = true;
+    scan.text = cheerio.load(r.html)('body').text().replace(/\s+/g, ' ').trim().slice(0, 30000) || scan.text;
+  } else c.report.push(extractorResult('rendered page', 'success', `read after running the page's scripts (${r.ms} ms): nothing more than the HTML held`));
+}
+
+/** A service with its own page on the site: take that page's description when the home page gave none. */
+async function enrichServicePages(scan: WebsiteScan) {
+  const c = scan.content!;
+  const targets = c.services.filter((s) => s.pageUrl && !s.description).slice(0, 5);
+  if (!targets.length) return;
+  let filled = 0;
+  await Promise.all(targets.map(async (s) => {
+    const r = await fetchRaw(s.pageUrl!, { timeoutMs: 7000, maxBytes: 2_000_000 }).catch(() => null);
+    if (!r?.ok) return;
+    const d = cheerio.load(r.body.toString('utf8'));
+    const meta = (d('meta[name="description"]').attr('content') || d('meta[property="og:description"]').attr('content') || '').replace(/\s+/g, ' ').trim();
+    if (meta.length >= 30 && meta !== c.identity.description) { s.description = restoreName(meta, c.identity.name).slice(0, 240); filled++; }
+  }));
+  c.report.push(extractorResult('service pages', filled === targets.length ? 'success' : filled ? 'partial' : 'failed', `${filled} of ${targets.length} service page${targets.length > 1 ? 's' : ''} gave a description`, filled, targets.length));
 }

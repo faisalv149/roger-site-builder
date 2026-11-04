@@ -74,3 +74,24 @@ export async function deleteOut(relDir: string): Promise<number> {
   if (paths.length) await remote.delFiles(paths);
   return Math.max(local, paths.length);
 }
+
+/**
+ * Bring a folder under out/ back onto this disk from the remote store (files already here are kept): a job resumed
+ * on another server instance carries on with the files an earlier instance made.
+ */
+export async function restoreDir(relDir: string): Promise<number> {
+  if (!remote) return 0;
+  const abs = path.join(config.dirs.out, relDir);
+  if (!abs.startsWith(config.dirs.out + path.sep)) return 0;
+  let n = 0;
+  for (const p of await remote.listFiles(relDir)) {
+    const dest = path.join(config.dirs.out, p);
+    if (fs.existsSync(dest)) continue;
+    const data = await remote.getFile(p);
+    if (!data) continue;
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, data);
+    n++;
+  }
+  return n;
+}

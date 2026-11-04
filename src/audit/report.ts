@@ -4,8 +4,11 @@ import sharp from 'sharp';
 import { config } from '../config.js';
 import { persistDir } from '../files.js';
 import { esc, truncateWords } from '../util/text.js';
-import type { AuditResult, Category } from './audit.js';
+import type { AuditIssue, AuditResult, Category } from './audit.js';
 import type { PageSpeedResult, PsiCategory, PsiReport } from './pagespeed.js';
+
+/** what the report counts as something to fix: measured faults and flagged risks, not advice */
+export const findings = (a: Pick<AuditResult, 'issues'>) => a.issues.filter((i) => i.basis !== 'suggestion');
 
 const FONT = "'Inter', 'DejaVu Sans', 'Helvetica Neue', Arial, sans-serif";
 const scoreColor = (s: number) => (s >= 90 ? '#15803D' : s >= 75 ? '#65A30D' : s >= 60 ? '#CA8A04' : s >= 40 ? '#EA580C' : '#DC2626');
@@ -52,7 +55,7 @@ export async function writeScoreCard(file: string, a: AuditResult, businessName?
   const c = scoreColor(a.score);
   const R = 120, C = 2 * Math.PI * R;
   const dash = (a.score / 100) * C;
-  const lines = a.issues.slice(0, 3).map((i, k) => `<text x="470" y="${318 + k * 62}" font-family="${FONT}" font-size="30" fill="#1F2937">• ${esc(truncateWords(i.title, 44))}</text>`).join('');
+  const lines = findings(a).slice(0, 3).map((i, k) => `<text x="470" y="${318 + k * 62}" font-family="${FONT}" font-size="30" fill="#1F2937">• ${esc(truncateWords(i.title, 44))}</text>`).join('');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630">
     <rect width="1200" height="630" fill="#F8FAFC"/><rect width="1200" height="12" fill="${c}"/>
     <text x="64" y="96" font-family="${FONT}" font-size="30" font-weight="600" fill="#64748B">Website check${businessName ? ` · ${esc(truncateWords(businessName, 40))}` : ''}</text>
@@ -63,9 +66,9 @@ export async function writeScoreCard(file: string, a: AuditResult, businessName?
       <text y="22" text-anchor="middle" font-family="${FONT}" font-size="92" font-weight="800" fill="#0F172A">${a.score}</text>
       <text y="68" text-anchor="middle" font-family="${FONT}" font-size="26" fill="#64748B">out of 100</text>
     </g>
-    <text x="470" y="250" font-family="${FONT}" font-size="34" font-weight="700" fill="#0F172A">${a.issues.length ? `Top ${Math.min(3, a.issues.length)} things to fix` : 'Looking good'}</text>
+    <text x="470" y="250" font-family="${FONT}" font-size="34" font-weight="700" fill="#0F172A">${findings(a).length ? `Top ${Math.min(3, findings(a).length)} things to fix` : 'Looking good'}</text>
     ${lines}
-    <text x="470" y="560" font-family="${FONT}" font-size="24" fill="#64748B">${a.issues.length} issues found · tap to see the full report</text>
+    <text x="470" y="560" font-family="${FONT}" font-size="24" fill="#64748B">${findings(a).length} to fix${a.unknowns?.length ? ` · ${a.unknowns.length} not measured` : ''} · tap to see the full report</text>
   </svg>`;
   await sharp(Buffer.from(svg)).png({ compressionLevel: 9 }).toFile(file);
 }
@@ -90,7 +93,7 @@ function comparisonSection(a: AuditResult, n: AuditResult | undefined, siteUrl?:
   return `<h2>Your current site vs. your new site</h2><div class="cmp"><table><thead><tr><th scope="col"></th><th scope="col">Current site</th><th scope="col">New site</th></tr></thead><tbody>
     ${rows.filter(([, o, nv]) => o !== undefined || nv !== undefined).map(([k, o, nv]) => `<tr><th scope="row">${esc(k)}</th>${cell(o, nv)}${cell(nv, o)}</tr>`).join('')}
     <tr><th scope="row">Main content appears (phones)</th><td>${esc(lcp(om))}</td><td>${esc(lcp(nm))}</td></tr>
-    <tr><th scope="row">Things to fix</th><td>${a.issues.length}</td><td>${n.issues.length}</td></tr></tbody></table>
+    <tr><th scope="row">Things to fix</th><td>${findings(a).length}</td><td>${findings(n).length}</td></tr></tbody></table>
     <p class="muted small">${esc(src)}</p>${siteUrl ? `<a class="cta" href="${esc(siteUrl)}">See the new site →</a>` : ''}</div>`;
 }
 
@@ -102,7 +105,14 @@ export async function writeReport(slug: string, a: AuditResult, opts: { business
   const image = `${url}og.png`;
   const c = scoreColor(a.score);
   const cats = (Object.keys(a.categories) as Category[]).map((k) => `<div class="cat"><div class="row"><span>${CAT_LABEL[k]}</span><b>${a.categories[k]}</b></div><div class="bar"><i style="width:${a.categories[k]}%;background:${scoreColor(a.categories[k])}"></i></div></div>`).join('');
-  const issues = a.issues.map((i) => `<li class="issue"><span class="sev" style="background:${SEV_COLOR[i.severity]}">${SEV_LABEL[i.severity]}</span><div><h3>${esc(i.title)}</h3><p class="muted">${esc(i.detail)}</p><p class="fix"><b>We'll fix it:</b> ${esc(i.fix)}</p></div></li>`).join('');
+  const item = (i: AuditIssue) => `<li class="issue"><span class="sev" style="background:${i.basis === 'suggestion' ? '#64748B' : SEV_COLOR[i.severity]}">${i.basis === 'suggestion' ? 'Advice' : SEV_LABEL[i.severity]}</span><div><h3>${esc(i.title)}</h3><p class="muted">${esc(i.detail)}</p>${i.basis === 'suggestion' ? '' : `<p class="fix"><b>We'll fix it:</b> ${esc(i.fix)}</p>`}</div></li>`;
+  const group = (title: string, note: string, list: AuditIssue[]) => (list.length ? `<h2>${title} (${list.length})</h2><p class="muted small" style="margin:-6px 0 12px">${note}</p><ul>${list.map(item).join('')}</ul>` : '');
+  const issues = [
+    group('Found by testing', 'Observed directly: in a request, in a phone-sized browser, or in Google\'s test.', a.issues.filter((i) => (i.basis ?? 'measured') === 'measured')),
+    group('Possible problems', 'Read from the page source and not confirmed by a test, so they may not apply. They count for half in the score.', a.issues.filter((i) => i.basis === 'heuristic')),
+    group('Advice', 'Ideas to consider. They are not faults and don\'t change the score.', a.issues.filter((i) => i.basis === 'suggestion')),
+  ].join('');
+  const unknowns = (a.unknowns || []).length ? `<h2>Not checked (${a.unknowns.length})</h2><p class="muted small" style="margin:-6px 0 12px">Things this check could not determine. They are not counted as problems.</p><ul>${a.unknowns.map((u) => `<li class="issue"><span class="sev" style="background:#94A3B8">Unknown</span><div><h3>${esc(u.title)}</h3><p class="muted">${esc(u.detail)}</p></div></li>`).join('')}</ul>` : '';
   const ps = a.metrics.pagespeed;
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Website check: ${esc(domain(a.finalUrl))} scored ${a.score}/100</title>
@@ -148,7 +158,7 @@ ul{list-style:none;margin:0;padding:0}
 </section>
 ${comparisonSection(a, opts.newSite, opts.siteUrl)}
 <h2>Scores by area</h2><div class="cats">${cats}</div>
-<h2>What to fix (${a.issues.length})</h2><ul>${issues || '<li class="issue"><span></span><div>No issues found.</div></li>'}</ul>
+${issues || '<h2>What to fix</h2><ul><li class="issue"><span></span><div>No issues found.</div></li></ul>'}${unknowns}
 ${pageSpeedSection(ps)}
 ${a.passed.length ? `<h2>What's already working</h2><ul class="passed">${a.passed.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
 <p class="meta">Checked ${new Date(a.generatedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })} · page ~${a.metrics.pageKb} KB · server ${a.metrics.ttfbMs} ms${(ps?.mobile?.scores.performance ?? ps?.performance) !== undefined ? ` · PageSpeed ${ps?.mobile?.scores.performance ?? ps?.performance}/100 on phones` : ''}</p>

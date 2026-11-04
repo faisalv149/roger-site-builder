@@ -20,6 +20,7 @@
     "qa:categories": "tsx scripts/category-qa.ts",
     "qa:owner": "tsx scripts/owner-journey.ts",
     "qa:release": "tsx scripts/release-qa.ts",
+    "repair:identity": "tsx scripts/repair-identity.ts",
     "qa:seo-examples": "tsx scripts/seo-examples.ts",
     "fixtures:categories": "tsx scripts/make-category-fixtures.ts"
   },
@@ -29,6 +30,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.2.0",
     "@sparticuz/chromium": "^153.0.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "@vercel/functions": "^3.10.3",
     "cheerio": "^1.2.0",
     "dotenv": "^18.0.9",
@@ -36,7 +38,9 @@
     "lighthouse": "^13.6.0",
     "lucide-static": "^1.61.0",
     "multer": "^2.5.0",
+    "mupdf": "^1.28.1",
     "sharp": "^0.35.5",
+    "tesseract.js": "^7.0.0",
     "tsx": "^4.23.15",
     "zod": "^3.25.76"
   },

@@ -56,7 +56,7 @@ ${c.mapsUrl ? `<meta http-equiv="refresh" content="0;url=${esc(c.mapsUrl)}">` : 
   await persistDir(dir); // on Vercel: so any server instance can serve the card
   return {
     kind: 'confirm-business',
-    text: `Is this you?\n${c.name}\n${(c.address || '').replace(/, USA$/, '')}${rating ? `\n${rating}` : ''}`,
+    text: `Is this you?\n${c.name}\n${(c.address || '').replace(/, USA$/, '')}${rating ? `\n${rating}` : ''}${c.fromWebsite ? "\n(These details are from your website. I couldn't find a matching Google listing.)" : ''}`,
     url,
     image,
     title: c.name,
@@ -87,16 +87,16 @@ export function noWebsiteCard(name: string, eta?: string): IMessageCard {
 }
 
 /** Step 3: the generated site. */
-export function siteCard(opts: { name: string; url: string; image: string; minutes?: string; hadWebsite: boolean; personalisable?: boolean }): IMessageCard {
+export function siteCard(opts: { name: string; url: string; image: string; minutes?: string; hadWebsite: boolean; personalisable?: boolean; /** the message, written from what the build actually obtained (src/content/summary.ts) */ text?: string; /** the build found things that need a person's check before it goes live */ needsReview?: boolean }): IMessageCard {
   return {
     kind: 'site-preview',
-    text: opts.hadWebsite
+    text: opts.text ?? (opts.hadWebsite
       ? `Here's a preview of a new site for ${opts.name}. It fixes the issues above and uses your Google photos, reviews and hours.`
-      : `Your free website preview for ${opts.name} is ready. It uses your Google photos, reviews and hours.`,
+      : `Your free website preview for ${opts.name} is ready. It uses your Google photos, reviews and hours.`),
     url: opts.url,
     image: opts.image,
     title: opts.name,
-    // the owner can answer three optional questions to shape the site
-    quickReplies: ['Looks great, publish it', opts.personalisable ? 'Personalise it' : 'Change something'],
+    // the owner can answer three optional questions to shape the site; a preview with open checks isn't offered for publishing yet
+    quickReplies: [...(opts.needsReview ? [] : ['Looks great, publish it']), opts.needsReview ? 'Check the details' : opts.personalisable ? 'Personalise it' : 'Change something'],
   };
 }

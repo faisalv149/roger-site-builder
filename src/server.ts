@@ -8,23 +8,27 @@ import multer from 'multer';
 import { config } from './config.js';
 import { loadThemes, saveCustomTheme, validateTheme, getTheme } from './theme/load.js';
 import { SUPPORTED_VARIANTS } from './theme/schema.js';
-import { searchCandidates } from './sources/places.js';
+import { lookupCandidates } from './sources/resolve.js';
 import { confirmBusinessCard } from './imessage/cards.js';
 import { runAudit, type BuildInput } from './pipeline.js';
 import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
-import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead } from './store.js';
+import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead, recordLeadDelivery } from './store.js';
+import { deliverLead, ownerEmailOf, configuredChannels } from './lead-delivery.js';
 import { handleInbound, isPending, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { normalizeLead } from './leads.js';
 import { personaliseState, startRefinement } from './design/refine.js';
 import { screenshotsAvailable } from './render/og.js';
 import { publishEnabled, publishSite, setPrimaryDomain, unpublishSite } from './publish.js';
-import { findDraft } from './drafts.js';
+import { findDraft, putDraft } from './drafts.js';
 import { publishReadiness } from './design/content.js';
 import { deleteOut, readOut } from './files.js';
 import { remote } from './remote.js';
 import { ownerRoutes, studioDraftRoutes } from './owner-api.js';
-import { claudeEnabled, claudeKeyStatus, claudeVia } from './content/claude.js';
+import { studioRoutes } from './studio/routes.js';
+import { resumeInterruptedJobs } from './studio/jobs.js';
+import { shareRoutes } from './studio/concepts/share.js';
+import { claudeEnabled, claudeKeyStatus, claudeToolMode, claudeVia } from './content/claude.js';
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
@@ -43,7 +47,8 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 // stock images stay public (owners, site visitors and iMessage link previews fetch them), as do the lead form
 // endpoint the sites post to and the health check the host pings.
 // the owner editor (/owner) and its API (/api/owner) use the owner's own key per draft, not the Studio password
-const OPEN = /^\/(sites|cards|reports|stock|demo-sites|owner)\/|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
+// /p/<token>/: a client's preview link for one chosen concept (src/studio/concepts/share.ts)
+const OPEN = /^\/(sites|cards|reports|stock|demo-sites|owner|p)\/|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
 // sites post their quote form here from any origin; reading leads (GET) still needs the password
 const isLeadPost = (req: Request) => /^\/api\/leads\/[^/]+$/.test(req.path) && (req.method === 'POST' || req.method === 'OPTIONS');
 const sha = (s: string) => createHash('sha256').update(s).digest();
@@ -86,7 +91,7 @@ app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
 
 // ── meta ──
 app.get('/api/health', wrap(async (_req, res) => {
-  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), model: config.anthropicModel, screenshots: screenshotsAvailable(), themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', pagespeed: !config.pagespeed ? 'off' : process.env.PAGESPEED_API_KEY ? 'key' : config.pagespeedKey ? 'maps-key' : 'no-key', fonts: await textRendering(), claudeKey: claudeVia() === 'api' ? await claudeKeyStatus() : undefined });
+  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), claudeTools: claudeToolMode(), model: config.anthropicModel, screenshots: screenshotsAvailable(), themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', pagespeed: !config.pagespeed ? 'off' : process.env.PAGESPEED_API_KEY ? 'key' : config.pagespeedKey ? 'maps-key' : 'no-key', fonts: await textRendering(), claudeKey: claudeVia() === 'api' ? await claudeKeyStatus() : undefined });
 }));
 // how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
 app.get('/api/estimate', (req, res, next) => {
@@ -127,9 +132,10 @@ app.post('/api/themes', themeUpload, (req, res) => {
 app.post('/api/lookup', wrap(async (req, res) => {
   const input = String(req.body.input || req.body.query || '').trim();
   if (!input) return res.status(400).json({ error: 'input is required (business name + ZIP, Google Maps link, or place ID)' });
-  const { intent, candidates } = await searchCandidates(input, { zip: req.body.zip, limit: Number(req.body.limit) || 5 });
+  // a website, when given, is read first so a ZIP code or a name can't be matched to the wrong place
+  const { intent, candidates, rejected, notes } = await lookupCandidates(input, { website: req.body.website || undefined, zip: req.body.zip, limit: Number(req.body.limit) || 5 });
   const card = candidates[0] ? await confirmBusinessCard(candidates[0]) : null;
-  res.json({ intent, candidates, card });
+  res.json({ intent, candidates, card, rejected, notes });
 }));
 
 // ── Roger step 2a: audit an existing website ──
@@ -161,7 +167,7 @@ app.post('/api/build', themeUpload, wrap(async (req, res) => {
   if (file) {
     try { input.theme = JSON.parse(file.buffer.toString('utf8')); } catch (e) { return res.status(400).json({ error: `theme.json is not valid JSON: ${(e as Error).message}` }); }
   } else if (body.theme && typeof body.theme === 'object') input.theme = body.theme;
-  if (!input.google && !input.placeId) return res.status(400).json({ error: 'google (link, place ID, or name + ZIP) or placeId is required' });
+  if (!input.google && !input.placeId && !input.website) return res.status(400).json({ error: 'google (link, place ID, or name + ZIP), placeId or website is required' });
   const job = startBuild(input, { source: body.source === 'studio' ? 'studio' : 'api' });
   if (req.query.wait === '1' || body.wait === true) {
     await waitForJob(job);
@@ -200,10 +206,13 @@ app.post('/api/leads/:slug', wrap(async (req, res) => {
   const n = normalizeLead(slug, b);
   if (!n.ok) return res.status(400).json({ error: n.error });
   const lead = n.lead;
-  await saveLead(lead); // data/leads locally, Supabase/Redis on Vercel
-  // awaited (with a timeout): on Vercel the function may stop right after the response
-  if (config.leadWebhook) await fetch(config.leadWebhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lead), signal: AbortSignal.timeout(8000) }).catch((e) => console.warn('[lead webhook]', e.message));
-  if (req.is('application/json')) return res.json({ ok: true });
+  const leadId = await saveLead(lead); // data/leads locally, Supabase/Redis on Vercel
+  // saved is not delivered: pass it on (awaited, with timeouts: on Vercel the function may stop right after the response) and record the result
+  const draft = await findDraft({ slug }).catch(() => undefined);
+  const delivery = await deliverLead(lead, { business: draft?.base.business.name || slug, ownerEmail: ownerEmailOf(draft?.content) });
+  await recordLeadDelivery(leadId, lead, { attempts: delivery.attempts, confirmed: delivery.confirmed }).catch((e) => console.warn('[lead delivery record]', e.message));
+  for (const a of delivery.attempts.filter((x) => x.status === 'failed')) console.warn(`[lead ${a.channel}] ${slug}: ${a.detail}`);
+  if (req.is('application/json')) return res.json({ ok: true, saved: true, delivered: delivery.confirmed });
   res.redirect(303, `${String(req.get('referer') || `/sites/${slug}/`).split('#')[0]}#quote`);
 }));
 // reading leads (names, phone numbers) needs the Studio password; only sending one is open
@@ -222,6 +231,12 @@ app.post('/api/imessage/reset', wrap(async (req, res) => { await resetSession(St
 
 // ── owner editor API (own key per draft) and the Studio's owner-link controls ──
 app.use('/api/owner', ownerRoutes);
+app.use('/api/studio', studioRoutes); // design studio: business briefs (phase 1) and concept sets (phase 2), src/studio
+// concept previews: each set's HTML, photos and screenshots (noindex; previews are never published from here)
+app.use('/studio-previews', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex' }); next(); }, express.static(path.join(config.dirs.out, 'studio-concepts')),
+  // on a serverless host the files may be on another instance: the remote store has every finished set
+  async (req, res, next) => { const data = await readOut(`studio-concepts${decodeURIComponent(req.path)}`).catch(() => undefined); if (!data) return next(); res.type(path.extname(req.path) || 'html').send(data); });
+app.use('/p', shareRoutes);
 app.use('/api', studioDraftRoutes);
 
 // ── saved history (data/builds, data/conversations). No auth: fine locally, add it before this is public. ──
@@ -231,11 +246,33 @@ app.post('/api/sites/:slug/publish', wrap(async (req, res) => {
   if (!publishEnabled()) return res.status(400).json({ error: 'Publishing is off: set VERCEL_TOKEN (vercel.com/account/tokens).' });
   res.json(await publishSite(String(req.params.slug)));
 }));
+// send a test enquiry through the same path a visitor's form uses; the site can't be published until one arrives
+app.post('/api/sites/:slug/test-lead', wrap(async (req, res) => {
+  const slug = String(req.params.slug).replace(/[^a-z0-9-]/g, '');
+  const d = await findDraft({ slug });
+  if (!d) return res.status(404).json({ error: 'No such site' });
+  const n = normalizeLead(slug, { name: 'Roger test enquiry', phone: '(000) 000-0000', message: 'Test enquiry sent by Roger before publishing. Safe to ignore.', kind: 'enquiry', page: 'test' });
+  if (!n.ok) return res.status(400).json({ error: n.error });
+  n.lead.test = true;
+  const leadId = await saveLead(n.lead);
+  const delivery = await deliverLead(n.lead, { business: d.base.business.name, ownerEmail: ownerEmailOf(d.content), test: true });
+  await recordLeadDelivery(leadId, n.lead, { attempts: delivery.attempts, confirmed: delivery.confirmed });
+  // the gate opens only when a channel acknowledged the test: a saved enquiry that reaches nobody is not delivery
+  if (delivery.confirmed) { d.base.leadTestedAt = new Date().toISOString(); d.base.leadDelivery = delivery.attempts; await putDraft(d); }
+  res.status(delivery.confirmed ? 200 : 502).json({ ok: delivery.confirmed, saved: true, delivered: delivery.confirmed, channels: delivery.configured, attempts: delivery.attempts, error: delivery.confirmed ? undefined : delivery.configured.length ? 'The test enquiry was saved, but no channel confirmed delivery.' : 'No delivery channel is set up: set LEAD_WEBHOOK_URL, or RESEND_API_KEY and LEAD_FROM_EMAIL (with the business\'s email or LEAD_NOTIFY_EMAIL).' });
+}));
 // what stops this site being published (Studio): reviewed facts, sample content, unconfirmed prices
+// Re-resolve a site whose saved business identity isn't a business (a postal code, a town) and rebuild its pages in place
+app.post('/api/sites/:slug/re-resolve', wrap(async (req, res) => {
+  const { repairIdentity } = await import('./repair.js');
+  const r = await repairIdentity({ slug: req.params.slug }, { force: req.body?.force === true });
+  res.status(r.repaired || !r.problem ? 200 : 422).json({ slug: r.slug, problem: r.problem, repaired: r.repaired, message: r.message, siteUrl: r.build?.siteUrl, business: r.build?.business, review: r.build?.review });
+}));
+
 app.get('/api/sites/:slug/readiness', wrap(async (req, res) => {
   const d = await findDraft({ slug: String(req.params.slug) });
   if (!d) return res.json({ ready: false, items: [{ key: 'content', level: 'blocker', message: 'This site was built before business details could be reviewed. Rebuild it to publish.' }] });
-  const items = publishReadiness(d.content, d.offerings);
+  const items = publishReadiness(d.content, d.offerings, { checks: d.base.source?.review?.checks, leadTested: !!d.base.leadTestedAt, leadNotified: configuredChannels(ownerEmailOf(d.content)).length > 0 });
   res.json({ ready: !items.some((i) => i.level === 'blocker'), items, draftId: d.id });
 }));
 // make a verified custom domain the primary address (real Vercel domain verification; the demo step never calls this)
@@ -318,5 +355,7 @@ app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: 
 export default app;
 if (!process.env.VERCEL) app.listen(config.port, () => {
   console.log(`Roger Site Builder on ${config.publicBaseUrl}  (mock=${config.mock}, claude=${claudeVia() ?? 'off'}, screenshots=${screenshotsAvailable()}, themes=${loadThemes().size}, password=${config.studioPassword ? 'on' : 'off'}, publish=${config.vercelToken ? 'vercel' : 'off'})`);
+  // studio jobs that were running when the server stopped continue where they were
+  resumeInterruptedJobs().then((ids) => { if (ids.length) console.log(`[studio] resuming ${ids.length} interrupted job(s): ${ids.join(', ')}`); }).catch((e) => console.warn('[studio] resume failed', e));
   if (!config.studioPassword && !/\/\/(localhost|127\.0\.0\.1)\b/.test(config.publicBaseUrl)) console.warn('[security] STUDIO_PASSWORD is not set: anyone who finds this URL can run builds on your API keys and read conversations.');
 });

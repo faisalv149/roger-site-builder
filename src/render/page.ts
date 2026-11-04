@@ -94,7 +94,8 @@ document.documentElement.classList.add('js');
       ev.preventDefault(); var fd=new FormData(f), body={}; fd.forEach(function(v,k){body[k]=v}); body.page=location.href;
       var btn=f.querySelector('button[type=submit]'); if(btn){btn.disabled=true;}
       fetch(f.action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-        .then(function(r){if(!r.ok) throw new Error(r.status); f.classList.add('sent');})
+        .then(function(r){if(!r.ok) throw new Error(r.status); return r.json().catch(function(){return {}});})
+        .then(function(d){var p=f.querySelector('.ok'); if(p && d && d.delivered===false && f.getAttribute('data-saved')) p.textContent=f.getAttribute('data-saved'); f.classList.add('sent');})
         .catch(function(){ if(btn) btn.disabled=false; alert('Sorry, that did not go through. Please call or text us instead.'); });
     });
   });

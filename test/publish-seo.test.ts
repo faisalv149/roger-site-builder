@@ -112,6 +112,10 @@ test('after review: published pages are indexable, canonical on the primary orig
     if (f.key === 'hours' || C.CLAIM_KEYS.includes(f.key as any) || f.key === 'serviceAreas' || f.key === 'description') d.content = C.reviewFact(d.content!, { key: f.key, action: 'omit' });
     else d.content = C.reviewFact(d.content!, { key: f.key, action: 'correct', value: f.value });
   }
+  // no test enquiry has arrived yet: that alone blocks publishing
+  assert.ok(C.publishReadiness(d.content, d.offerings, { leadTested: false }).some((x) => x.key === 'lead-test' && x.level === 'blocker'));
+  d.base.leadTestedAt = new Date().toISOString();
+  (config as { leadWebhook: string }).leadWebhook = 'http://127.0.0.1:9/lead'; // a delivery channel is set up (publishing checks it, it does not send)
   // the owner uploads nothing: Google photos stay in the preview; sample photos never publish
   await D.putDraft(d);
   d = (await D.getDraft(draftId))!;

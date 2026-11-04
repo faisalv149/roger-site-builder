@@ -46,7 +46,7 @@ export async function writeOgCard(file: string, opts: { heroFile: string | Buffe
 /** Chromium for screenshots: the local install (Playwright cache, Chrome, Edge) or, on Vercel, @sparticuz/chromium. */
 export const screenshotsAvailable = () => !!config.chromiumPath || !!process.env.VERCEL;
 
-async function launchBrowser() {
+export async function launchBrowser() {
   const { chromium } = await import('playwright-core');
   if (!config.chromiumPath && process.env.VERCEL) {
     const { default: serverless } = await import('@sparticuz/chromium'); // a Chromium build for serverless Linux
