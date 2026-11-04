@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseLookupInput } from '../src/sources/maps-url.js';
+import { parseLookupInput, resolveLookupInput } from '../src/sources/maps-url.js';
 import { checkBrandColor, deriveScale } from '../src/color/palette.js';
 import { contrast } from '../src/color/oklch.js';
 import { loadThemes, validateTheme } from '../src/theme/load.js';
@@ -27,6 +27,26 @@ test('Google Maps inputs are parsed', () => {
   assert.equal(parseLookupInput('https://maps.app.goo.gl/AbCdEf123').kind, 'short');
   assert.deepEqual(parseLookupInput('https://www.google.com/maps/search/?api=1&query=Joe&query_place_id=ChIJabcdefghijklmnopqrstu'), { kind: 'placeId', placeId: 'ChIJabcdefghijklmnopqrstu' });
   assert.deepEqual(parseLookupInput("Joe's Roofing 78704"), { kind: 'text', query: "Joe's Roofing 78704" });
+});
+
+test('a maps.app.goo.gl short link is followed as a plain client (a browser gets a page with no address)', async () => {
+  const long = 'https://www.google.com/maps/place/TLT+-+The+Last+Tribe+Rooftop/@31.51,74.35,15z/data=!4m7!3m6!1s0x3919050731a2ae49:0x6ff91d1e604c0b3f!8m2!3d31.5086248!4d74.3506163';
+  const real = globalThis.fetch;
+  const seen: string[] = [];
+  // Google's behaviour as of 2026-11: a browser identity gets a 200 script page, a plain client gets the 302
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    const ua = String((init?.headers as Record<string, string>)?.['user-agent'] ?? '');
+    seen.push(ua);
+    return /Mozilla/.test(ua) ? new Response('<!doctype html><html><body><script>/* loads the place */</script></body></html>', { status: 200 }) : new Response(null, { status: 302, headers: { location: long } });
+  }) as typeof fetch;
+  try {
+    const intent = await resolveLookupInput('https://maps.app.goo.gl/tVkK1prMGBSq8A6MA');
+    assert.equal(intent.kind, 'text');
+    if (intent.kind === 'text') { assert.equal(intent.query, 'TLT - The Last Tribe Rooftop'); assert.equal(intent.cid, BigInt('0x6ff91d1e604c0b3f').toString()); assert.equal(intent.lat, 31.5086248); }
+    assert.ok(!/Mozilla/.test(seen[0]), 'the first request is not a browser');
+  } finally {
+    globalThis.fetch = real;
+  }
 });
 
 test('all 36 package themes validate (5 trades + general, 6 layouts each)', () => {

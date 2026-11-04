@@ -77,11 +77,11 @@ export function auditCard(a: AuditResult, reportUrl: string, image: string): IMe
   };
 }
 
-/** Step 2b (no website): offer to build one. `eta` is estimateBuild().label, e.g. "about 15 seconds". */
-export function noWebsiteCard(name: string, eta?: string): IMessageCard {
+/** Step 2b (no website): offer to build one. No time is promised: the preview is sent when it is ready. */
+export function noWebsiteCard(name: string): IMessageCard {
   return {
     kind: 'no-website',
-    text: `I couldn't find a website for ${name}. Most customers check a site before they call.\n\nWant me to put together a free preview using your Google profile? ${eta ? `It takes ${eta}.` : 'It only takes a minute.'}`,
+    text: `I couldn't find a website for ${name}. Most customers look at a website before they call.\n\nWant me to build you a free website preview from your Google profile? There's no cost and nothing to sign up for.`,
     quickReplies: ['Yes, build it', 'Not now'],
   };
 }
@@ -97,6 +97,6 @@ export function siteCard(opts: { name: string; url: string; image: string; minut
     image: opts.image,
     title: opts.name,
     // the owner can answer three optional questions to shape the site; a preview with open checks isn't offered for publishing yet
-    quickReplies: [...(opts.needsReview ? [] : ['Looks great, publish it']), opts.needsReview ? 'Check the details' : opts.personalisable ? 'Personalise it' : 'Change something'],
+    quickReplies: [...(opts.needsReview ? [] : ['Looks great, publish it']), opts.needsReview ? 'Check the details' : opts.personalisable ? 'Personalize it' : 'Change something'],
   };
 }

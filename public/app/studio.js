@@ -717,7 +717,9 @@ function cardActions(b) {
 
 function convoRow(c) {
   const sitesN = c.buildIds.length ? `${c.buildIds.length} site${c.buildIds.length > 1 ? 's' : ''}` : 'no site yet';
-  return `<button type="button" class="convo" data-convo="${esc(c.from)}"><span class="av">${esc((c.business || 'R')[0].toUpperCase())}</span><span style="min-width:0"><b>${esc(c.business || who(c.from))}</b><span class="line">${esc(c.last)}</span><span class="line">${esc(who(c.from))} · ${c.messages} messages · ${sitesN}</span></span><span class="when">${esc(ago(c.updatedAt))}</span></button>`;
+  // the owner asked Roger for a person: a call back, or help going live
+  const ask = c.followUp ? ` <span class="tag follow">${c.followUp.reason === 'publish' ? 'Wants to go live' : 'Wants a call'}</span>` : '';
+  return `<button type="button" class="convo" data-convo="${esc(c.from)}"><span class="av">${esc((c.business || 'R')[0].toUpperCase())}</span><span style="min-width:0"><b>${esc(c.business || who(c.from))}${ask}</b><span class="line">${esc(c.last)}</span><span class="line">${esc(who(c.from))} · ${c.messages} messages · ${sitesN}</span></span><span class="when">${esc(ago(c.updatedAt))}</span></button>`;
 }
 
 // saved messages, drawn like the simulator: the owner's texts in blue, Roger's replies + link cards in gray

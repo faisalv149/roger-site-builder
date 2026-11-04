@@ -123,7 +123,7 @@ async function send(raw) {
   await sleep(300);
   showTyping();
   try {
-    // async: a build answers "On it, about 20 seconds" now and sends the preview when it's done
+    // async: a build answers "On it" now and sends the preview when it's done, however long that takes
     const res = await postJson('/api/imessage/inbound', { from, text, async: true });
     setReceipt(row, `<b>Read</b> ${timeNow()}`);
     let replies = res.replies;

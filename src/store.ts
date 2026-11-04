@@ -87,6 +87,8 @@ export interface Conversation {
   buildIds: string[];
   /** the iMessage flow's state (src/imessage/flow.ts) so a restart picks up where it left off */
   session?: unknown;
+  /** the owner asked for a person in iMessage: a call back, or help putting the site live */
+  followUp?: { at: string; reason: 'call' | 'publish' };
 }
 
 /** A site published to Vercel (src/publish.ts) */
@@ -234,7 +236,7 @@ export async function listConversations() {
   all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return all.map((c) => {
     const last = c.messages[c.messages.length - 1];
-    return { from: c.from, startedAt: c.startedAt, updatedAt: c.updatedAt, business: c.business, messages: c.messages.length, last: last?.text || last?.title || '', buildIds: c.buildIds };
+    return { from: c.from, startedAt: c.startedAt, updatedAt: c.updatedAt, business: c.business, messages: c.messages.length, last: last?.text || last?.title || '', buildIds: c.buildIds, followUp: c.followUp };
   });
 }
 

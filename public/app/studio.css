@@ -180,6 +180,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);margin:0;
 .site-body .meta{margin:0;color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
 .tag,.src{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;background:#F1F5F9;color:#475569;white-space:nowrap}
+.tag.follow{background:#FEF3C7;color:#92400E;vertical-align:1px;margin-left:4px}
 .tag.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:500}
 .src.imessage{background:#DBEAFE;color:#1D4ED8}.src.studio{background:#EDE9FE;color:#6D28D9}.src.api{background:#F1F5F9;color:#475569}.src.imported{background:#FEF3C7;color:#92400E}
 .site-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px 12px 14px}

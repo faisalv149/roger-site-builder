@@ -40,7 +40,6 @@ import { writeReport } from './audit/report.js';
 import { auditCard, noWebsiteCard, siteCard, type IMessageCard } from './imessage/cards.js';
 import { slugify } from './util/text.js';
 import { claudeEnabled, claudeVia } from './content/claude.js';
-import { estimateBuild } from './estimate.js';
 import { persistDir } from './files.js';
 import { detectVertical } from './theme/select.js';
 import { findSavedPlan } from './store.js';
@@ -589,7 +588,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     auditOut = { ...audit, reportUrl: rep.url, image: rep.image };
     cards.push(auditCard(audit, rep.url, rep.image));
   } else if (!websiteUrl) {
-    cards.push(noWebsiteCard(b.name, (await estimateBuild({ website: false, audit: false })).label));
+    cards.push(noWebsiteCard(b.name));
   }
   cards.push(siteCard({
     name: b.name, url: model.urls.site, image: shot ? `${model.urls.site}preview.jpg` : model.urls.og, hadWebsite: !!websiteUrl, personalisable: personalise.eligible && !personalise.manualTheme,
