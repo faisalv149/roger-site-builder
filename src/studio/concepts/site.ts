@@ -171,17 +171,22 @@ export async function nextConcept(current: { setId: string; conceptId: string })
  * the inner pages, forms, SEO and owner editing; its home page lends the concept the SEO head (title, description,
  * canonical, structured data, social cards) and the links to the inner pages. Re-applied after every owner save.
  */
+/** The chosen concept's homepage could not be written or restored: the site job fails rather than report a site that isn't the concept. */
+export class ConceptHomeError extends Error {}
+
 export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
   if (!d.concept) return false;
   const set = await getConceptSet(d.concept.setId);
   const concept = set?.concepts.find((c) => c.id === d.concept!.conceptId);
-  if (!set || !concept) return false;
+  if (!set || !concept) throw new ConceptHomeError(`the chosen concept ${d.concept.conceptId.toUpperCase()} of set ${d.concept.setId} is missing`);
   const cdir = setDir(set.id);
   const read = async (rel: string) => { const f = path.join(cdir, rel); return fs.existsSync(f) ? fs.readFileSync(f) : await readOut(`studio-concepts/${set.id}/${rel}`).catch(() => undefined); };
   const src = await read(`${concept.id}.html`);
   const siteDir = path.join(config.dirs.sites, d.slug);
   const homeFile = path.join(siteDir, 'index.html');
-  if (!src || !fs.existsSync(homeFile)) return false;
+  // never leave the older builder's homepage standing in for the chosen concept
+  if (!src) throw new ConceptHomeError(`concept ${concept.id.toUpperCase()}'s page could not be read or restored, so the homepage would still be the older builder's`);
+  if (!fs.existsSync(homeFile)) throw new ConceptHomeError('the site has no home page to replace');
   let html = src.toString('utf8');
   const legacy = fs.readFileSync(homeFile, 'utf8');
   // the concept's own pictures, copied into the site (Google listing photos stay live stand-ins, never copied)

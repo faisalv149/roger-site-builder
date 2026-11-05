@@ -362,8 +362,23 @@ test('the chosen concept survives the handoff: the homepage has its sections in 
     const h = home();
     assert.deepEqual(sections(h), concept.sections.map((s) => `${s.kind}:${s.variant}`), `section order ${when}`);
     assert.deepEqual(assets(h), assets(conceptHtml), `image ids ${when}`);
-    assert.ok(assets(h).every((id) => concept.images.includes(id) || set.concepts.length), 'an image the concept does not record');
+    const foreign = assets(h).filter((id) => !concept.images.includes(id));
+    assert.deepEqual(foreign, [], `images on the homepage that concept B does not record ${when}`);
     assert.match(h, /<link rel="canonical"/, `SEO head ${when}`);
     if (when === 'after the handoff') await saveDraft(d, { revision: d.revision, appearance: { ...d.appearance, textSize: 'comfortable' } });
   }
+});
+
+test('a concept homepage that cannot be written or restored fails the site job; the older builder homepage is never reported as done', { timeout: 400_000 }, async () => {
+  const { startSiteJob, getSiteJob } = await import('../src/studio/concepts/site.js');
+  const brief = await waitForStudioJob((await startStudioJob({ google: placeId(CASES[1]) })).id);
+  const judge: typeof judgeListingPhotos = (pid, business) => judgeListingPhotos(pid, business, { label: async (items) => ({ kinds: items.map(() => 'work'), seen: items.map(() => 'work'), source: 'vision' }) });
+  const cj = await waitForConceptJob((await startConceptJob({ businessKey: brief.businessKey! }, { transport: null, judgeListing: judge })).id);
+  const set = (await getConceptSet(cj.setId))!;
+  // the chosen concept's page is gone, and there is no remote copy to restore it from
+  fs.rmSync(path.join(setDir(set.id), set.concepts.find((x) => x.id === 'a')!.preview!.html));
+  let job; for (job = (await getSiteJob((await startSiteJob(set.id, 'a')).id))!; job.status !== 'done' && job.status !== 'failed'; job = (await getSiteJob(job.id))!) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(job.status, 'failed');
+  assert.match(job.error ?? '', /could not be read or restored/);
+  assert.equal(job.siteUrl, undefined, 'a failed job offers no site link');
 });
