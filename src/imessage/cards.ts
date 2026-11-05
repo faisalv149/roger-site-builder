@@ -98,6 +98,7 @@ export function siteCard(opts: { name: string; url: string; image: string; minut
     image: opts.image,
     title: opts.name,
     // the owner can answer three optional questions to shape the site; a preview with open checks isn't offered for publishing yet
-    quickReplies: [...(opts.needsReview ? [] : ['Looks great, publish it']), opts.needsReview ? 'Check the details' : opts.personalisable ? 'Personalize it' : 'Change something'],
+    // one preview at a time: the client approves it or asks for another version (publishing stays gated)
+    quickReplies: ['Approve and publish', 'Request another version'],
   };
 }
