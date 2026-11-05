@@ -46,13 +46,19 @@ export async function applyConcept(draftId: string, setId: string, concept: Conc
   const { layout, appearance } = conceptDesign(concept);
   return withDraftLock(draftId, async () => {
     const d = (await getDraft(draftId))!;
-    let saved: DraftRecord;
-    try { saved = await saveDraft(d, { revision: d.revision, layout, appearance }); }
-    catch {
-      // a layout this business's photos can't carry (a photo-led hero without a strong photo): the rest still applies
-      const { hero: _h, ...rest } = layout;
-      saved = await saveDraft((await getDraft(draftId))!, { revision: d.revision, layout: rest, appearance });
+    // a choice this business's content or the chosen style can't carry (a photo-led hero without a strong photo, a
+    // gallery the style doesn't offer) is dropped, one at a time; the rest of the concept still applies
+    const { hero, gallery, direction } = layout;
+    const tries: LayoutChoice[] = [layout, { direction, gallery }, { direction, hero }, { direction }, {}];
+    let saved: DraftRecord | undefined;
+    let last: unknown;
+    for (const t of tries) {
+      const clean = Object.fromEntries(Object.entries(t).filter(([, v]) => v !== undefined)) as LayoutChoice;
+      try { saved = await saveDraft((await getDraft(draftId))!, { revision: d.revision, layout: clean, appearance }); break; }
+      catch (e) { last = e; }
     }
+    void hero; void gallery;
+    if (!saved) throw last;
     saved.concept = { setId, conceptId: concept.id };
     await putDraft(saved);
     return saved;
