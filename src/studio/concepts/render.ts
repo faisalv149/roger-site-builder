@@ -61,11 +61,11 @@ async function defaultFetch(url: string): Promise<Buffer | null> {
 const NAV: Record<string, (cat: Catalog) => string> = { offer: (c) => (c.items.length ? 'Menu' : 'Services'), story: () => 'Story', gallery: () => 'Photos', proof: (c) => (c.rating ? 'Reviews' : 'Why us'), contact: (c) => (c.locations.length > 1 ? 'Locations' : 'Visit') };
 
 /** The concept as one HTML document (relative image paths: img/<id>.jpg). */
-export function conceptHtml(concept: Concept, cat: Catalog, setId: string): string {
+export function conceptHtml(concept: Concept, cat: Catalog, setId: string, opts: { serviceLinks?: RenderCtx["serviceLinks"] } = {}): string {
   const dir = path.join(setDir(setId), 'img');
   const photo = new Map(cat.photos.map((p) => [p.id, p]));
   const ctx: RenderCtx = {
-    cat, concept, used: new Set(),
+    cat, concept, used: new Set(), serviceLinks: opts.serviceLinks,
     img: (id) => {
       if (id === 'logo') { const f = path.join(dir, 'logo.png'); return cat.logo && fs.existsSync(f) ? { src: 'img/logo.png', width: 200, height: 44, alt: `${cat.business.name} logo`, photo: { id: 'logo', url: cat.logo.url, width: 200, height: 44, orientation: 'landscape', uses: [], alt: '', services: [] } } : undefined; }
       const p = photo.get(id);
@@ -78,7 +78,7 @@ export function conceptHtml(concept: Concept, cat: Catalog, setId: string): stri
   const hero = concept.sections[0]?.variant;
   const nav = concept.sections.filter((s) => s.kind !== 'hero').map((s) => ({ href: `#${s.id}`, label: NAV[s.kind](cat) }));
   const body = concept.sections.map((s) => RENDERERS[`${s.kind}:${s.variant}`](ctx, s)).join('\n');
-  const css = baseCss(concept.tokens) + concept.sections.map((s) => VARIANT_CSS[`${s.kind}:${s.variant}`] ?? '').join('\n') + (cat.photos.some(isListing) ? `\n${LISTING_CSS}` : '');
+  const css = baseCss(concept.tokens) + VARIANT_CSS['svc-go'] + concept.sections.map((s) => VARIANT_CSS[`${s.kind}:${s.variant}`] ?? '').join('\n') + (cat.photos.some(isListing) ? `\n${LISTING_CSS}` : '');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
 <title>${esc(cat.business.name)}: concept ${concept.id.toUpperCase()}, ${esc(concept.name)} (preview)</title>

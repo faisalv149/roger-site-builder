@@ -2,7 +2,11 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
-import { persistDir, readOut } from '../../files.js';
+import { persistDir, readOut, restoreDir } from '../../files.js';
+import { TYPE_PRESET_DEFS, fontsUrl } from '../../design/directions.js';
+import { getReview, resolveCatalog, type Catalog } from './review.js';
+import { conceptHtml } from './render.js';
+import type { DesignTokens } from './types.js';
 import { setDir } from './render.js';
 import { buildSite } from '../../pipeline.js';
 import { getDraft, issueOwnerKey, ownerUrl, putDraft, saveDraft, withDraftLock, type DraftRecord } from '../../drafts.js';
@@ -187,7 +191,16 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
   // never leave the older builder's homepage standing in for the chosen concept
   if (!src) throw new ConceptHomeError(`concept ${concept.id.toUpperCase()}'s page could not be read or restored, so the homepage would still be the older builder's`);
   if (!fs.existsSync(homeFile)) throw new ConceptHomeError('the site has no home page to replace');
-  let html = src.toString('utf8');
+  // re-rendered from the concept itself (the same renderer, no AI, no research): the owner's supported design edits
+  // and the site's own service pages apply; the concept's sections, their order and its pictures stay
+  const { brief, inventory } = await getBrief(set.brief.businessKey, set.brief.revision);
+  const review = await getReview(set.reviewId);
+  if (!brief || !inventory || !review) throw new ConceptHomeError(`the brief or owner review behind concept ${concept.id.toUpperCase()} is missing, so its homepage can't be rendered`);
+  if (!fs.existsSync(path.join(cdir, 'img'))) await restoreDir(path.relative(config.dirs.out, cdir).split(path.sep).join('/')).catch(() => undefined);
+  const cat = resolveCatalog(brief, inventory, review);
+  const tokens = conceptTokens(concept, d.appearance);
+  let html = conceptHtml({ ...concept, tokens }, cat, set.id, { serviceLinks: serviceLinksOf(d, cat) });
+  void src;
   const legacy = fs.readFileSync(homeFile, 'utf8');
   // the concept's own pictures, copied into the site (Google listing photos stay live stand-ins, never copied)
   const dest = path.join(siteDir, 'assets', 'concept');
@@ -219,6 +232,51 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
   }
   if (add.length) html = html.replace(/(<nav aria-label="Sections"><ul>[\s\S]*?)(<\/ul><\/nav>)/, `$1${add.join('')}$2`);
   fs.writeFileSync(homeFile, html);
+  applyTokensToPages(siteDir, homeFile, tokens);
   await persistDir(siteDir);
   return true;
+}
+
+/**
+ * The concept's design tokens with the owner's supported design edits applied: accent colour, typeface, corners and
+ * spacing. One set of tokens drives the homepage and every inner page, so they can't drift apart.
+ */
+export function conceptTokens(concept: Concept, a?: Appearance): DesignTokens {
+  const t: DesignTokens = structuredClone(concept.tokens);
+  if (!a) return t;
+  const base = conceptDesign(concept).appearance;
+  const accent = a.color?.accent;
+  if (accent && accent.toLowerCase() !== base.color?.accent?.toLowerCase()) { t.colors.action = accent; t.colors.onAction = readableOn(accent); }
+  if (a.font && a.font !== base.font) {
+    const p = TYPE_PRESET_DEFS[a.font];
+    t.fonts = { heading: { family: p.heading.family, weight: t.fonts.heading.weight, css: `'${p.heading.family}', ${p.heading.fallback}` }, body: { family: p.body.family, css: `'${p.body.family}', ${p.body.fallback}` }, href: fontsUrl(p) };
+  }
+  if (a.corners && a.corners !== base.corners) t.radius = { sharp: 2, soft: 10, round: 18 }[a.corners];
+  if (a.spacing) t.space = { compact: 0.85, comfortable: 1, spacious: 1.2 }[a.spacing];
+  return t;
+}
+const readableOn = (hex: string) => { const n = parseInt(hex.slice(1), 16); const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; return lum > 0.6 ? '#111316' : '#FFFFFF'; };
+
+/** The site's own page for each service the concept lists, matched by name (only pages the builder made). */
+function serviceLinksOf(d: DraftRecord, cat: Catalog): Record<string, { href: string; label: string }> {
+  const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const out: Record<string, { href: string; label: string }> = {};
+  for (const p of d.sitePlan?.pages ?? []) {
+    const o = p.offeringId ? d.offerings.find((x) => x.id === p.offeringId) : undefined;
+    const svc = o ? cat.services.find((s) => key(s.name) === key(o.name)) : undefined;
+    if (svc) out[svc.id] = { href: p.route, label: `More about ${svc.name}` };
+  }
+  return out;
+}
+
+/** The inner pages wear the concept's tokens: its colours, typefaces and corners override the builder's. */
+export function applyTokensToPages(siteDir: string, homeFile: string, t: DesignTokens) {
+  const c = t.colors;
+  const block = `<link rel="stylesheet" href="${t.fonts.href}" data-concept-tokens><style id="concept-tokens">:root:root{--brand:${c.action};--brand-ink:${c.onAction};--brand-text:${c.brandText};--ink:${c.ink};--ink-muted:${c.muted};--surface:${c.bg};--surface-alt:${c.surface};--font-heading:${t.fonts.heading.css};--font-body:${t.fonts.body.css};--r-sm:${Math.round(t.radius / 2)}px;--r-md:${t.radius}px;--r-lg:${Math.round(t.radius * 1.5)}px}</style>`;
+  const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'assets' ? [] : walk(path.join(dir, e.name))) : e.name.endsWith('.html') ? [path.join(dir, e.name)] : []));
+  for (const f of walk(siteDir)) {
+    if (f === homeFile) continue;
+    const html = fs.readFileSync(f, 'utf8').replace(/<link rel="stylesheet" href="[^"]*" data-concept-tokens><style id="concept-tokens">[\s\S]*?<\/style>/, '');
+    fs.writeFileSync(f, html.replace('</head>', `${block}</head>`));
+  }
 }

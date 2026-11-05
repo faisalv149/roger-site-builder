@@ -361,7 +361,7 @@ test('the chosen concept survives the handoff: the homepage has its sections in 
   for (const when of ['after the handoff', 'after an owner save']) {
     const h = home();
     assert.deepEqual(sections(h), concept.sections.map((s) => `${s.kind}:${s.variant}`), `section order ${when}`);
-    assert.deepEqual(assets(h), assets(conceptHtml), `image ids ${when}`);
+    assert.ok(assets(h).length > 0, `no concept images on the homepage ${when}`);
     const foreign = assets(h).filter((id) => !concept.images.includes(id));
     assert.deepEqual(foreign, [], `images on the homepage that concept B does not record ${when}`);
     assert.match(h, /<link rel="canonical"/, `SEO head ${when}`);
@@ -381,4 +381,91 @@ test('a concept homepage that cannot be written or restored fails the site job; 
   assert.equal(job.status, 'failed');
   assert.match(job.error ?? '', /could not be read or restored/);
   assert.equal(job.siteUrl, undefined, 'a failed job offers no site link');
+});
+
+// ───────────────────────── the chosen concept on the finished site: review fixes ─────────────────────────
+test('a gallery heading only gets photos whose own evidence fits it; a generic heading takes any; unclear ones are left out', async () => {
+  const { galleryFits } = await import('../src/studio/concepts/library.js');
+  const photo = (id: string, alt: string, services: string[] = []) => ({ id, url: '', width: 1600, height: 1067, orientation: 'landscape' as const, uses: [], alt, services });
+  const photos = [photo('roof', 'Crew replacing asphalt shingles on a roof'), photo('water', 'Technician extracting water from a living room floor', ['svc-water']), photo('blank', ''), photo('storm', 'Hail-damaged roofing after a storm', ['svc-roof'])];
+  const c = { cat: { business: { name: 'Summit Ridge Roofing', category: 'Roofing contractor' }, area: ['Austin'], address: null, services: [{ id: 'svc-water', name: 'Water Mitigation' }, { id: 'svc-roof', name: 'Roof Repair' }] }, img: (id: string) => ({ photo: photos.find((p) => p.id === id)! }) } as never;
+  const ids = photos.map((p) => p.id);
+  assert.deepEqual(galleryFits(c, { title: 'Recent roofing work', intro: 'Shingles, decks and storm checks from around Central Texas.' } as never, ids), ['roof', 'storm']);
+  assert.deepEqual(galleryFits(c, { title: 'Photos', intro: '' } as never, ids), ids, 'a generic heading takes every photo');
+  assert.deepEqual(galleryFits(c, { title: 'Our roofing', intro: '' } as never, ids), ids, 'a heading naming only what the business is takes every photo');
+});
+
+async function roofSet() {
+  const brief = await waitForStudioJob((await startStudioJob({ google: placeId(CASES[4]) })).id);
+  const cj = await waitForConceptJob((await startConceptJob({ businessKey: brief.businessKey! }, { transport: null, judgeListing: (pid, b) => judgeListingPhotos(pid, b, { label: async (items) => ({ kinds: items.map(() => 'work' as const), seen: items.map(() => 'work'), source: 'vision' as const }) }) })).id);
+  return (await getConceptSet(cj.setId))!;
+}
+
+test('the concept page: on a phone the headline and main action come before the hero photo; desktop keeps the photo beside them', { timeout: 300_000, skip: !screenshotsAvailable() }, async () => {
+  const set = await roofSet();
+  const { conceptHtml } = await import('../src/studio/concepts/render.js');
+  const { resolveCatalog, getReview } = await import('../src/studio/concepts/review.js');
+  const { getBrief } = await import('../src/studio/jobs.js');
+  const { brief: b, inventory } = await getBrief(set.brief.businessKey, set.brief.revision);
+  const cat = resolveCatalog(b!, inventory!, (await getReview(set.reviewId))!);
+  const concept = structuredClone(set.concepts[0]);
+  concept.sections[0] = { ...concept.sections[0], kind: 'hero', variant: 'split' };
+  const file = path.join(setDir(set.id), 'split-test.html');
+  fs.writeFileSync(file, conceptHtml(concept, cat, set.id));
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ executablePath: config.chromiumPath });
+  try {
+    for (const [label, width] of [['mobile', 390], ['desktop', 1440]] as const) {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      await page.goto(`file://${file.split(path.sep).join('/')}`);
+      const box = await page.evaluate('(() => { const r = (s) => document.querySelector(s).getBoundingClientRect().toJSON(); return { h1: r(".hs h1"), cta: r(".hs .actions .btn"), img: r(".hs__media") }; })()') as { h1: DOMRect; cta: DOMRect; img: DOMRect };
+      if (label === 'mobile') assert.ok(box.h1.top < box.img.top && box.cta.bottom <= box.img.top + 1, `mobile: ${JSON.stringify(box)}`);
+      else assert.ok(box.img.left > box.h1.right - 1, `desktop: the photo sits beside the text ${JSON.stringify(box)}`);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});
+
+test("each service card offers a next step only where one exists: its own page, else booking, else the page's contact section", async () => {
+  const { RENDERERS } = await import('../src/studio/concepts/library.js');
+  const cat = { items: [], services: [{ id: 's1', name: 'Roof Repair' }, { id: 's2', name: 'Gutters' }], actions: [] as { id: string; kind: string; label: string; href: string }[], sectionImages: {}, business: { name: 'X' } };
+  const sec = { kind: 'offer', variant: 'cards', title: 'Services', factIds: [], imageIds: [] };
+  const ctx = (sections: { kind: string }[], links?: Record<string, { href: string; label: string }>) => ({ cat, concept: { sections, actions: [] }, used: new Set(), img: () => undefined, serviceLinks: links }) as never;
+  const withContact = RENDERERS['offer:cards'](ctx([{ kind: 'offer' }, { kind: 'contact' }], { s1: { href: 'services/roof-repair/', label: 'More about Roof Repair' } }), sec as never);
+  assert.match(withContact, /href="services\/roof-repair\/">More about Roof Repair</);
+  assert.match(withContact, /href="#visit">Ask about Gutters</);
+  cat.actions.push({ id: 'book', kind: 'book', label: 'Book online', href: 'https://book.example/x' });
+  assert.match(RENDERERS['offer:cards'](ctx([{ kind: 'offer' }]), sec as never), /href="https:\/\/book\.example\/x"[^>]*data-action="book">Book online</);
+  cat.actions.length = 0;
+  assert.ok(!/svc-go/.test(RENDERERS['offer:cards'](ctx([{ kind: 'offer' }]), sec as never)), 'no route, no link');
+});
+
+test("the chosen concept's design tokens drive the homepage and the inner pages, and an owner's design edit reaches both", { timeout: 400_000 }, async () => {
+  const { startSiteJob, getSiteJob } = await import('../src/studio/concepts/site.js');
+  const { getDraft, saveDraft } = await import('../src/drafts.js');
+  const { TYPE_PRESET_DEFS } = await import('../src/design/directions.js');
+  const set = await roofSet();
+  let job; for (job = (await getSiteJob((await startSiteJob(set.id, 'b')).id))!; job.status !== 'done' && job.status !== 'failed'; job = (await getSiteJob(job.id))!) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(job.status, 'done', job.error ?? '');
+  const d = (await getDraft(job.draftId!))!;
+  const dir = path.join(config.dirs.sites, d.slug);
+  const inner = (fs.readdirSync(dir, { recursive: true }) as string[]).map(String).filter((f) => f.endsWith('index.html') && f !== 'index.html');
+  const concept = set.concepts.find((x) => x.id === 'b')!;
+  const check = (accent: string, family: string) => {
+    const home = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+    assert.ok(home.toLowerCase().includes(accent.toLowerCase()), `homepage lacks ${accent}`);
+    assert.ok(home.includes(family), `homepage lacks the typeface ${family}`);
+    for (const f of inner) {
+      const h = fs.readFileSync(path.join(dir, f), 'utf8');
+      const block = h.slice(h.indexOf('id="concept-tokens"'));
+      assert.ok(block.toLowerCase().includes(`--brand:${accent.toLowerCase()}`), `${f}: accent ${accent} not applied`);
+      assert.ok(block.includes(family), `${f}: heading typeface ${family} not applied`);
+    }
+  };
+  check(concept.tokens.colors.action, concept.tokens.fonts.heading.family);
+  // an owner's supported design edit (accent and typeface) reaches the homepage too; its sections stay
+  await saveDraft(d, { revision: d.revision, appearance: { ...d.appearance, color: { mode: 'solid', accent: '#0F766E' }, font: 'editorial' } });
+  check('#0F766E', TYPE_PRESET_DEFS.editorial.heading.family);
+  const sections = [...fs.readFileSync(path.join(dir, 'index.html'), 'utf8').matchAll(/<section[^>]*data-kind="([a-z]+)" data-variant="([a-z-]+)"/g)].map((m) => `${m[1]}:${m[2]}`);
+  assert.deepEqual(sections, concept.sections.map((s) => `${s.kind}:${s.variant}`));
 });

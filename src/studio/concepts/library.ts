@@ -18,6 +18,8 @@ export interface RenderCtx {
   img: (id: string) => { src: string; width: number; height: number; alt: string; photo: Photo } | undefined;
   /** pictures already on the page: a photo is shown once */
   used: Set<string>;
+  /** a service's own page on the finished site (the full-site handoff), by service id */
+  serviceLinks?: Record<string, { href: string; label: string }>;
 }
 
 export const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -117,6 +119,18 @@ function ordered<T extends { id: string }>(list: T[], first: string[]) { const f
 const price = (it: { id: string; price?: string }) => (it.price ? `<span class="price" data-price="${esc(it.id)}">${esc(it.price.replace(/\s*\|\s*/g, ' · '))}</span>` : '');
 const tags = (t: string[]) => (t.length ? `<ul class="tags">${t.slice(0, 3).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
 
+/**
+ * A service's next step, only where one exists: its own page on the finished site; else the business's booking
+ * destination; else the page's own contact section. Nothing is invented (no offer, no link Roger hasn't verified).
+ */
+function serviceAction(c: RenderCtx, x: { id: string; name: string }) {
+  const own = c.serviceLinks?.[x.id];
+  if (own) return `<a class="svc-go" href="${esc(own.href)}">${esc(own.label)}</a>`;
+  const book = c.cat.actions.find((a) => a.kind === 'book');
+  if (book) return `<a class="svc-go" href="${esc(book.href)}"${ext(book.href)} data-action="${esc(book.id)}">${esc(book.label)}</a>`;
+  if (c.concept.sections.some((sec) => sec.kind === 'contact')) return `<a class="svc-go" href="#visit">Ask about ${esc(x.name)}</a>`;
+  return '';
+}
 function offerCards(c: RenderCtx, s: ComposedSection) {
   const cat = c.cat;
   if (cat.items.length) {
@@ -125,7 +139,7 @@ function offerCards(c: RenderCtx, s: ComposedSection) {
   }
   const svc = ordered(cat.services, s.factIds);
   const pictured = svc.every((x) => fresh(c, [x.imageId]));
-  return `<section class="sec offer oc" id="offer" data-kind="offer" data-variant="cards"><div class="wrap">${head(s)}<ul class="oc__grid">${svc.map((x, i) => `<li class="oc__card" data-fact="${esc(x.id)}">${pictured ? `<div class="oc__img">${image(c, x.imageId)}</div>` : `<div class="oc__num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</div>`}<h3>${esc(x.name)}</h3>${x.description ? `<p>${esc(firstSentences(x.description, 220))}</p>` : ''}</li>`).join('')}</ul></div></section>`;
+  return `<section class="sec offer oc" id="offer" data-kind="offer" data-variant="cards"><div class="wrap">${head(s)}<ul class="oc__grid">${svc.map((x, i) => `<li class="oc__card" data-fact="${esc(x.id)}">${pictured ? `<div class="oc__img">${image(c, x.imageId)}</div>` : `<div class="oc__num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</div>`}<h3>${esc(x.name)}</h3>${x.description ? `<p>${esc(firstSentences(x.description, 220))}</p>` : ''}${serviceAction(c, x)}</li>`).join('')}</ul></div></section>`;
 }
 function offerBoard(c: RenderCtx, s: ComposedSection) {
   const cat = c.cat;
@@ -134,7 +148,7 @@ function offerBoard(c: RenderCtx, s: ComposedSection) {
     return `<section class="sec offer ob ob--menu" id="offer" data-kind="offer" data-variant="board"><div class="wrap">${head(s)}<div class="ob__cols">${sections.map((sec) => `<div class="ob__group">${sec ? `<h3>${esc(sec)}</h3>` : ''}<ul>${cat.items.filter((i) => (i.section ?? '') === sec).map((i) => `<li data-fact="${esc(i.id)}"><div class="ob__row"><span class="ob__name">${esc(i.name)}</span><span class="ob__dots" aria-hidden="true"></span>${price(i)}</div>${i.description ? `<p>${esc(firstSentences(i.description, 140))}</p>` : ''}</li>`).join('')}</ul></div>`).join('')}</div>${menuMore(c)}</div></section>`;
   }
   const svc = ordered(cat.services, s.factIds);
-  return `<section class="sec offer ob" id="offer" data-kind="offer" data-variant="board"><div class="wrap">${head(s)}<ol class="ob__index">${svc.map((x, i) => `<li data-fact="${esc(x.id)}"><span class="ob__n" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span><div><h3>${esc(x.name)}</h3>${x.description ? `<p>${esc(firstSentences(x.description, 180))}</p>` : ''}</div></li>`).join('')}</ol></div></section>`;
+  return `<section class="sec offer ob" id="offer" data-kind="offer" data-variant="board"><div class="wrap">${head(s)}<ol class="ob__index">${svc.map((x, i) => `<li data-fact="${esc(x.id)}"><span class="ob__n" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span><div><h3>${esc(x.name)}</h3>${x.description ? `<p>${esc(firstSentences(x.description, 180))}</p>` : ''}${serviceAction(c, x)}</div></li>`).join('')}</ol></div></section>`;
 }
 function offerRows(c: RenderCtx, s: ComposedSection) {
   const cat = c.cat;
@@ -178,16 +192,38 @@ function proofStats(c: RenderCtx, s: ComposedSection) {
 }
 
 // ───────────────────────── gallery ─────────────────────────
+const STOP = new Set(['the', 'and', 'for', 'from', 'with', 'our', 'your', 'around', 'recent', 'latest', 'work', 'photos', 'photo', 'pictures', 'gallery', 'look', 'take', 'inside', 'see', 'some', 'what', 'we', 'do', 'done', 'jobs', 'projects', 'here', 'more', 'a', 'of', 'in', 'on', 'at', 'to', 'by', 'up', 'out']);
+const stem = (w: string) => w.toLowerCase().replace(/(ing|ings|ed|es|s)$/, '');
+const words = (t: string) => new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w)).map(stem));
+/**
+ * Photos under a gallery heading must fit what it says. A generic heading ("Photos", "Take a look around") takes any of
+ * the business's photos; a specific one ("Recent roofing work") only those whose own evidence (alt text, the service
+ * the website ties them to) shares its subject. Unclear: left out, never placed under a misleading heading.
+ */
+export function galleryFits(c: RenderCtx, s: ComposedSection, ids: string[]): string[] {
+  const where = new Set([...words(c.cat.business.name), ...(c.cat.area ?? []).flatMap((a) => [...words(a)]), ...words(c.cat.address?.formatted ?? '')]);
+  const kind = words(c.cat.business.category ?? '');
+  const topic = [...words(`${s.title ?? ''} ${s.intro ?? ''}`)].filter((w) => !where.has(w));
+  // a heading that only names the business or what it is ("Inside the bakery") is generic: any of its photos fit
+  if (!topic.length || topic.every((w) => kind.has(w))) return ids;
+  return ids.filter((id) => {
+    const p = c.img(id)?.photo;
+    if (!p) return false;
+    // the services the website ties it to (recorded by id or by name)
+    const ev = words([p.alt, ...p.services.map((sid) => c.cat.services.find((x) => x.id === sid)?.name ?? sid)].join(' '));
+    return topic.some((w) => ev.has(w));
+  });
+}
 function galleryMosaic(c: RenderCtx, s: ComposedSection) {
-  const ids = s.imageIds.filter((id) => c.img(id));
+  const ids = galleryFits(c, s, s.imageIds.filter((id) => c.img(id)));
   const n = ids.length >= 8 ? 8 : Math.min(5, ids.length);
   return `<section class="sec gallery gm gm--${n}" id="gallery" data-kind="gallery" data-variant="mosaic"><div class="wrap">${head(s)}<div class="gm__grid">${ids.slice(0, n).map((id, i) => `<figure class="gm__i gm__i--${i + 1}">${image(c, id)}</figure>`).join('')}</div></div></section>`;
 }
 function galleryFilmstrip(c: RenderCtx, s: ComposedSection) {
-  return `<section class="sec gallery gf" id="gallery" data-kind="gallery" data-variant="filmstrip"><div class="wrap">${head(s)}</div><div class="gf__strip" role="region" aria-label="Photos" tabindex="0">${s.imageIds.slice(0, 8).map((id) => `<figure>${image(c, id)}</figure>`).join('')}</div></section>`;
+  return `<section class="sec gallery gf" id="gallery" data-kind="gallery" data-variant="filmstrip"><div class="wrap">${head(s)}</div><div class="gf__strip" role="region" aria-label="Photos" tabindex="0">${galleryFits(c, s, s.imageIds).slice(0, 8).map((id) => `<figure>${image(c, id)}</figure>`).join('')}</div></section>`;
 }
 function galleryFeature(c: RenderCtx, s: ComposedSection) {
-  return `<section class="sec gallery gg" id="gallery" data-kind="gallery" data-variant="feature-grid"><div class="wrap">${head(s)}<div class="gg__grid">${s.imageIds.slice(0, 5).map((id, i) => `<figure class="gg__i${i === 0 ? ' gg__i--big' : ''}">${image(c, id)}</figure>`).join('')}</div></div></section>`;
+  return `<section class="sec gallery gg" id="gallery" data-kind="gallery" data-variant="feature-grid"><div class="wrap">${head(s)}<div class="gg__grid">${galleryFits(c, s, s.imageIds).slice(0, 5).map((id, i) => `<figure class="gg__i${i === 0 ? ' gg__i--big' : ''}">${image(c, id)}</figure>`).join('')}</div></div></section>`;
 }
 
 // ───────────────────────── story ─────────────────────────
@@ -284,6 +320,7 @@ h2{font-size:clamp(2rem,4.2vw,3.4rem);margin-bottom:.45em}h3{font-size:1.3rem;li
 }
 
 export const VARIANT_CSS: Record<string, string> = {
+  'svc-go': `.svc-go{margin-top:auto;padding-top:6px;font-weight:700;color:var(--brandText);text-decoration:underline;text-underline-offset:3px;min-height:44px;display:inline-flex;align-items:center}`,
   'hero:full-bleed': `.hb{position:relative;min-height:clamp(600px,94vh,900px);display:flex;align-items:flex-end;color:#fff;overflow:hidden;isolation:isolate}
 .hb__img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2}.hb__scrim{position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,rgba(11,12,16,.66) 0%,rgba(11,12,16,.6) 45%,rgba(11,12,16,.84) 100%)}
 .hb__body{padding-block:150px calc(76px*var(--sp))}.hb h1{font-size:min(clamp(2.7rem,6.6vw,6.2rem),calc(min(860px,92vw) / var(--fit,8)));max-width:max(13ch,calc(var(--fit,8) * 1em));line-height:.98}.hb .lede{margin-top:22px;color:#F1F2F4}
@@ -292,7 +329,7 @@ export const VARIANT_CSS: Record<string, string> = {
 .hs h1{font-size:min(clamp(2.5rem,5.2vw,4.8rem),calc(min(620px,88vw) / var(--fit,8)));color:var(--ink)}.hs .eyebrow{color:var(--brandText)}.hs .lede{margin-top:20px;color:var(--muted)}
 .hs__facts{display:grid;gap:14px;margin-top:36px;padding-top:24px;border-top:1px solid var(--line)}.hs__facts div{display:grid;grid-template-columns:130px 1fr;gap:12px}.hs__facts dt{font-weight:700;color:var(--muted);font-size:.9rem;text-transform:uppercase;letter-spacing:.08em}
 .hs__media{position:relative}.hs__media::before{content:"";position:absolute;inset:22px -22px -22px 22px;background:var(--brand);border-radius:var(--r);z-index:0}.hs__media img{position:relative;z-index:1;width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:var(--r)}
-@media (max-width:860px){.hs__grid{grid-template-columns:1fr}.hs__media{order:-1;margin-right:22px}.hs__media img{aspect-ratio:4/3}.hs__facts div{grid-template-columns:1fr;gap:2px}}`,
+@media (max-width:860px){.hs__grid{grid-template-columns:1fr}.hs__media{margin:28px 22px 0 0}.hs__media img{aspect-ratio:16/10}.hs__facts div{grid-template-columns:1fr;gap:2px}}`,
   'hero:type-collage': `.ht{background:var(--brand);color:var(--onBrand);padding-top:calc(40px*var(--sp));overflow:hidden}.ht__grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(340px,.9fr);gap:48px;align-items:center;padding-bottom:calc(72px*var(--sp))}
 .ht h1{font-size:min(clamp(3rem,7.2vw,7rem),calc(min(640px,50vw) / var(--fit,8)));line-height:.92;letter-spacing:-.025em}
 @media (max-width:860px){.ht h1{font-size:min(clamp(2.6rem,11vw,4.5rem),calc((100vw - 48px) / var(--fit,8)))}}.ht .lede{margin-top:26px}

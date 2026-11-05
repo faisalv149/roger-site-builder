@@ -385,7 +385,7 @@ export async function saveDraft(d: DraftRecord, body: Record<string, unknown>) {
   const sp = sitePlanOf(d, model, body);
   await writeSite(d.base, model, { sitePlan: sp, previousSitePlan: d.sitePlan });
   // a site made from a concept: its homepage stays the concept (src/studio/concepts/site.ts)
-  if (d.concept) await (await import("./studio/concepts/site.js")).writeConceptHome({ ...d, sitePlan: sp });
+  if (d.concept) await (await import("./studio/concepts/site.js")).writeConceptHome({ ...d, sitePlan: sp, appearance, offerings });
   d.sitePlan = sp;
   const now = new Date().toISOString();
   if (plan.id !== d.plan.id) d.history = [d.plan, ...d.history.filter((p) => p.id !== d.plan.id && p.id !== plan.id)].slice(0, 5);
