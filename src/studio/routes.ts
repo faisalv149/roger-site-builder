@@ -9,7 +9,7 @@ import type { ConceptSet } from './concepts/types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { getConceptJob, getConceptSet, resumeConceptIfStale, startConceptJob } from './concepts/jobs.js';
+import { getConceptJob, getConceptSet, resumeConceptIfStale, resumeConceptJob, startConceptJob, type ConceptJob } from './concepts/jobs.js';
 import { createShare, shareUrl } from './concepts/share.js';
 import { getSiteJob, resumeSiteIfStale, startSiteJob } from './concepts/site.js';
 import { IdentityError } from '../sources/website-business.js';
@@ -108,6 +108,20 @@ studioRoutes.post('/concepts', wrap(async (req, res) => {
     if (e instanceof StaleBrief) return res.status(409).json({ error: e.message });
     throw e;
   }
+}));
+/**
+ *   GET  /api/studio/concept-jobs?businessKey=…   the concept jobs (newest first): id, set, status, failed stage
+ *   POST /api/studio/concept-jobs/:id/resume      a failed or interrupted job continues from its first unfinished stage
+ */
+studioRoutes.get('/concept-jobs', wrap(async (req, res) => {
+  const key = typeof req.query.businessKey === 'string' ? req.query.businessKey : undefined;
+  const jobs = (await studioDocs.list<ConceptJob>('studio-concept-jobs')).filter((j) => !key || j.input.businessKey === key).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 50);
+  res.json({ jobs: jobs.map((j) => ({ id: j.id, setId: j.setId, businessKey: j.input.businessKey, status: j.status, createdAt: j.createdAt, updatedAt: j.updatedAt, resumes: j.resumes, failedStage: j.stages.find((s) => s.status === 'failed')?.name, error: j.error })) });
+}));
+studioRoutes.post('/concept-jobs/:id/resume', wrap(async (req, res) => {
+  const j = await resumeConceptJob(String(req.params.id));
+  if (!j) return res.status(404).json({ error: 'No such concept job' });
+  res.status(202).json({ id: j.id, status: j.status, url: `/api/studio/concept-jobs/${j.id}` });
 }));
 studioRoutes.get('/concept-jobs/:id', wrap(async (req, res) => {
   const found = await getConceptJob(String(req.params.id));
