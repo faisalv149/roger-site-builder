@@ -127,6 +127,7 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
           break;
         case 'photos': {
           const r = await preparePhotos(cat, job.setId, hooks.fetchImage);
+          await persistDir(setDir(job.setId)); // the render may start on a different Vercel instance
           const own = r.ok.filter((x) => x !== 'logo');
           note(`${own.length} of the business's photos copied into the preview${r.failed.length ? `; ${r.failed.length} could not be: ${r.failed.map((f) => `${f.id} (${f.reason})`).join(', ')}` : ''}`);
           // the Google listing's photos (only when the website gives too few): looked at once for relevance, never stored
@@ -186,15 +187,23 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
           const dir = setDir(job.setId);
           // A resumed function may land on a fresh instance. Restore the images
           // and screenshots before making another page or validating the set.
-          if (job.work.rendered?.length) await restoreDir(path.relative(config.dirs.out, dir).split(path.sep).join('/'));
-          await preparePhotos(cat, job.setId, hooks.fetchImage); // a no-op when this instance already has them
+          const started = Date.now();
+          await restoreDir(path.relative(config.dirs.out, dir).split(path.sep).join('/'));
+          note(`restored saved photos in ${Date.now() - started} ms`);
           const completed = job.work.rendered ?? [];
           const next = job.work.concepts!.filter((c) => !completed.some((r) => r.conceptId === c.id));
           // Each Vercel invocation owns one fresh browser and one concept. A
           // timeout can then only restart that concept, never erase A or B.
           const batch = process.env.VERCEL || hooks.chunkRender ? next.slice(0, 1) : next;
-          const rendered = batch.length ? await (hooks.render ?? renderSet)(batch, cat, job.setId) : [];
+          const photosAt = Date.now();
+          await preparePhotos(cat, job.setId, hooks.fetchImage, new Set(batch.flatMap((c) => c.images)));
+          note(`prepared ${batch.map((c) => c.id.toUpperCase()).join(', ')} photos in ${Date.now() - photosAt} ms`);
+          const rendered = batch.length ? await (hooks.render ?? renderSet)(batch, cat, job.setId, {
+            onStep: (label, ms) => { const line = `${label}: ${ms} ms`; note(line); console.info(`[concepts ${id}] ${line}`); },
+          }) : [];
+          const savedAt = Date.now();
           await persistDir(dir); // persist files before recording their checkpoint
+          note(`saved render files in ${Date.now() - savedAt} ms`);
           job.work.rendered = [...completed, ...rendered];
           await save(job);
           for (const r of job.work.rendered) note(`${r.conceptId.toUpperCase()}: desktop ${r.desktop.metrics.height}px tall, mobile ${r.mobile.metrics.height}px`);

@@ -97,6 +97,20 @@ async function getBriefs() {
 }
 const refOf = (b: BusinessBrief) => ({ businessKey: b.businessKey, revision: b.revision, briefHash: b.briefHash });
 
+test('a render restores only the concept pictures it needs', async () => {
+  const { agreed, inventory } = await getBriefs();
+  const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
+  const own = cat.photos.filter((p) => !p.url.startsWith('listing-photo:'));
+  assert.ok(own.length > 2);
+  const id = `cs_subset_${Date.now()}`;
+  const wanted = new Set([own[0].id]);
+  const result = await preparePhotos(cat, id, async () => IMGS.values().next().value!, wanted);
+  assert.ok(result.ok.includes(own[0].id));
+  assert.ok(!result.ok.includes(own[1].id));
+  assert.ok(fs.existsSync(path.join(setDir(id), 'img', `${own[0].id}.jpg`)));
+  assert.ok(!fs.existsSync(path.join(setDir(id), 'img', `${own[1].id}.jpg`)));
+});
+
 test('a bounded render checkpoints one concept and resumes with the next', async () => {
   const { agreed } = await getBriefs();
   const batches: string[] = [];
