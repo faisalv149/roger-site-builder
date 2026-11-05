@@ -70,7 +70,8 @@ export async function launchBrowser() {
       }
     }
   }
-  return chromium.launch({ executablePath: config.chromiumPath, args: ['--no-sandbox'] });
+  // STUDIO_SINGLE_PROCESS=1: the serverless Chromium's single-process mode, so tests can reproduce it locally
+  return chromium.launch({ executablePath: config.chromiumPath, args: ['--no-sandbox', ...(process.env.STUDIO_SINGLE_PROCESS === '1' ? ['--single-process', '--no-zygote'] : [])] });
 }
 
 /** Real screenshot of the generated site (needs Chromium). Returns false if unavailable. */

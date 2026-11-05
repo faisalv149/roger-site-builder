@@ -111,6 +111,23 @@ test('a render restores only the concept pictures it needs', async () => {
   assert.ok(!fs.existsSync(path.join(setDir(id), 'img', `${own[1].id}.jpg`)));
 });
 
+test('single-process Chromium (as on Vercel): a concept renders at desktop and phone size, one browser per page', { skip: !chrome && 'no Chrome here' }, async () => {
+  const { agreed, inventory } = await getBriefs();
+  const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
+  const setId = 'cs_single_process';
+  const ok = await preparePhotos(cat, setId);
+  cat.photos = cat.photos.filter((p) => ok.ok.includes(p.id));
+  const [A] = fallbackPlans(cat, agreed).map((p, i) => compose(p, (['a', 'b', 'c'] as const)[i], 'fallback', cat, agreed, i === 0));
+  const steps: string[] = [];
+  process.env.STUDIO_SINGLE_PROCESS = '1';
+  try {
+    const [r] = await renderSet([A], cat, setId, { onStep: (s) => steps.push(s) });
+    assert.ok(r.desktop.metrics.height > 0 && r.mobile.metrics.height > 0, 'both sizes rendered');
+    assert.ok(fs.existsSync(r.mobile.full) && fs.existsSync(r.desktop.full));
+    assert.deepEqual(steps.filter((s) => /browser start/.test(s)), ['a desktop browser start', 'a mobile browser start'], 'a fresh browser for each page');
+  } finally { delete process.env.STUDIO_SINGLE_PROCESS; }
+});
+
 test('a bounded render checkpoints one concept and resumes with the next', async () => {
   const { agreed } = await getBriefs();
   const batches: string[] = [];

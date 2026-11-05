@@ -208,13 +208,18 @@ export async function renderSet(concepts: Concept[], cat: Catalog, setId: string
   fs.mkdirSync(path.join(dir, 'shots'), { recursive: true });
   let started = Date.now();
   const step = (label: string) => { opts.onStep?.(label, Date.now() - started); started = Date.now(); };
-  const browser = await launchBrowser();
-  step('browser start');
+  // Serverless Chromium runs with --single-process, where a browser supports one context for its whole life: a second
+  // one (the phone-size render after the desktop one) fails at newPage with "browser has been closed". There, each
+  // page gets its own browser; elsewhere one browser serves every page.
+  const perPage = singleProcessChrome();
+  const shared = perPage ? undefined : await launchBrowser();
+  if (shared) step('browser start');
+  const open = new Set<import('playwright-core').Browser>(shared ? [shared] : []);
   // If Chrome stops responding, close it while there is still time for the job
   // to record a named failure instead of disappearing at Vercel's 300 s limit.
   const watchdog = process.env.VERCEL ? setTimeout(() => {
     opts.onStep?.('browser unresponsive; closing after 180 s', 180_000);
-    void browser.close().catch(() => undefined);
+    for (const b of open) void b.close().catch(() => undefined);
   }, 180_000) : undefined;
   const out: Rendered[] = [];
   try {
@@ -225,6 +230,8 @@ export async function renderSet(concepts: Concept[], cat: Catalog, setId: string
       step(`${name} HTML`);
       const url = `file:///${html.replace(/\\/g, '/').replace(/^\//, '')}`;
       const shoot = async (kind: 'desktop' | 'mobile') => {
+        const browser = shared ?? await launchBrowser();
+        if (!shared) { open.add(browser); step(`${name} ${kind} browser start`); }
         const ctx = await browser.newContext(kind === 'desktop' ? { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 } : { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
         try {
         const page = await ctx.newPage();
@@ -243,12 +250,18 @@ export async function renderSet(concepts: Concept[], cat: Catalog, setId: string
         step(`${name} ${kind} measurements`);
         return { full, hero, metrics };
         } catch (e) { throw new Error(`${name} ${kind} render: ${(e as Error).message}`); }
-        finally { await ctx.close().catch(() => undefined); }
+        finally {
+          await ctx.close().catch(() => undefined);
+          if (!shared) { open.delete(browser); await browser.close().catch(() => undefined); }
+        }
       };
       const desktop = await shoot('desktop');
       const mobile = await shoot('mobile');
       out.push({ conceptId: concept.id, html, desktop, mobile });
     }
-  } finally { if (watchdog) clearTimeout(watchdog); await browser.close(); }
+  } finally { if (watchdog) clearTimeout(watchdog); for (const b of open) await b.close().catch(() => undefined); }
   return out;
 }
+
+/** Serverless Chromium (@sparticuz on Vercel) runs single-process: one browser context per browser. STUDIO_SINGLE_PROCESS=1 forces it (tests). */
+export const singleProcessChrome = () => process.env.STUDIO_SINGLE_PROCESS === '1' || (!config.chromiumPath && !!process.env.VERCEL);
