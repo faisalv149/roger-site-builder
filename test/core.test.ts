@@ -159,3 +159,32 @@ test("a website's own headline keeps its words but not the separators left at it
   assert.equal(tidyHeadline('| Fresh bread daily |'), 'Fresh bread daily');
   assert.equal(tidyHeadline('Roof repair — done right'), 'Roof repair — done right');
 });
+
+test('a phone or address the website and Google disagree on is held: neither is chosen for visitors', async () => {
+  const { heldContacts } = await import('../src/pipeline.js');
+  const site = { phones: { primary: '(833) 656-4056' }, address: { zip: '78744', formatted: '4437 Supply Court, Unit #101, Austin, TX 78744' } };
+  const h = heldContacts({ phone: '(512) 690-4935', formattedAddress: '901 Reinli St, Austin, TX 78751, USA' }, site);
+  assert.deepEqual(h.phone, { google: '(512) 690-4935', website: '(833) 656-4056' });
+  assert.equal(h.address?.website, '4437 Supply Court, Unit #101, Austin, TX 78744');
+  assert.deepEqual(heldContacts({ phone: '512-690-4935', formattedAddress: '901 Reinli St, Austin, TX 78751, USA' }, { phones: { primary: '(512) 690 4935' }, address: { zip: '78751', formatted: '901 Reinli St' } }), {}, 'the same number written differently is no conflict');
+});
+
+test('"Schedule now" only where it reaches a verified booking page; a request form says what it is', async () => {
+  const { ctaFor, requestLabel } = await import('../src/pipeline.js');
+  assert.deepEqual(ctaFor({ label: 'Schedule Now', kind: 'external', href: 'https://book.example.com' }, true, false), { label: 'Schedule Now', to: 'booking' });
+  assert.deepEqual(ctaFor({ label: 'Schedule Now', kind: 'page', href: 'https://radiant.example/schedule' }, false, false), { label: 'Request an appointment', to: 'form' });
+  assert.deepEqual(ctaFor({ label: 'Schedule Now', kind: 'anchor', href: '#form' }, false, false), { label: 'Request an appointment', to: 'form' });
+  assert.deepEqual(ctaFor({ label: 'Call Now', kind: 'phone', href: 'tel:+15126904935' }, false, true), { label: 'Send a request', to: 'form' }, 'a held phone is not called');
+  assert.deepEqual(ctaFor({ label: 'Get a free estimate', kind: 'anchor', href: '#form' }, false, false), { label: 'Get a free estimate', to: 'form' });
+  assert.equal(requestLabel('Book an appointment'), 'Request an appointment');
+});
+
+test('vague one-word service labels are dropped; a service photo needs words that name that service', async () => {
+  const { vagueService, serviceImageFits } = await import('../src/pipeline.js');
+  for (const v of ['Installation', 'Maintenance', 'Tankless', 'Repair']) assert.equal(vagueService(v), true, v);
+  for (const k of ['AC Repair', 'Water Heater Repair', 'Repiping', 'Leak Detection']) assert.equal(vagueService(k), false, k);
+  assert.equal(serviceImageFits('Plumbing', { alt: 'Radiant plumber fixing a sink', url: 'https://x/a.jpg' }), true);
+  assert.equal(serviceImageFits('Water Heaters', { url: 'https://x/tankless-water-heater-install.jpg' }), true);
+  assert.equal(serviceImageFits('Drains & Sewers', { alt: 'Radiant technician with van', url: 'https://x/IMG_2041.jpg' }), false);
+  assert.equal(serviceImageFits('Electrical', { url: 'https://x/team-photo.jpg' }), false);
+});

@@ -52,6 +52,7 @@ import { offeringsFrom, type Offering } from './design/offerings.js';
 import { toMeta, type PhotoInfo } from './design/photos.js';
 import type { Appearance } from './design/schema.js';
 import { withLiveReviews } from './sources/google-live.js';
+import { phoneKey } from './sources/site-content.js';
 import { composeModel, findDraft, newDraftId, putDraft, tokensFor, type DraftBase, type DraftRecord } from './drafts.js';
 
 export interface BuildInput {
@@ -235,6 +236,12 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     if (!b.primaryTypeLabel && content.identity.typeHint) { b.primaryTypeLabel = content.identity.typeHint.label; b.primaryType ||= content.identity.typeHint.googleType; b.types = [...new Set([...(b.types || []), content.identity.typeHint.googleType])]; recovered.push(`business type "${b.primaryTypeLabel}" from the website`); }
   }
   if (recovered.length) warnings.push(`Filled in from the website: ${recovered.join('; ')}.`);
+  // the website and Google disagree on the phone or the address: neither is chosen for visitors (no call or directions
+  // button, no number or map shown) until the owner settles it; the conflict stays in the review, the request form stays
+  const google = { phone: b.phone, phoneE164: b.phoneE164, formattedAddress: b.formattedAddress, street: b.street, lat: b.lat, lng: b.lng };
+  const held = content && b.source !== 'mock' ? heldContacts(b, content) : {};
+  if (held.phone) { b.phone = undefined; b.phoneE164 = undefined; warnings.push(`Phone held for the owner: Google lists ${held.phone.google}, the website ${held.phone.website}.`); }
+  if (held.address) { b.formattedAddress = undefined; b.street = undefined; b.lat = undefined; b.lng = undefined; warnings.push(`Address held for the owner: Google lists ${held.address.google}, the website ${held.address.website}.`); }
   // the website's own photographs (fetched at full size, measured, de-duplicated; failures recorded)
   let siteImages: Awaited<ReturnType<typeof fetchSiteImages>> | undefined;
   if (content && scan && b.source !== 'mock') {
@@ -301,7 +308,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   // the picture on each service's own card, kept with that service
   let serviceImgs: Awaited<ReturnType<typeof fetchServiceImages>> | undefined;
   if (content && b.source !== 'mock' && content.services.some((x) => x.image)) {
-    serviceImgs = await timed(steps, emit, 'Fetch service pictures', () => fetchServiceImages(content.services, { outDir: assetDir, publicPrefix: 'assets' }), (r) => `${r.byService.size} of ${r.records.length} cropped to 16:10`);
+    serviceImgs = await timed(steps, emit, 'Fetch service pictures', () => fetchServiceImages(content.services.map((x) => (x.image && !serviceImageFits(x.name, x.image) ? { ...x, image: undefined } : x)), { outDir: assetDir, publicPrefix: 'assets' }), (r) => `${r.byService.size} of ${r.records.length} cropped to 16:10`);
     for (const s of factsRes.services) { const im = serviceImgs.byService.get(nameKey(s.name)); if (im) s.image = im; }
     for (const r of serviceImgs.records.filter((x) => !x.ok)) warnings.push(`Service picture not used: ${r.service} (${r.skipped ?? r.error})`);
   }
@@ -330,7 +337,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       factsRes.services = verified.map((r) => {
         const src = content.services.find((x) => serviceKey(x.name) === serviceKey(r.canonicalName));
         const { description, note } = splitNote(r.description?.value);
-        const contact = src?.booking ? { kind: src.booking.kind, url: src.booking.url, label: src.booking.kind === 'phone' ? 'Call to book' : src.booking.label } : null;
+        const contact = src?.booking && !(src.booking.kind === 'phone' && held.phone) ? { kind: src.booking.kind, url: src.booking.url, label: src.booking.kind === 'phone' ? 'Call to book' : src.booking.kind === 'online' ? src.booking.label : requestLabel(src.booking.label) } : null;
         return { name: r.canonicalName, description: shorten(description ?? '', 150), icon: iconFor(r.canonicalName), note, contact, image: serviceImgs?.byService.get(nameKey(r.canonicalName)) ?? null, fromWebsite: true, secondary: !r.isPrimary, page: ownPage(r.destination, scan.finalUrl), price: factsRes.services.find((x) => serviceKey(x.name) === serviceKey(r.canonicalName))?.price ?? undefined };
       });
     }
@@ -338,6 +345,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   }
 
   // 5) Services (before the design plan, which leads with one of them)
+  factsRes.services = factsRes.services.filter((x) => !vagueService(x.name));
   const services = pickServices(theme, b, scan, factsRes.servicesMentioned, factsRes.serviceBlurbs, { emergencyOk: factsRes.facts.emergency || factsRes.facts.open24h, own: factsRes.services, ownFromWebsite: factsRes.services.some((x) => x.fromWebsite) });
   emit({ type: 'step', step: 'Services', status: 'done', note: services.source === 'business' ? `${services.items.length} from the business's own website` : services.hidden ? 'none verified, section hidden' : `theme's standard list (${factsRes.services.length} own services found, need ${(theme.sectionRules.services as any)?.min ?? 3})` });
   const evidence = evidenceFor(theme, b, factsRes.facts, content?.areas?.places);
@@ -393,7 +401,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     const projects = !!evModel?.projectsVerified;
     sourceBundle = {
       cta: heroCta || second ? {
-        primary: heroCta ? { label: heroCta.label, to: heroCta.kind === 'phone' ? 'phone' : heroCta.kind === 'form' || heroCta.kind === 'anchor' ? 'form' : primary && heroCta.href === primary.url ? 'booking' : 'url', href: heroCta.kind === 'external' || heroCta.kind === 'page' ? heroCta.href : undefined, terms: heroCta.terms, eligibleServices: (evModel?.offers[0]?.eligible ?? []).map((e) => serviceKey(e.service)), featuredService: featuredService(evModel?.offers[0], evModel?.services ?? []) } : undefined,
+        primary: heroCta ? { ...ctaFor(heroCta, !!primary && heroCta.href === primary.url, !!held.phone), terms: heroCta.terms, eligibleServices: (evModel?.offers[0]?.eligible ?? []).map((e) => serviceKey(e.service)), featuredService: featuredService(evModel?.offers[0], evModel?.services ?? []) } : undefined,
         // "See our work" goes to the photo section of this site when the work is shown there; a link to a page that exists only on the old site would be dead
         secondary: second && (projects || /work|project|gallery|photo/i.test(second.label)) ? { label: second.label, to: 'gallery' } : undefined,
       } : undefined,
@@ -528,7 +536,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   const claude: ClaudeRun = factsRes.claude ?? claudeNotRun(false, null, 'not run');
   const websitePhotoCount = photos.items.filter((p) => p.photo.source === 'website').length;
   const review0 = checkBuild({
-    business: b, scan,
+    business: { ...b, ...google }, scan,
     servicesKept: model.services.items.map((x) => x.label),
     photos: { discovered: siteImages ? siteImages.records.filter((r) => r.role === 'content' || r.role === 'team').length : 0, kept: websitePhotoCount, failures: siteImages ? siteImages.records.filter((r) => !r.ok).length : 0 },
     videos: { discovered: content?.videos.length ?? 0, kept: sourceBundle?.videos.length ?? 0 },
@@ -693,3 +701,39 @@ export async function runAudit(input: { website: string; google?: string; placeI
  * ("- Just Call Radiant -" → "Just Call Radiant"), which read as a typo once the words stand alone.
  */
 export const tidyHeadline = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/^[\s\-–—|:•·~*]+|[\s\-–—|:•·~*]+$/g, '').trim();
+
+/** The website and Google disagree: the phone (by number) or the address (by ZIP). Both values, for the owner. */
+export function heldContacts(b: Pick<Business, 'phone' | 'formattedAddress'>, c: { phones: { primary?: string }; address?: { zip: string; formatted: string } }): { phone?: { google: string; website: string }; address?: { google: string; website: string } } {
+  const out: ReturnType<typeof heldContacts> = {};
+  if (c.phones.primary && b.phone && phoneKey(c.phones.primary) !== phoneKey(b.phone)) out.phone = { google: b.phone, website: c.phones.primary };
+  if (c.address && b.formattedAddress && !b.formattedAddress.includes(c.address.zip)) out.address = { google: b.formattedAddress, website: c.address.formatted };
+  return out;
+}
+
+const SCHEDULING = /\b(schedul\w*|book\w*|appointments?|reserv\w*)\b/i;
+/** A button that opens the request form says so: scheduling words promise a booking flow it doesn't have. */
+export const requestLabel = (label: string) => (SCHEDULING.test(label) ? 'Request an appointment' : label);
+
+/** The website's main action on this site: its own words, unless they promise what the button can't do here. */
+export function ctaFor(c: { label: string; kind: string; href: string }, verifiedBooking: boolean, phoneHeld: boolean): { label: string; to: 'phone' | 'form' | 'booking' | 'url'; href?: string } {
+  if (c.kind === 'phone') return phoneHeld ? { label: 'Send a request', to: 'form' } : { label: c.label, to: 'phone' };
+  if (verifiedBooking) return { label: c.label, to: 'booking' };
+  if (c.kind === 'form' || c.kind === 'anchor') return { label: requestLabel(c.label), to: 'form' };
+  // a link to a page on the old site that promises scheduling: the request form instead
+  if (SCHEDULING.test(c.label)) return { label: 'Request an appointment', to: 'form' };
+  return { label: c.label, to: 'url', href: c.kind === 'external' || c.kind === 'page' ? c.href : undefined };
+}
+
+/** A one-word label that names no service on its own ("Installation", "Maintenance", "Tankless"). */
+const VAGUE = new Set(['installation', 'installations', 'install', 'installs', 'maintenance', 'repair', 'repairs', 'replacement', 'replacements', 'service', 'services', 'inspection', 'inspections', 'cleaning', 'tankless', 'upgrades', 'upgrade', 'emergency', 'commercial', 'residential', 'other', 'more', 'misc', 'general', 'consultation', 'estimates', 'estimate']);
+export const vagueService = (name: string) => { const w = name.toLowerCase().replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter(Boolean); return w.length === 1 && VAGUE.has(w[0]); };
+
+/** A service's picture fits when its own words (alt text, file name) name what the service is about. */
+export function serviceImageFits(service: string, image: { alt?: string; url: string }): boolean {
+  const generic = new Set(['service', 'services', 'repair', 'repairs', 'installation', 'replacement', 'maintenance', 'and', 'the', 'for', 'your']);
+  const words = (t: string) => t.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 3 && !generic.has(w));
+  const want = words(service);
+  const have = words(`${image.alt ?? ''} ${decodeURIComponent(image.url.split('/').pop() ?? '').replace(/\.[a-z]+$/, '')}`);
+  const near = (a: string, b: string) => a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b.slice(0, 5)) || b.startsWith(a.slice(0, 5))));
+  return want.some((w) => have.some((h) => near(w, h)));
+}

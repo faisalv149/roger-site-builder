@@ -280,9 +280,12 @@ test('service pictures stay with their services, cropped to one shape, with a fo
   const byName = (n: string) => cards.find((c) => c.includes(n))!;
   for (const n of SERVICES) {
     const c = byName(n.replace('&', '&amp;'));
-    assert.match(c, /<div class="f-svc-media"><img src="assets\/svc-\d\.webp" width="900" height="562" alt=""/, `${n}: a 16:10 picture of its own, marked decorative because the heading names it`);
+    assert.match(c, /<div class="f-svc-media"><img src="assets\/svc-\d\.webp" width="900" height="562" alt="[^"]*"/, `${n}: a 16:10 picture of its own`);
     assert.match(c, /object-position:\d+% \d+%/, `${n}: its focal point`);
   }
+  // an alt that only restates the heading is decorative; one that adds something stays
+  assert.match(byName('Massage Chair Session'), /alt="" loading/);
+  assert.match(byName('Decompression Therapy'), /alt="Spinal decompression therapy table"/);
   // each card's own booking destination
   assert.match(byName('Massage Therapy'), /href="tel:1-512-630-3723"[^>]*>Call to book/);
   assert.match(byName('Chiropractic Adjustment'), /href="https:\/\/practice\.chirotouch\.com\/portal\/LakesideChiropractic"[^>]*>Book online/);

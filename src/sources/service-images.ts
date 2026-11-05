@@ -84,11 +84,19 @@ export async function fetchServiceImages(services: SourceService[], opts: { outD
       fs.writeFileSync(path.join(opts.outDir, file), cropped);
       fs.writeFileSync(path.join(opts.outDir, orig), original);
       rec.ok = true; rec.focal = focal;
-      byService.set(nameKey(s.name), { path: `${opts.publicPrefix}/${file}`, width: TW, height: TH, focal, alt: (s.image.alt || '').trim(), source: 'website', original: `${opts.publicPrefix}/${orig}`, sourceUrl: s.image.url });
+      byService.set(nameKey(s.name), { path: `${opts.publicPrefix}/${file}`, width: TW, height: TH, focal, alt: cardAlt(s.name, s.image.alt), source: 'website', original: `${opts.publicPrefix}/${orig}`, sourceUrl: s.image.url });
     } catch (e) {
       rec.skipped = 'unreadable';
       rec.error = `could not decode the image: ${(e as Error).message.slice(0, 80)}`;
     }
   }
   return { byService, records };
+}
+
+/** A picture's alt beside its heading: empty (decorative) when it only restates the heading ("A massage chair session" by "Massage Chair Session"). */
+export function cardAlt(heading: string, alt: string | undefined): string {
+  const a = (alt || '').trim();
+  const words = (t: string) => t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !['a', 'an', 'the', 'of', 'our', 'and'].includes(w));
+  const h = new Set(words(heading));
+  return a && words(a).every((w) => h.has(w)) ? '' : a;
 }
