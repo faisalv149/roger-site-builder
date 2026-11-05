@@ -356,6 +356,12 @@ export function headlineRelevant(headline: string, ctx: { typeLabel?: string; se
   return hits.size >= 1 && (ctx.services.length < 2 || hits.size >= 2 || (ctx.typeLabel ? words(ctx.typeLabel).some((w) => h.includes(stem(w))) : false));
 }
 
+/** A one-word label that names no service on its own ("Installation", "Maintenance", "Tankless"). */
+const VAGUE = new Set(['installation', 'installations', 'install', 'installs', 'maintenance', 'repair', 'repairs', 'replacement', 'replacements', 'service', 'services', 'inspection', 'inspections', 'cleaning', 'tankless', 'upgrades', 'upgrade', 'emergency', 'commercial', 'residential', 'other', 'more', 'misc', 'general', 'consultation', 'estimates', 'estimate']);
+export const vagueService = (name: string) => { const w = name.toLowerCase().replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter(Boolean); return w.length === 1 && VAGUE.has(w[0]); };
+/** A menu link to a list, not a service: "Every plumbing service we offer", "All indoor air quality services". */
+const MENU_PHRASE = /^(?:every|all)\b.*\b(?:services?|we offer)$/i;
+
 /** What the model says about whether the site may be published as built. Used by the build review and the publish gate. */
 export function reviewEvidence(m: EvidenceModel, built: { servicesShown: string[]; headline?: string; typeLabel?: string; primaryCtaLabel?: string; galleryTitle?: string; storyChars?: number; serviceCardImages: number }): EvidenceFinding[] {
   const out: EvidenceFinding[] = [];
@@ -363,7 +369,8 @@ export function reviewEvidence(m: EvidenceModel, built: { servicesShown: string[
   const primary = m.services.filter((s) => s.isPrimary && s.status === 'verified');
   const missing = primary.filter((s) => !shown.has(tokenKey(s.canonicalName)) && !s.aliases.some((a) => shown.has(tokenKey(a))));
   if (missing.length) out.push({ id: 'primary-services-missing', level: 'block', message: `The business's own services are missing from the site: ${missing.map((s) => s.canonicalName).join(', ')}.` });
-  const secondary = m.services.filter((s) => !s.isPrimary && s.status === 'verified' && !shown.has(tokenKey(s.canonicalName)));
+  // vague labels ("Installation") and menu wording ("Every plumbing service we offer") are not services the site left out
+  const secondary = m.services.filter((s) => !s.isPrimary && s.status === 'verified' && !shown.has(tokenKey(s.canonicalName)) && !vagueService(s.canonicalName) && !MENU_PHRASE.test(s.canonicalName));
   if (secondary.length) out.push({ id: 'secondary-services-missing', level: 'review', message: `Services listed in the website's menu are not on the site: ${secondary.map((s) => s.canonicalName).join(', ')}.` });
   const fromText = m.services.filter((s) => s.status === 'verified' && s.mentions.length > 0 && s.mentions.every((x) => x.kind === 'page-text') && shown.has(tokenKey(s.canonicalName)));
   if (fromText.length) out.push({ id: 'services-from-text', level: 'review', message: `${fromText.length} service${fromText.length > 1 ? 's were' : ' was'} read from the website's wording, not from a list of services: ${fromText.map((s) => s.canonicalName).slice(0, 5).join(', ')}. Confirm ${fromText.length > 1 ? 'them' : 'it'}.` });

@@ -67,7 +67,8 @@ ${c.mapsUrl ? `<meta http-equiv="refresh" content="0;url=${esc(c.mapsUrl)}">` : 
 
 /** Step 2a (has a website): the audit result. */
 export function auditCard(a: AuditResult, reportUrl: string, image: string): IMessageCard {
-  const bullets = a.summary.bullets.map((b) => `• ${b}`).join('\n');
+  // a written summary can come back with a blank point: the client never sees an empty bullet
+  const bullets = a.summary.bullets.map((b) => (b ?? '').trim()).filter(Boolean).map((b) => `• ${b}`).join('\n');
   return {
     kind: 'audit',
     text: `${a.summary.headline}\n\n${bullets}\n\n${a.summary.pitch}`.trim(),

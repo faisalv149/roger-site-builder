@@ -187,6 +187,15 @@ test('vague one-word service labels are dropped; a service photo needs words tha
   assert.equal(serviceImageFits('Water Heaters', { url: 'https://x/tankless-water-heater-install.jpg' }), true);
   assert.equal(serviceImageFits('Drains & Sewers', { alt: 'Radiant technician with van', url: 'https://x/IMG_2041.jpg' }), false);
   assert.equal(serviceImageFits('Electrical', { url: 'https://x/team-photo.jpg' }), false);
+  // the owner's "missing services" check leaves out vague labels and menu wording, and keeps real services
+  const { reviewEvidence } = await import('../src/evidence.js');
+  const svc = (canonicalName: string) => ({ canonicalName, aliases: [], isPrimary: false, status: 'verified', mentions: [{ kind: 'nav' }] });
+  const found = reviewEvidence({ services: ['Installation', 'Maintenance', 'Tankless', 'Every plumbing service we offer', 'All indoor air quality services', 'Duct Cleaning'].map(svc), assets: [], conflicts: [], claims: {}, brand: { confidence: 1 }, hero: {}, projectsVerified: [] } as any, { servicesShown: [], serviceCardImages: 0 });
+  assert.equal(found.find((f) => f.id === 'secondary-services-missing')?.message, "Services listed in the website's menu are not on the site: Duct Cleaning.");
+  // the audit text never shows an empty bullet
+  const { auditCard } = await import('../src/imessage/cards.js');
+  const card = auditCard({ summary: { headline: 'Scored 88.', bullets: ['Phones differ', '', '  '], pitch: 'Want it?' } } as any, 'https://x/r', 'https://x/i.png');
+  assert.equal(card.text, 'Scored 88.\n\n• Phones differ\n\nWant it?');
   // the business's own name is not evidence of what the picture shows
   const biz = 'Radiant Plumbing, Air Conditioning, & Electrical';
   assert.equal(serviceImageFits('Plumbing', { alt: 'Radiant Plumbing technician beside the van', url: 'https://x/radiant-plumbing-van.jpg' }, biz), false);

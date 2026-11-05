@@ -9,7 +9,7 @@ import { formatDuration, imageKey, nameKey } from './sources/site-content.js';
 import { fetchServiceImages, type ServiceImageRecord } from './sources/service-images.js';
 import { buildBrandProfile, dominantColors, profileColors, type BrandProfile } from './sources/brand-profile.js';
 import { extractorResult } from './content/extraction.js';
-import { featuredService, buildAssets, buildEvidenceModel, headlineRelevant, reconcileServices, reviewEvidence, serviceKey, type EvidenceModel } from './evidence.js';
+import { vagueService, featuredService, buildAssets, buildEvidenceModel, headlineRelevant, reconcileServices, reviewEvidence, serviceKey, type EvidenceModel } from './evidence.js';
 import { iconFor, shorten, splitNote } from './content/facts.js';
 import { IdentityError } from './sources/website-business.js';
 import { fetchSiteImages, type ImageRecord } from './sources/site-images.js';
@@ -724,9 +724,7 @@ export function ctaFor(c: { label: string; kind: string; href: string }, verifie
   return { label: c.label, to: 'url', href: c.kind === 'external' || c.kind === 'page' ? c.href : undefined };
 }
 
-/** A one-word label that names no service on its own ("Installation", "Maintenance", "Tankless"). */
-const VAGUE = new Set(['installation', 'installations', 'install', 'installs', 'maintenance', 'repair', 'repairs', 'replacement', 'replacements', 'service', 'services', 'inspection', 'inspections', 'cleaning', 'tankless', 'upgrades', 'upgrade', 'emergency', 'commercial', 'residential', 'other', 'more', 'misc', 'general', 'consultation', 'estimates', 'estimate']);
-export const vagueService = (name: string) => { const w = name.toLowerCase().replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter(Boolean); return w.length === 1 && VAGUE.has(w[0]); };
+export { vagueService } from './evidence.js';
 
 /** A service's picture fits when its own words (alt text, file name) name what the service is about.
  *  The business's own name is not evidence: "Radiant Plumbing van" says nothing about plumbing work. */
