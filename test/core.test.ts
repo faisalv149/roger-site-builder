@@ -192,6 +192,9 @@ test('vague one-word service labels are dropped; a service photo needs words tha
   const svc = (canonicalName: string) => ({ canonicalName, aliases: [], isPrimary: false, status: 'verified', mentions: [{ kind: 'nav' }] });
   const found = reviewEvidence({ services: ['Installation', 'Maintenance', 'Tankless', 'Every plumbing service we offer', 'All indoor air quality services', 'Duct Cleaning'].map(svc), assets: [], conflicts: [], claims: {}, brand: { confidence: 1 }, hero: {}, projectsVerified: [] } as any, { servicesShown: [], serviceCardImages: 0 });
   assert.equal(found.find((f) => f.id === 'secondary-services-missing')?.message, "Services listed in the website's menu are not on the site: Duct Cleaning.");
+  // a scheduling button turned into the request form says why, so the owner knows what to confirm
+  const cta = reviewEvidence({ services: [], assets: [], conflicts: [], claims: {}, brand: { confidence: 1 }, hero: { primaryCta: { label: 'Schedule Now' } }, projectsVerified: [] } as any, { servicesShown: [], serviceCardImages: 0, primaryCtaLabel: 'Request an appointment' });
+  assert.match(cta.find((f) => f.id === 'primary-cta-changed')!.message, /"Schedule Now" is replaced by "Request an appointment"\. It opens the request form, because no verified booking/);
   // the audit text never shows an empty bullet
   const { auditCard } = await import('../src/imessage/cards.js');
   const card = auditCard({ summary: { headline: 'Scored 88.', bullets: ['Phones differ', '', '  '], pitch: 'Want it?' } } as any, 'https://x/r', 'https://x/i.png');
