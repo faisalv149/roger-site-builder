@@ -47,12 +47,28 @@ export async function writeOgCard(file: string, opts: { heroFile: string | Buffe
 /** Chromium for screenshots: the local install (Playwright cache, Chrome, Edge) or, on Vercel, @sparticuz/chromium. */
 export const screenshotsAvailable = () => !!config.chromiumPath || !!process.env.VERCEL;
 
+// Several Studio jobs can launch browsers in one Vercel instance. Sparticuz extracts to
+// /tmp/chromium; concurrent extractions can try to execute that file while it is being
+// written (ETXTBSY). Share the extraction promise across all launches in this process.
+let serverlessExecutable: Promise<string> | undefined;
+
 export async function launchBrowser() {
   const { chromium } = await import('playwright-core');
   if (!config.chromiumPath && process.env.VERCEL) {
     const { default: serverless } = await import('@sparticuz/chromium'); // a Chromium build for serverless Linux
     serverless.setGraphicsMode = false; // no GPU there; skipping it starts faster
-    return chromium.launch({ executablePath: await serverless.executablePath(), args: serverless.args, headless: true });
+    serverlessExecutable ??= serverless.executablePath().catch((error: unknown) => {
+      serverlessExecutable = undefined; // a later request may retry a failed extraction
+      throw error;
+    });
+    const executablePath = await serverlessExecutable;
+    for (let attempt = 0; ; attempt++) {
+      try { return await chromium.launch({ executablePath, args: serverless.args, headless: true }); }
+      catch (error) {
+        if (attempt >= 4 || !/ETXTBSY/.test(String(error))) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** attempt));
+      }
+    }
   }
   return chromium.launch({ executablePath: config.chromiumPath, args: ['--no-sandbox'] });
 }

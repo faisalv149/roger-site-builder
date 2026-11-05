@@ -23,8 +23,20 @@ const { buildFromSnapshot } = await import('../src/studio/brief.js');
 const { getSnapshot } = await import('../src/studio/snapshot.js');
 const { readPdf, itemsFromPdf, seenInOcr, tesseractOcr, pdfKind } = await import('../src/studio/pdf.js');
 const { runQa } = await import('../src/studio/qa.js');
+const { documentLimits } = await import('../src/studio/stages.js');
 const { coverageReport, conflictReport, summaryTable } = await import('../src/studio/report.js');
 type Ocr = import('../src/studio/pdf.js').Ocr;
+
+test('serverless PDF work is bounded while local OCR coverage remains available', () => {
+  const serverless = documentLimits(true);
+  const local = documentLimits(false);
+  assert.equal(serverless.fetchTimeoutMs, 15_000);
+  assert.equal(serverless.fetchAttempts, 2);
+  assert.ok(serverless.maxPages <= 8);
+  assert.equal(serverless.ocrPages, 0);
+  assert.equal(local.fetchTimeoutMs, 60_000);
+  assert.equal(local.ocrPages, 6);
+});
 
 // ───────────────────────── PDFs, written by hand ─────────────────────────
 interface Line { t: string; size: number; x: number; y: number; bold?: boolean }
