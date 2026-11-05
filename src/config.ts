@@ -59,8 +59,10 @@ const googleKey = process.env.GOOGLE_MAPS_API_KEY || '';
 // OUT_DIR: generated sites, cards and reports (default out/). On a host, point it and DATA_DIR at the persistent disk.
 const OUT = process.env.OUT_DIR ? path.resolve(process.env.OUT_DIR) : TMP ? path.join(TMP, 'out') : path.join(ROOT, 'out');
 // Hosts that announce their public URL: Render (RENDER_EXTERNAL_URL), Railway (RAILWAY_PUBLIC_DOMAIN, no scheme)
+// A Vercel preview serves itself (VERCEL_URL): its sites, cards and owner links must not point at the production domain
 const hostUrl = process.env.RENDER_EXTERNAL_URL
   || (process.env.RAILWAY_PUBLIC_DOMAIN && `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`)
+  || (process.env.VERCEL_ENV === 'preview' && process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`)
   || (process.env.VERCEL_PROJECT_PRODUCTION_URL && `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`);
 
 export const config = {
