@@ -7,6 +7,7 @@ import { confirmServiceImages } from './design/offerings.js';
 import { pageMeta, seoIssues } from './seo.js';
 import { addUpload } from './uploads.js';
 import { contentView, ensureLocalSite, refreshSavedSite, DraftError, findDraft, generateAnother, getDraft, issueOwnerKey, ownerState, ownerUrl, previewTokens, putDraft, renderWorking, resolvePlan, saveDraft, summarisePlan, verifyOwnerKey, withDraftLock, type DraftRecord } from './drafts.js';
+import { applyConcept, nextConcept } from './studio/concepts/site.js';
 import { allOrders, createDemoOrder, domainIdeas, DNS_PROVIDERS, getOrder, listOrders, orderView, simulateVerification, updateOnboarding } from './orders.js';
 import { layoutOptions } from './design/planner.js';
 import { latestBuildFor, listLeads } from './store.js';
@@ -90,6 +91,15 @@ ownerRoutes.post('/:draftId/render', wrap(async (req, res) => {
 
 ownerRoutes.post('/:draftId/generate', wrap(async (req, res) => {
   const d = (res.locals as Locals).draft;
+  // a site made from a concept set: "another design" is the set's next concept (three to choose from, saved as chosen)
+  if (d.concept) {
+    const next = await nextConcept(d.concept);
+    if (next) {
+      const saved = await applyConcept(d.id, d.concept.setId, next);
+      const r = await renderWorking(saved, {});
+      return res.json({ html: r.html, plan: summarisePlan(r.plan), planId: r.plan.id, concept: { id: next.id, name: next.name }, saved: true, revision: saved.revision, options: layoutOptions(r.plan, saved.base.photos, { offerings: saved.offerings, category: saved.category, services: saved.base.services.items }) });
+    }
+  }
   const r = await withDraftLock(d.id, async () => generateAnother((await getDraft(d.id))!, json(req)));
   res.json({ html: r.html, plan: summarisePlan(r.plan), planId: r.plan.id, options: layoutOptions(r.plan, d.base.photos, { offerings: d.offerings, category: d.category, services: d.base.services.items }) });
 }));

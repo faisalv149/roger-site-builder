@@ -32,7 +32,7 @@ export interface ConceptJob {
   error?: string;
   resumes: number;
 }
-export interface ConceptHooks { transport?: AiTransport | null; fetchImage?: (url: string) => Promise<Buffer | null>; judgeListing?: typeof judgeListingPhotos }
+export interface ConceptHooks { transport?: AiTransport | null; fetchImage?: (url: string) => Promise<Buffer | null>; judgeListing?: typeof judgeListingPhotos; render?: typeof renderSet; chunkRender?: boolean }
 
 const now = () => new Date().toISOString();
 const save = (j: ConceptJob) => studioDocs.put('studio-concept-jobs', j.id, { ...j, updatedAt: now() });
@@ -78,6 +78,12 @@ export async function resumeConceptJob(id: string, hooks: ConceptHooks = {}) {
 }
 /** picked up again by the poll that finds it running nowhere (see src/studio/keepalive.ts) */
 export async function resumeConceptIfStale(job: ConceptJob): Promise<ConceptJob> {
+  // A Vercel render yields after each concept. The next status poll gives it a
+  // fresh function invocation; the completed concepts are already in storage.
+  if (job.status === 'queued' && job.stages.find((s) => s.name === 'render')?.status === 'pending' && job.work.rendered?.length && !active.has(job.id)) {
+    void keepAlive(runConceptJob(job.id));
+    return job;
+  }
   if ((job.status === 'running' || job.status === 'queued') && !active.has(job.id) && Date.now() - Date.parse(job.updatedAt) > STALE_MS()) return (await resumeConceptJob(job.id)) ?? job;
   return job;
 }
@@ -121,6 +127,7 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
           break;
         case 'photos': {
           const r = await preparePhotos(cat, job.setId, hooks.fetchImage);
+          await persistDir(setDir(job.setId)); // the render may start on a different Vercel instance
           const own = r.ok.filter((x) => x !== 'logo');
           note(`${own.length} of the business's photos copied into the preview${r.failed.length ? `; ${r.failed.length} could not be: ${r.failed.map((f) => `${f.id} (${f.reason})`).join(', ')}` : ''}`);
           // the Google listing's photos (only when the website gives too few): looked at once for relevance, never stored
@@ -177,10 +184,36 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
           break;
         }
         case 'render': {
-          await preparePhotos(cat, job.setId, hooks.fetchImage); // a no-op when this instance already has them
-          job.work.rendered = await renderSet(job.work.concepts!, cat, job.setId);
-          await persistDir(setDir(job.setId)); // previews outlive this instance (Supabase Storage on Vercel)
+          const dir = setDir(job.setId);
+          // A resumed function may land on a fresh instance. Restore the images
+          // and screenshots before making another page or validating the set.
+          const started = Date.now();
+          await restoreDir(path.relative(config.dirs.out, dir).split(path.sep).join('/'));
+          note(`restored saved photos in ${Date.now() - started} ms`);
+          const completed = job.work.rendered ?? [];
+          const next = job.work.concepts!.filter((c) => !completed.some((r) => r.conceptId === c.id));
+          // Each Vercel invocation owns one fresh browser and one concept. A
+          // timeout can then only restart that concept, never erase A or B.
+          const batch = process.env.VERCEL || hooks.chunkRender ? next.slice(0, 1) : next;
+          const photosAt = Date.now();
+          await preparePhotos(cat, job.setId, hooks.fetchImage, new Set(batch.flatMap((c) => c.images)));
+          note(`prepared ${batch.map((c) => c.id.toUpperCase()).join(', ')} photos in ${Date.now() - photosAt} ms`);
+          const rendered = batch.length ? await (hooks.render ?? renderSet)(batch, cat, job.setId, {
+            onStep: (label, ms) => { const line = `${label}: ${ms} ms`; note(line); console.info(`[concepts ${id}] ${line}`); },
+          }) : [];
+          const savedAt = Date.now();
+          await persistDir(dir); // persist files before recording their checkpoint
+          note(`saved render files in ${Date.now() - savedAt} ms`);
+          job.work.rendered = [...completed, ...rendered];
+          await save(job);
           for (const r of job.work.rendered) note(`${r.conceptId.toUpperCase()}: desktop ${r.desktop.metrics.height}px tall, mobile ${r.mobile.metrics.height}px`);
+          if (job.work.rendered.length < job.work.concepts!.length) {
+            clearInterval(beat);
+            st.status = 'pending'; st.finishedAt = now();
+            job.status = 'queued';
+            await save(job);
+            return job;
+          }
           break;
         }
         case 'validate': {

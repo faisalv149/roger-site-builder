@@ -27,7 +27,7 @@ const { resolveCatalog, emptyReview, saveReview, withId, publicationGate, StaleB
 const { checkCopy } = await import('../src/studio/concepts/copy.js');
 const { fallbackPlans, validatePlans, compose, fromAnswer } = await import('../src/studio/concepts/plan.js');
 const { aiJson, CostLedger, CostCapExceeded } = await import('../src/studio/concepts/ai.js');
-const { startConceptJob, waitForConceptJob, getConceptSet, getConceptJob } = await import('../src/studio/concepts/jobs.js');
+const { startConceptJob, runConceptJob, resumeConceptJob, waitForConceptJob, getConceptSet, getConceptJob } = await import('../src/studio/concepts/jobs.js');
 const { renderSet, preparePhotos, setDir } = await import('../src/studio/concepts/render.js');
 const { grounding, rights, links, imagery, accessibility, similarity, THRESHOLDS } = await import('../src/studio/concepts/validate.js');
 const { studioRoutes } = await import('../src/studio/routes.js');
@@ -96,6 +96,75 @@ async function getBriefs() {
   return briefs;
 }
 const refOf = (b: BusinessBrief) => ({ businessKey: b.businessKey, revision: b.revision, briefHash: b.briefHash });
+
+test('a render restores only the concept pictures it needs', async () => {
+  const { agreed, inventory } = await getBriefs();
+  const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
+  const own = cat.photos.filter((p) => !p.url.startsWith('listing-photo:'));
+  assert.ok(own.length > 2);
+  const id = `cs_subset_${Date.now()}`;
+  const wanted = new Set([own[0].id]);
+  const result = await preparePhotos(cat, id, async () => IMGS.values().next().value!, wanted);
+  assert.ok(result.ok.includes(own[0].id));
+  assert.ok(!result.ok.includes(own[1].id));
+  assert.ok(fs.existsSync(path.join(setDir(id), 'img', `${own[0].id}.jpg`)));
+  assert.ok(!fs.existsSync(path.join(setDir(id), 'img', `${own[1].id}.jpg`)));
+});
+
+test('single-process Chromium (as on Vercel): a concept renders at desktop and phone size, one browser per page', { skip: !chrome && 'no Chrome here' }, async () => {
+  const { agreed, inventory } = await getBriefs();
+  const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
+  const setId = 'cs_single_process';
+  const ok = await preparePhotos(cat, setId);
+  cat.photos = cat.photos.filter((p) => ok.ok.includes(p.id));
+  const [A] = fallbackPlans(cat, agreed).map((p, i) => compose(p, (['a', 'b', 'c'] as const)[i], 'fallback', cat, agreed, i === 0));
+  const steps: string[] = [];
+  process.env.STUDIO_SINGLE_PROCESS = '1';
+  try {
+    const [r] = await renderSet([A], cat, setId, { onStep: (s) => steps.push(s) });
+    assert.ok(r.desktop.metrics.height > 0 && r.mobile.metrics.height > 0, 'both sizes rendered');
+    assert.ok(fs.existsSync(r.mobile.full) && fs.existsSync(r.desktop.full));
+    assert.deepEqual(steps.filter((s) => /browser start/.test(s)), ['a desktop browser start', 'a mobile browser start'], 'a fresh browser for each page');
+  } finally { delete process.env.STUDIO_SINGLE_PROCESS; }
+});
+
+test('a bounded render checkpoints one concept and resumes with the next', async () => {
+  const { agreed } = await getBriefs();
+  const batches: string[] = [];
+  let failB = true;
+  const hooks: import('../src/studio/concepts/jobs.js').ConceptHooks = {
+    transport: null, chunkRender: true,
+    fetchImage: async () => IMGS.values().next().value!,
+    render: async (concepts, _cat, setId) => {
+      assert.equal(concepts.length, 1);
+      const id = concepts[0].id;
+      batches.push(id);
+      if (id === 'b' && failB) { failB = false; throw new Error('browser closed'); }
+      const dir = setDir(setId);
+      fs.mkdirSync(path.join(dir, 'shots'), { recursive: true });
+      const html = path.join(dir, `${id}.html`);
+      const hero = path.join(dir, 'shots', `${id}-hero.png`);
+      fs.writeFileSync(html, `<h1>${id}</h1>`);
+      fs.writeFileSync(hero, await photo(1, 32, 32));
+      const page = { full: hero, hero, metrics: { height: 900 } as PageMetrics };
+      return [{ conceptId: id, html, desktop: page, mobile: page }];
+    },
+  };
+  const started = await startConceptJob({ businessKey: agreed.businessKey, revision: agreed.revision }, hooks);
+  const first = await runConceptJob(started.id, hooks);
+  assert.equal(first.status, 'queued');
+  assert.equal(first.stages.find((s) => s.name === 'render')?.status, 'pending');
+  assert.deepEqual(first.work.rendered?.map((r) => r.conceptId), ['a']);
+  const interrupted = await runConceptJob(started.id, hooks);
+  assert.equal(interrupted.status, 'failed');
+  assert.deepEqual(interrupted.work.rendered?.map((r) => r.conceptId), ['a']);
+  await resumeConceptJob(started.id, hooks);
+  const second = await runConceptJob(started.id, hooks);
+  assert.equal(second.status, 'queued');
+  assert.deepEqual(second.work.rendered?.map((r) => r.conceptId), ['a', 'b']);
+  assert.deepEqual(batches, ['a', 'b', 'b']);
+  assert.equal(await getConceptSet(second.setId), undefined, 'no incomplete set is published');
+});
 
 // ───────────────────────── facts, review and the publication gate ─────────────────────────
 test('a disputed phone number is left out of previews with every call button; the owner\'s answer brings it back; publishing is a separate gate', async () => {

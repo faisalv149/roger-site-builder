@@ -11,6 +11,7 @@ import { personaliseInfo, startRefinement } from '../design/refine.js';
 import { profileFor, type Category } from '../design/categories.js';
 import { getDraft, issueOwnerKey, ownerUrl, putDraft, withDraftLock } from '../drafts.js';
 import { channelFor } from '../channels.js';
+import { applyConcept, nextConcept } from '../studio/concepts/site.js';
 import { addComparisonToReport, canScoreNewSite, scoreMessage, scoreNewSite } from '../audit/compare.js';
 import { saveBuild } from '../store.js';
 import type { Job } from '../jobs.js';
@@ -72,7 +73,7 @@ const fromCard = (c: IMessageCard): Reply => ({ text: c.text, url: c.url, image:
 const outgoing = (replies: Reply[]): Conversation['messages'] => { const at = new Date().toISOString(); return replies.map((r) => ({ dir: 'out' as const, at, ...r })); };
 
 const PERSONALISE = /\b(personali[sz]e|customi[sz]e|change (something|it|the (style|design|look|layout))|tweak|make it (more )?mine)\b/i;
-const ALTERNATIVE = /\b(different|another|other|new) (design|look|style|layout)\b|\btry (a|another) design\b/i;
+const ALTERNATIVE = /\b(different|another|other|new) (design|look|style|layout|version)\b|\btry (a|another) design\b/i;
 const YES = /^(y|yes|yep|yeah|yup|sure|correct|that'?s (me|us|it)|ok|okay|please|do it|build it|let'?s go|sounds good|go ahead|show me)\b/i;
 const NO = /^(n|no|nope|not (me|us|really|now)|wrong)\b/i;
 const URL_RE = /(https?:\/\/[^\s]+|(?:www\.)?[a-z0-9-]+\.(?:com|net|org|biz|us|co|io|pro|info|services|site)(?:\/[^\s]*)?)/i;
@@ -174,7 +175,9 @@ async function finishedReplies(job: Job, kind: 'build' | 'update', s: Session): 
   }
   const owner = await issueOwnerLink(job.result.draftId).catch(() => undefined);
   const card = kind === 'build' ? fromCard(job.result.cards.find((c) => c.kind === 'site-preview')!) : updatedCard(job);
-  return { siteUrl: job.result.siteUrl, ownerUrl: owner, replies: [card, ...(owner ? [editorReply(owner)] : [])] };
+  // one preview and its two choices; the owner editor link is for the team, not sent to the client
+  void editorReply;
+  return { siteUrl: job.result.siteUrl, ownerUrl: owner, replies: [{ ...card, quickReplies: DONE_CHOICES }] };
 }
 
 /**
@@ -209,7 +212,8 @@ async function keepAlive(p: Promise<unknown>) {
 }
 
 const host = (u: string) => { try { return new URL(/^https?:/i.test(u) ? u : `https://${u}`).host.replace(/^www\./, ''); } catch { return u; } };
-const DONE_CHOICES = ['Personalize it', 'Try a different design', 'Publish it'];
+/** the client's two choices on a preview: approve it, or ask for another version (never layout controls) */
+const DONE_CHOICES = ['Approve and publish', 'Request another version'];
 
 /** The question in front of the owner, asked again after Roger answers something else. */
 function nextStep(s: Session): Reply | undefined {
@@ -303,15 +307,26 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
   }
 
   if (s.state === 'done' && s.lastBuildId && s.lastSiteUrl) {
-    if (ALTERNATIVE.test(msg) || RETRY.test(msg)) return refine(from, ctx, s.lastBuildId, {}, true);
-    if (PERSONALISE.test(msg)) return startPersonalise(s);
-    if (PUBLISH.test(msg)) return goLive(s);
+    if (ALTERNATIVE.test(msg) || RETRY.test(msg)) {
+      // a site made from a concept set: the next of its three concepts, never a random fourth
+      const rec = await getBuild(s.lastBuildId);
+      const d = rec?.result?.draftId ? await getDraft(rec.result.draftId) : undefined;
+      const next = d?.concept ? await nextConcept(d.concept) : undefined;
+      if (d?.concept && next) {
+        await applyConcept(d.id, d.concept.setId, next);
+        return [{ text: `Here's design ${next.id.toUpperCase()}, "${next.name}": ${s.lastSiteUrl}`, url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
+      }
+      return refine(from, ctx, s.lastBuildId, {}, true);
+    }
+    // no design controls for the client: a change request is a request for another version
+    if (PERSONALISE.test(msg)) return respond(from, 'Request another version', ctx);
+    if (PUBLISH.test(msg) || /\bapprove/i.test(msg)) return goLive(s);
     if (CHECK.test(msg)) return checkDetails(s);
     if (THANKS.test(msg)) return [{ text: `${/thank|thx|^ty\b/i.test(msg) ? 'You\'re welcome!' : 'Sounds good!'} Text me anytime if you'd like changes.`, quickReplies: DONE_CHOICES }];
   }
 
   if (s.chosen && (/build|preview/i.test(msg) || RETRY.test(msg))) { s.state = 'offer'; return respond(from, 'yes', ctx); }
-  if (s.lastSiteUrl) return [{ text: `Here's your preview again: ${s.lastSiteUrl}\n\nI can personalize it, try a different design, or help you put it live. Text "restart" to start over with a different business.`, quickReplies: DONE_CHOICES }];
+  if (s.lastSiteUrl) return [{ text: `Here's your preview again: ${s.lastSiteUrl}\n\nReply "Approve and publish" if you're happy with it, or "Request another version" for a different design. Text "restart" to start over with a different business.`, quickReplies: DONE_CHOICES }];
   return [{ text: 'Sorry, I didn\'t catch that. Send me your website, or your business name and ZIP code, and I\'ll find you on Google. Text "restart" anytime to start over.' }];
 }
 
@@ -389,25 +404,24 @@ async function editorLink(s: Session, rec: BuildRecord | undefined): Promise<str
   return s.ownerUrl;
 }
 
+/**
+ * "Approve and publish": the approval goes to the team, who publish once the publication gates are clear (facts,
+ * photo rights, lead delivery). The client gets no editor and no layout controls: one preview, approve or ask again.
+ */
 async function goLive(s: Session): Promise<Reply[]> {
   const rec = await getBuild(s.lastBuildId!);
-  const link = await editorLink(s, rec);
   const checks = openChecks(rec);
-  if (!link) {
-    s.followUp = { at: new Date().toISOString(), reason: 'publish' };
-    return [{ text: 'Glad you like it! I\'ve asked someone from the team to get in touch and help you put it live.' }];
-  }
+  s.followUp = { at: new Date().toISOString(), reason: 'publish' };
   if (checks.length) {
-    return [{ text: `Glad you like it! Before it goes live, ${checks.length === 1 ? 'one thing needs' : 'a few things need'} your OK:\n${checks.slice(0, 4).map((c) => `• ${c}`).join('\n')}\n\nYou can sort ${checks.length === 1 ? 'it' : 'them'} out in your private editor, then tap "Buy this website" to choose your web address: ${link}`, url: link, title: 'Your website editor' }];
+    return [{ text: `Thanks, approved! Before it can go live, ${checks.length === 1 ? 'one thing needs' : 'a few things need'} confirming:\n${checks.slice(0, 4).map((c) => `• ${c}`).join('\n')}\n\nSomeone from the team will be in touch to sort ${checks.length === 1 ? 'it' : 'them'} out and publish it.` }];
   }
-  return [{ text: `Glad you like it! To put it live, open your private editor and tap "Buy this website". You'll choose your web address there: ${link}`, url: link, title: 'Your website editor' }];
+  return [{ text: 'Thanks, approved! Someone from the team will be in touch to choose your web address and publish it.' }];
 }
 
 async function checkDetails(s: Session): Promise<Reply[]> {
   const rec = await getBuild(s.lastBuildId!);
   const checks = openChecks(rec);
-  const link = await editorLink(s, rec);
-  const where = link ? ` You can change any of it in your private editor: ${link}` : '';
+  const where = '';
   if (!checks.length) return [{ text: `Everything on your preview checked out, so there's nothing waiting on you.${where}`, quickReplies: DONE_CHOICES }];
   return [{ text: `Here's what I'd like you to check before it goes live:\n${checks.slice(0, 6).map((c) => `• ${c}`).join('\n')}\n${where}`.trim(), quickReplies: DONE_CHOICES }];
 }
@@ -494,7 +508,7 @@ function updatedCard(job: Job): Reply {
   return {
     ...fromCard(card),
     text: p ? `Here's your updated preview: ${DIRECTION_LABEL[p.direction]}, leading with ${p.service.label.toLowerCase()}, main button "${profileFor(p.category).actions[p.goal]}".` : card.text,
-    quickReplies: ['Looks great, publish it', 'Try a different design', 'Personalize it'],
+    quickReplies: DONE_CHOICES,
   };
 }
 

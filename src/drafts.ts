@@ -77,6 +77,8 @@ export interface DraftBase {
 }
 
 export interface DraftRecord {
+  /** the Phase 2 concept this draft's design comes from: "Try another design" switches among its set's concepts */
+  concept?: { setId: string; conceptId: string };
   v: number;
   id: string;
   slug: string;
@@ -382,6 +384,8 @@ export async function saveDraft(d: DraftRecord, body: Record<string, unknown>) {
   const model = await composeModel(d.base, plan, { appearance, offerings, content: d.content });
   const sp = sitePlanOf(d, model, body);
   await writeSite(d.base, model, { sitePlan: sp, previousSitePlan: d.sitePlan });
+  // a site made from a concept: its homepage stays the concept (src/studio/concepts/site.ts)
+  if (d.concept) await (await import("./studio/concepts/site.js")).writeConceptHome({ ...d, sitePlan: sp, appearance, offerings });
   d.sitePlan = sp;
   const now = new Date().toISOString();
   if (plan.id !== d.plan.id) d.history = [d.plan, ...d.history.filter((p) => p.id !== d.plan.id && p.id !== plan.id)].slice(0, 5);
@@ -405,6 +409,7 @@ export async function refreshSavedSite(d: DraftRecord): Promise<void> {
   const model = await composeModel(d.base, d.plan, { appearance: d.appearance, offerings: d.offerings, content: d.content });
   const sp = isFamilyV2(model) ? sitePlanFor(model, { previous: d.sitePlan }) : undefined;
   await writeSite(d.base, model, { sitePlan: sp, previousSitePlan: d.sitePlan });
+  if (d.concept) await (await import("./studio/concepts/site.js")).writeConceptHome({ ...d, sitePlan: sp });
   d.sitePlan = sp;
 }
 

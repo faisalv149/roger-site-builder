@@ -67,7 +67,8 @@ ${c.mapsUrl ? `<meta http-equiv="refresh" content="0;url=${esc(c.mapsUrl)}">` : 
 
 /** Step 2a (has a website): the audit result. */
 export function auditCard(a: AuditResult, reportUrl: string, image: string): IMessageCard {
-  const bullets = a.summary.bullets.map((b) => `• ${b}`).join('\n');
+  // a written summary can come back with a blank point: the client never sees an empty bullet
+  const bullets = a.summary.bullets.map((b) => (b ?? '').trim()).filter(Boolean).map((b) => `• ${b}`).join('\n');
   return {
     kind: 'audit',
     text: `${a.summary.headline}\n\n${bullets}\n\n${a.summary.pitch}`.trim(),
@@ -98,6 +99,7 @@ export function siteCard(opts: { name: string; url: string; image: string; minut
     image: opts.image,
     title: opts.name,
     // the owner can answer three optional questions to shape the site; a preview with open checks isn't offered for publishing yet
-    quickReplies: [...(opts.needsReview ? [] : ['Looks great, publish it']), opts.needsReview ? 'Check the details' : opts.personalisable ? 'Personalize it' : 'Change something'],
+    // one preview at a time: the client approves it or asks for another version (publishing stays gated)
+    quickReplies: ['Approve and publish', 'Request another version'],
   };
 }

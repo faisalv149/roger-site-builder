@@ -356,6 +356,12 @@ export function headlineRelevant(headline: string, ctx: { typeLabel?: string; se
   return hits.size >= 1 && (ctx.services.length < 2 || hits.size >= 2 || (ctx.typeLabel ? words(ctx.typeLabel).some((w) => h.includes(stem(w))) : false));
 }
 
+/** A one-word label that names no service on its own ("Installation", "Maintenance", "Tankless"). */
+const VAGUE = new Set(['installation', 'installations', 'install', 'installs', 'maintenance', 'repair', 'repairs', 'replacement', 'replacements', 'service', 'services', 'inspection', 'inspections', 'cleaning', 'tankless', 'upgrades', 'upgrade', 'emergency', 'commercial', 'residential', 'other', 'more', 'misc', 'general', 'consultation', 'estimates', 'estimate']);
+export const vagueService = (name: string) => { const w = name.toLowerCase().replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter(Boolean); return w.length === 1 && VAGUE.has(w[0]); };
+/** A menu link to a list, not a service: "Every plumbing service we offer", "All indoor air quality services". */
+const MENU_PHRASE = /^(?:every|all)\b.*\b(?:services?|we offer)$/i;
+
 /** What the model says about whether the site may be published as built. Used by the build review and the publish gate. */
 export function reviewEvidence(m: EvidenceModel, built: { servicesShown: string[]; headline?: string; typeLabel?: string; primaryCtaLabel?: string; galleryTitle?: string; storyChars?: number; serviceCardImages: number }): EvidenceFinding[] {
   const out: EvidenceFinding[] = [];
@@ -363,13 +369,14 @@ export function reviewEvidence(m: EvidenceModel, built: { servicesShown: string[
   const primary = m.services.filter((s) => s.isPrimary && s.status === 'verified');
   const missing = primary.filter((s) => !shown.has(tokenKey(s.canonicalName)) && !s.aliases.some((a) => shown.has(tokenKey(a))));
   if (missing.length) out.push({ id: 'primary-services-missing', level: 'block', message: `The business's own services are missing from the site: ${missing.map((s) => s.canonicalName).join(', ')}.` });
-  const secondary = m.services.filter((s) => !s.isPrimary && s.status === 'verified' && !shown.has(tokenKey(s.canonicalName)));
+  // vague labels ("Installation") and menu wording ("Every plumbing service we offer") are not services the site left out
+  const secondary = m.services.filter((s) => !s.isPrimary && s.status === 'verified' && !shown.has(tokenKey(s.canonicalName)) && !vagueService(s.canonicalName) && !MENU_PHRASE.test(s.canonicalName));
   if (secondary.length) out.push({ id: 'secondary-services-missing', level: 'review', message: `Services listed in the website's menu are not on the site: ${secondary.map((s) => s.canonicalName).join(', ')}.` });
   const fromText = m.services.filter((s) => s.status === 'verified' && s.mentions.length > 0 && s.mentions.every((x) => x.kind === 'page-text') && shown.has(tokenKey(s.canonicalName)));
   if (fromText.length) out.push({ id: 'services-from-text', level: 'review', message: `${fromText.length} service${fromText.length > 1 ? 's were' : ' was'} read from the website's wording, not from a list of services: ${fromText.map((s) => s.canonicalName).slice(0, 5).join(', ')}. Confirm ${fromText.length > 1 ? 'them' : 'it'}.` });
   const proposed = m.services.filter((s) => s.status === 'needs_review');
   if (proposed.length) out.push({ id: 'services-unverified', level: 'review', message: `Not shown, because the website doesn't list ${proposed.length === 1 ? 'it' : 'them'} itself: ${proposed.map((s) => s.canonicalName).slice(0, 5).join(', ')}. Confirm before adding.` });
-  if (m.hero?.primaryCta && built.primaryCtaLabel && nameKey(m.hero.primaryCta.label) !== nameKey(built.primaryCtaLabel)) out.push({ id: 'primary-cta-changed', level: 'block', message: `The website's main action "${m.hero.primaryCta.label}" is replaced by "${built.primaryCtaLabel}".` });
+  if (m.hero?.primaryCta && built.primaryCtaLabel && nameKey(m.hero.primaryCta.label) !== nameKey(built.primaryCtaLabel)) out.push({ id: 'primary-cta-changed', level: 'block', message: `The website's main action "${m.hero.primaryCta.label}" is replaced by "${built.primaryCtaLabel}".${/^(Request an appointment|Send a request)$/.test(built.primaryCtaLabel) ? ' It opens the request form, because no verified booking or confirmed phone number is available yet. Confirm, or give the booking link.' : ''}` });
   if (built.headline && !headlineRelevant(built.headline, { typeLabel: built.typeLabel, services: m.services.filter((s) => s.isPrimary).map((s) => s.canonicalName) })) out.push({ id: 'hero-relevance', level: 'review', message: `The headline "${built.headline}" doesn't say what the business does.` });
   if (built.serviceCardImages < 1 && m.assets.some((a) => a.kind === 'service')) out.push({ id: 'service-images-unused', level: 'review', message: 'The website shows pictures on its services but none are on the service cards.' });
   if (!m.assets.some((a) => a.kind === 'service' && a.usable)) out.push({ id: 'no-service-images', level: 'review', message: 'No usable picture on any service: the services use a designed text pattern.' });

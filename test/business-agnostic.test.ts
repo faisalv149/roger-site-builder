@@ -299,3 +299,259 @@ test('the contact widget starts small and offers Book only when the business tak
   assert.ok(!/data-open="book"/.test(html), 'Book offered without evidence of bookings');
   assert.ok(!/data-panel="book"/.test(html));
 });
+
+// ───────────────────────── the product flow: brief → three concepts → a chosen one becomes the full site ─────────────────────────
+test('a chosen concept becomes the full site in its design; refining keeps it; "another design" cycles the three saved concepts only', { timeout: 400_000 }, async () => {
+  const { startSiteJob, getSiteJob, nextConcept, conceptDesign } = await import('../src/studio/concepts/site.js');
+  const { getDraft, saveDraft } = await import('../src/drafts.js');
+  const c = CASES[3];
+  const brief = await waitForStudioJob((await startStudioJob({ google: placeId(c) })).id);
+  const judge: typeof judgeListingPhotos = (pid, business) => judgeListingPhotos(pid, business, { label: async (items) => ({ kinds: items.map((_, i) => (i === 5 ? 'other' : 'work')), seen: items.map(() => 'work'), source: 'vision' }) });
+  const cj = await waitForConceptJob((await startConceptJob({ businessKey: brief.businessKey! }, { transport: null, judgeListing: judge })).id);
+  const set = (await getConceptSet(cj.setId))!;
+  assert.equal(set.concepts.length, 3, 'exactly three concepts');
+  const designs = set.concepts.map((x) => JSON.stringify(conceptDesign(x)));
+  assert.equal(new Set(designs).size, 3, 'the three concepts map to three different designs');
+  const wait = async (id: string) => { for (;;) { const j = (await getSiteJob(id))!; if (j.status === 'done' || j.status === 'failed') return j; await new Promise((r) => setTimeout(r, 200)); } };
+  const job = await wait((await startSiteJob(set.id, 'b')).id);
+  assert.equal(job.status, 'done', job.error ?? '');
+  assert.ok(job.stages.some((s) => /Apply concept B/.test(s.name)) && job.stages.some((s) => s.name === 'Render site'), job.stages.map((s) => s.name).join(', '));
+  const d = (await getDraft(job.draftId!))!;
+  assert.deepEqual(d.concept, { setId: set.id, conceptId: 'b' });
+  const want = conceptDesign(set.concepts[1]);
+  assert.equal(d.plan.direction, want.layout.direction);
+  assert.equal(d.appearance.font, want.appearance.font);
+  assert.ok(d.plan.locks.includes('direction'), `locks: ${d.plan.locks.join(', ')}`);
+  // full pages, served with Google content filled per view
+  assert.ok((d.sitePlan?.pages.length ?? 1) >= 1);
+  if (screenshotsAvailable()) {
+    const b = await inBrowser(job.siteUrl!);
+    for (const [label, m] of Object.entries(b)) { assert.equal(m.overflow, false, label); assert.ok(m.images >= 1, `${label}: ${m.images} photos`); }
+  }
+  // refine (an owner edit) keeps the concept's layout, type and colour
+  const refined = await saveDraft(d, { revision: d.revision, appearance: { ...d.appearance, textSize: 'comfortable' } });
+  assert.equal(refined.plan.direction, d.plan.direction);
+  assert.equal(refined.appearance.font, d.appearance.font);
+  assert.equal(refined.appearance.color?.accent, d.appearance.color?.accent);
+  // another design: the next saved concept, and the job for it re-renders rather than rebuilding
+  assert.equal((await nextConcept({ setId: set.id, conceptId: 'c' }))!.id, 'a');
+  const sw = await wait((await startSiteJob(set.id, 'c')).id);
+  assert.equal(sw.status, 'done', sw.error ?? '');
+  assert.equal(sw.switched, true);
+  assert.equal(sw.draftId, job.draftId);
+  assert.deepEqual((await getDraft(sw.draftId!))!.concept, { setId: set.id, conceptId: 'c' });
+});
+
+test('the chosen concept survives the handoff: the homepage has its sections in order and its images, also after an owner save', { timeout: 400_000 }, async () => {
+  const { startSiteJob, getSiteJob } = await import('../src/studio/concepts/site.js');
+  const { getDraft, saveDraft } = await import('../src/drafts.js');
+  const brief = await waitForStudioJob((await startStudioJob({ google: placeId(CASES[4]) })).id);
+  const judge: typeof judgeListingPhotos = (pid, business) => judgeListingPhotos(pid, business, { label: async (items) => ({ kinds: items.map((_, i) => (i === 5 ? 'other' : 'work')), seen: items.map(() => 'work'), source: 'vision' }) });
+  const cj = await waitForConceptJob((await startConceptJob({ businessKey: brief.businessKey! }, { transport: null, judgeListing: judge })).id);
+  const set = (await getConceptSet(cj.setId))!;
+  const concept = set.concepts.find((x) => x.id === 'b')!;
+  const conceptHtml = fs.readFileSync(path.join(setDir(set.id), concept.preview!.html), 'utf8');
+  const sections = (h: string) => [...h.matchAll(/<section[^>]*data-kind="([a-z]+)" data-variant="([a-z-]+)"/g)].map((m) => `${m[1]}:${m[2]}`);
+  const assets = (h: string) => [...h.matchAll(/data-asset="([^"]+)"/g)].map((m) => m[1]).filter((x) => x !== 'logo');
+  assert.deepEqual(sections(conceptHtml), concept.sections.map((s) => `${s.kind}:${s.variant}`));
+  let job; for (job = (await getSiteJob((await startSiteJob(set.id, 'b')).id))!; job.status !== 'done' && job.status !== 'failed'; job = (await getSiteJob(job.id))!) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(job.status, 'done', job.error ?? '');
+  const d = (await getDraft(job.draftId!))!;
+  const home = () => fs.readFileSync(path.join(config.dirs.sites, d.slug, 'index.html'), 'utf8');
+  for (const when of ['after the handoff', 'after an owner save']) {
+    const h = home();
+    assert.deepEqual(sections(h), concept.sections.map((s) => `${s.kind}:${s.variant}`), `section order ${when}`);
+    assert.ok(assets(h).length > 0, `no concept images on the homepage ${when}`);
+    const foreign = assets(h).filter((id) => !concept.images.includes(id));
+    assert.deepEqual(foreign, [], `images on the homepage that concept B does not record ${when}`);
+    assert.match(h, /<link rel="canonical"/, `SEO head ${when}`);
+    if (when === 'after the handoff') await saveDraft(d, { revision: d.revision, appearance: { ...d.appearance, textSize: 'comfortable' } });
+  }
+});
+
+test('a concept homepage that cannot be written or restored fails the site job; the older builder homepage is never reported as done', { timeout: 400_000 }, async () => {
+  const { startSiteJob, getSiteJob } = await import('../src/studio/concepts/site.js');
+  const brief = await waitForStudioJob((await startStudioJob({ google: placeId(CASES[1]) })).id);
+  const judge: typeof judgeListingPhotos = (pid, business) => judgeListingPhotos(pid, business, { label: async (items) => ({ kinds: items.map(() => 'work'), seen: items.map(() => 'work'), source: 'vision' }) });
+  const cj = await waitForConceptJob((await startConceptJob({ businessKey: brief.businessKey! }, { transport: null, judgeListing: judge })).id);
+  const set = (await getConceptSet(cj.setId))!;
+  // the chosen concept's page is gone, and there is no remote copy to restore it from
+  fs.rmSync(path.join(setDir(set.id), set.concepts.find((x) => x.id === 'a')!.preview!.html));
+  let job; for (job = (await getSiteJob((await startSiteJob(set.id, 'a')).id))!; job.status !== 'done' && job.status !== 'failed'; job = (await getSiteJob(job.id))!) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(job.status, 'failed');
+  assert.match(job.error ?? '', /could not be read or restored/);
+  assert.equal(job.siteUrl, undefined, 'a failed job offers no site link');
+});
+
+// ───────────────────────── the chosen concept on the finished site: review fixes ─────────────────────────
+test('a gallery heading only gets photos whose own evidence fits it; a generic heading takes any; unclear ones are left out', async () => {
+  const { galleryFits } = await import('../src/studio/concepts/library.js');
+  const photo = (id: string, alt: string, services: string[] = []) => ({ id, url: '', width: 1600, height: 1067, orientation: 'landscape' as const, uses: [], alt, services });
+  const photos = [photo('roof', 'Crew replacing asphalt shingles on a roof'), photo('water', 'Technician extracting water from a living room floor', ['svc-water']), photo('blank', ''), photo('storm', 'Hail-damaged roofing after a storm', ['svc-roof'])];
+  const c = { cat: { business: { name: 'Summit Ridge Roofing', category: 'Roofing contractor' }, area: ['Austin'], address: null, services: [{ id: 'svc-water', name: 'Water Mitigation' }, { id: 'svc-roof', name: 'Roof Repair' }] }, img: (id: string) => ({ photo: photos.find((p) => p.id === id)! }) } as never;
+  const ids = photos.map((p) => p.id);
+  assert.deepEqual(galleryFits(c, { title: 'Recent roofing work', intro: 'Shingles, decks and storm checks from around Central Texas.' } as never, ids), ['roof', 'storm']);
+  assert.deepEqual(galleryFits(c, { title: 'Photos', intro: '' } as never, ids), ids, 'a generic heading takes every photo');
+  assert.deepEqual(galleryFits(c, { title: 'Our roofing', intro: '' } as never, ids), ids, 'a heading naming only what the business is takes every photo');
+});
+
+async function roofSet() {
+  const brief = await waitForStudioJob((await startStudioJob({ google: placeId(CASES[4]) })).id);
+  const cj = await waitForConceptJob((await startConceptJob({ businessKey: brief.businessKey! }, { transport: null, judgeListing: (pid, b) => judgeListingPhotos(pid, b, { label: async (items) => ({ kinds: items.map(() => 'work' as const), seen: items.map(() => 'work'), source: 'vision' as const }) }) })).id);
+  return (await getConceptSet(cj.setId))!;
+}
+
+test('the concept page: on a phone the headline and main action come before the hero photo; desktop keeps the photo beside them', { timeout: 300_000, skip: !screenshotsAvailable() }, async () => {
+  const set = await roofSet();
+  const { conceptHtml } = await import('../src/studio/concepts/render.js');
+  const { resolveCatalog, getReview } = await import('../src/studio/concepts/review.js');
+  const { getBrief } = await import('../src/studio/jobs.js');
+  const { brief: b, inventory } = await getBrief(set.brief.businessKey, set.brief.revision);
+  const cat = resolveCatalog(b!, inventory!, (await getReview(set.reviewId))!);
+  const concept = structuredClone(set.concepts[0]);
+  concept.sections[0] = { ...concept.sections[0], kind: 'hero', variant: 'split' };
+  const file = path.join(setDir(set.id), 'split-test.html');
+  fs.writeFileSync(file, conceptHtml(concept, cat, set.id));
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ executablePath: config.chromiumPath });
+  try {
+    for (const [label, width] of [['mobile', 390], ['desktop', 1440]] as const) {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      await page.goto(`file://${file.split(path.sep).join('/')}`);
+      const box = await page.evaluate('(() => { const r = (s) => document.querySelector(s).getBoundingClientRect().toJSON(); return { h1: r(".hs h1"), cta: r(".hs .actions .btn"), img: r(".hs__media") }; })()') as { h1: DOMRect; cta: DOMRect; img: DOMRect };
+      if (label === 'mobile') assert.ok(box.h1.top < box.img.top && box.cta.bottom <= box.img.top + 1, `mobile: ${JSON.stringify(box)}`);
+      else assert.ok(box.img.left > box.h1.right - 1, `desktop: the photo sits beside the text ${JSON.stringify(box)}`);
+      await page.close();
+    }
+  } finally { await browser.close(); }
+});
+
+test("each service card offers a next step only where one exists: its own page, else booking, else the page's contact section", async () => {
+  const { RENDERERS } = await import('../src/studio/concepts/library.js');
+  const cat = { items: [], services: [{ id: 's1', name: 'Roof Repair' }, { id: 's2', name: 'Gutters' }], actions: [] as { id: string; kind: string; label: string; href: string }[], sectionImages: {}, business: { name: 'X' } };
+  const sec = { kind: 'offer', variant: 'cards', title: 'Services', factIds: [], imageIds: [] };
+  const ctx = (sections: { kind: string }[], links?: Record<string, { href: string; label: string }>) => ({ cat, concept: { sections, actions: [] }, used: new Set(), img: () => undefined, serviceLinks: links }) as never;
+  const withContact = RENDERERS['offer:cards'](ctx([{ kind: 'offer' }, { kind: 'contact' }], { s1: { href: 'services/roof-repair/', label: 'More about Roof Repair' } }), sec as never);
+  assert.match(withContact, /href="services\/roof-repair\/">More about Roof Repair</);
+  assert.match(withContact, /href="#visit">Ask about Gutters</);
+  cat.actions.push({ id: 'book', kind: 'book', label: 'Book online', href: 'https://book.example/x' });
+  assert.match(RENDERERS['offer:cards'](ctx([{ kind: 'offer' }]), sec as never), /href="https:\/\/book\.example\/x"[^>]*data-action="book">Book online</);
+  cat.actions.length = 0;
+  assert.ok(!/svc-go/.test(RENDERERS['offer:cards'](ctx([{ kind: 'offer' }]), sec as never)), 'no route, no link');
+});
+
+test("the chosen concept's design tokens drive the homepage and the inner pages, and an owner's design edit reaches both", { timeout: 400_000 }, async () => {
+  const { startSiteJob, getSiteJob } = await import('../src/studio/concepts/site.js');
+  const { getDraft, saveDraft } = await import('../src/drafts.js');
+  const { TYPE_PRESET_DEFS } = await import('../src/design/directions.js');
+  const set = await roofSet();
+  let job; for (job = (await getSiteJob((await startSiteJob(set.id, 'b')).id))!; job.status !== 'done' && job.status !== 'failed'; job = (await getSiteJob(job.id))!) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(job.status, 'done', job.error ?? '');
+  const d = (await getDraft(job.draftId!))!;
+  const dir = path.join(config.dirs.sites, d.slug);
+  const inner = (fs.readdirSync(dir, { recursive: true }) as string[]).map(String).filter((f) => f.endsWith('index.html') && f !== 'index.html');
+  const concept = set.concepts.find((x) => x.id === 'b')!;
+  const check = (accent: string, family: string) => {
+    const home = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+    assert.ok(home.toLowerCase().includes(accent.toLowerCase()), `homepage lacks ${accent}`);
+    assert.ok(home.includes(family), `homepage lacks the typeface ${family}`);
+    for (const f of inner) {
+      const h = fs.readFileSync(path.join(dir, f), 'utf8');
+      const block = h.slice(h.indexOf('id="concept-tokens"'));
+      assert.ok(block.toLowerCase().includes(`--brand:${accent.toLowerCase()}`), `${f}: accent ${accent} not applied`);
+      assert.ok(block.includes(family), `${f}: heading typeface ${family} not applied`);
+    }
+  };
+  check(concept.tokens.colors.action, concept.tokens.fonts.heading.family);
+  // an owner's supported design edit (accent and typeface) reaches the homepage too; its sections stay
+  await saveDraft(d, { revision: d.revision, appearance: { ...d.appearance, color: { mode: 'solid', accent: '#0F766E' }, font: 'editorial' } });
+  check('#0F766E', TYPE_PRESET_DEFS.editorial.heading.family);
+  const sections = [...fs.readFileSync(path.join(dir, 'index.html'), 'utf8').matchAll(/<section[^>]*data-kind="([a-z]+)" data-variant="([a-z-]+)"/g)].map((m) => `${m[1]}:${m[2]}`);
+  assert.deepEqual(sections, concept.sections.map((s) => `${s.kind}:${s.variant}`));
+});
+
+// ───────────────────────── one design across the site: menu, inner-page shell, spacing (concept C of another business) ─────────────────────────
+async function conceptSite(_preferred: 'a' | 'b' | 'c') {
+  const { startSiteJob, getSiteJob, conceptDesign } = await import('../src/studio/concepts/site.js');
+  const { getDraft } = await import('../src/drafts.js');
+  const set = await roofSet();
+  // a concept whose design uses a page family with inner pages (the classic one is a single page)
+  const conceptId = set.concepts.find((x) => x.id !== 'b' && conceptDesign(x).layout.direction !== 'clean-professional')?.id ?? set.concepts.find((x) => conceptDesign(x).layout.direction !== 'clean-professional')!.id;
+  let job; for (job = (await getSiteJob((await startSiteJob(set.id, conceptId)).id))!; job.status !== 'done' && job.status !== 'failed'; job = (await getSiteJob(job.id))!) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(job.status, 'done', job.error ?? '');
+  // the owner asks for separate pages, so there are inner pages to check
+  const { saveDraft } = await import('../src/drafts.js');
+  const first = (await getDraft(job.draftId!))!;
+  const d = await saveDraft(first, { revision: first.revision, siteMode: 'multi' });
+  return { set, job, d, dir: path.join(config.dirs.sites, d.slug) };
+}
+
+test('the concept homepage has a working phone menu with every page; desktop keeps the concept header', { timeout: 400_000, skip: !screenshotsAvailable() }, async () => {
+  const { job, d } = await conceptSite('c');
+  const routes = (d.sitePlan?.pages ?? []).filter((p) => p.route && p.type !== 'home' && !p.offeringId).map((p) => p.route);
+  assert.ok(routes.length > 0, 'the fixture has inner pages');
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ executablePath: config.chromiumPath });
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await page.goto(job.siteUrl!, { waitUntil: 'load' });
+    const state = () => page.evaluate('({ expanded: document.querySelector(".menu-btn").getAttribute("aria-expanded"), navShown: getComputedStyle(document.querySelector("#site-menu")).display !== "none", btnShown: getComputedStyle(document.querySelector(".menu-btn")).display !== "none", overflow: document.documentElement.scrollWidth > innerWidth + 1, links: [...document.querySelectorAll("#site-menu a")].map((a) => a.getAttribute("href")) })') as Promise<{ expanded: string; navShown: boolean; btnShown: boolean; overflow: boolean; links: string[] }>;
+    let s = await state();
+    assert.deepEqual([s.btnShown, s.navShown, s.expanded, s.overflow], [true, false, 'false', false], JSON.stringify(s));
+    for (const r of routes) assert.ok(s.links.includes(r), `the menu lacks ${r}: ${s.links.join(', ')}`);
+    await page.click('.menu-btn');
+    s = await state();
+    assert.deepEqual([s.navShown, s.expanded], [true, 'true'], 'opens');
+    await page.keyboard.press('Escape');
+    s = await state();
+    assert.deepEqual([s.navShown, s.expanded], [false, 'false'], 'Escape closes');
+    await page.click('.menu-btn');
+    await page.click(`#site-menu a[href="${routes[0]}"]`);
+    await page.waitForLoadState('load');
+    assert.ok(page.url().endsWith(routes[0]), `the menu link goes to ${routes[0]}: ${page.url()}`);
+    await page.close();
+    const desk = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await desk.goto(job.siteUrl!, { waitUntil: 'load' });
+    const ds = await desk.evaluate('({ btn: getComputedStyle(document.querySelector(".menu-btn")).display, nav: getComputedStyle(document.querySelector("#site-menu")).display })') as { btn: string; nav: string };
+    assert.equal(ds.btn, 'none');
+    assert.notEqual(ds.nav, 'none');
+    await desk.close();
+  } finally { await browser.close(); }
+});
+
+test('inner pages wear the chosen concept header and footer; their content, forms and SEO stay; every header link works', { timeout: 400_000 }, async () => {
+  const { job, d, dir } = await conceptSite('c');
+  const home = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  const headClass = home.match(/<header class="(site-head[^"]*)"/)![1];
+  const inner = (fs.readdirSync(dir, { recursive: true }) as string[]).map(String).filter((f) => f.endsWith('index.html') && f !== 'index.html');
+  assert.ok(inner.length > 0);
+  let forms = 0;
+  for (const f of inner) {
+    const h = fs.readFileSync(path.join(dir, f), 'utf8');
+    assert.ok(h.includes(`<div class="cx cx-head"><header class="${headClass}"`), `${f}: not the concept header`);
+    assert.ok(h.includes('<div class="cx cx-foot"><footer class="site-foot'), `${f}: not the concept footer`);
+    assert.ok(!/<header class="f[a-z]-head/.test(h) && !/<footer class="f[a-z]-foot/.test(h), `${f}: the builder header or footer is still there`);
+    assert.match(h, /<link rel="canonical"/, `${f}: SEO head`);
+    assert.match(h, /<main[\s>]/, `${f}: page content`);
+    forms += (h.match(/<form\b/g) || []).length;
+    // every link in the concept header resolves on this page
+    const base = new URL(f.replace(/\\/g, '/').replace(/index\.html$/, ''), job.siteUrl!);
+    for (const href of [...h.slice(h.indexOf('cx-head'), h.indexOf('</header>')).matchAll(/href="([^"]+)"/g)].map((m) => m[1]).filter((x) => !/^(tel|mailto|https?):/.test(x))) {
+      const u = new URL(href, base);
+      if (!u.href.startsWith(job.siteUrl!)) continue;
+      assert.equal((await fetch(u.href.split('#')[0])).status, 200, `${f}: ${href} → ${u.href}`);
+    }
+  }
+  assert.ok(forms > 0, 'the inner pages keep their forms');
+  void d;
+});
+
+test("the owner's spacing setting reaches the inner pages as well as the homepage", { timeout: 400_000 }, async () => {
+  const { saveDraft } = await import('../src/drafts.js');
+  const { d, dir } = await conceptSite('c');
+  await saveDraft(d, { revision: d.revision, appearance: { ...d.appearance, spacing: 'spacious' } });
+  const home = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  assert.match(home, /--sp:1\.2\b/, 'homepage spacing');
+  const inner = (fs.readdirSync(dir, { recursive: true }) as string[]).map(String).filter((f) => f.endsWith('index.html') && f !== 'index.html');
+  for (const f of inner) assert.match(fs.readFileSync(path.join(dir, f), 'utf8'), /--section-y:67px}@media \(min-width:900px\)\{:root:root\{--section-y:115px}/, `${f}: spacing`);
+});
