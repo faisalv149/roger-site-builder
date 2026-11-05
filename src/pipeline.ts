@@ -448,7 +448,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     // the headline: the website's own, when it says what the business does; otherwise what it is, its main services and where
     if (evModel?.hero && content?.hero) {
       const ctx = { typeLabel: b.primaryTypeLabel, services: evModel.services.filter((s) => s.isPrimary).map((s) => s.canonicalName) };
-      const own = content.hero.headline.replace(/\s+/g, ' ').trim();
+      const own = tidyHeadline(content.hero.headline);
       const subOk = content.hero.subline && content.hero.subline.length >= 40;
       const where = content.areas?.region || b.city;
       const composed = `${b.primaryTypeLabel ? b.primaryTypeLabel.replace(/ contractor$/i, '') : 'Local'} ${ctx.services.slice(0, 3).map((x) => x.toLowerCase()).join(', ')}${where ? ` in ${where}` : ''}`.replace(/\s+/g, ' ').trim();
@@ -687,3 +687,9 @@ export async function runAudit(input: { website: string; google?: string; placeI
   const rep = await writeReport(slug, audit, { businessName: b?.name });
   return { audit, reportUrl: rep.url, image: rep.image, card: auditCard(audit, rep.url, rep.image) };
 }
+
+/**
+ * A website's own headline as a heading: its words unchanged, without the separators a page layout leaves at the ends
+ * ("- Just Call Radiant -" → "Just Call Radiant"), which read as a typo once the words stand alone.
+ */
+export const tidyHeadline = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/^[\s\-–—|:•·~*]+|[\s\-–—|:•·~*]+$/g, '').trim();

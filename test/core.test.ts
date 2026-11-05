@@ -152,3 +152,10 @@ test('publishing to Vercel: valid project names, self-links rewritten, lead form
 test('the bundled theme list matches themes/ on disk (re-run scripts/theme-manifest.ts if not)', () => {
   assert.deepEqual(PACKAGE_THEMES.map((t) => t.file), themeFiles());
 });
+
+test("a website's own headline keeps its words but not the separators left at its ends", async () => {
+  const { tidyHeadline } = await import('../src/pipeline.js');
+  assert.equal(tidyHeadline('For Plumbing, HVAC & Electrical Services - Just Call Radiant - '), 'For Plumbing, HVAC & Electrical Services - Just Call Radiant');
+  assert.equal(tidyHeadline('| Fresh bread daily |'), 'Fresh bread daily');
+  assert.equal(tidyHeadline('Roof repair — done right'), 'Roof repair — done right');
+});
