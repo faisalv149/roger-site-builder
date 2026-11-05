@@ -308,7 +308,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   // the picture on each service's own card, kept with that service
   let serviceImgs: Awaited<ReturnType<typeof fetchServiceImages>> | undefined;
   if (content && b.source !== 'mock' && content.services.some((x) => x.image)) {
-    serviceImgs = await timed(steps, emit, 'Fetch service pictures', () => fetchServiceImages(content.services.map((x) => (x.image && !serviceImageFits(x.name, x.image) ? { ...x, image: undefined } : x)), { outDir: assetDir, publicPrefix: 'assets' }), (r) => `${r.byService.size} of ${r.records.length} cropped to 16:10`);
+    serviceImgs = await timed(steps, emit, 'Fetch service pictures', () => fetchServiceImages(content.services.map((x) => (x.image && !serviceImageFits(x.name, x.image, b.name) ? { ...x, image: undefined } : x)), { outDir: assetDir, publicPrefix: 'assets' }), (r) => `${r.byService.size} of ${r.records.length} cropped to 16:10`);
     for (const s of factsRes.services) { const im = serviceImgs.byService.get(nameKey(s.name)); if (im) s.image = im; }
     for (const r of serviceImgs.records.filter((x) => !x.ok)) warnings.push(`Service picture not used: ${r.service} (${r.skipped ?? r.error})`);
   }
@@ -728,12 +728,20 @@ export function ctaFor(c: { label: string; kind: string; href: string }, verifie
 const VAGUE = new Set(['installation', 'installations', 'install', 'installs', 'maintenance', 'repair', 'repairs', 'replacement', 'replacements', 'service', 'services', 'inspection', 'inspections', 'cleaning', 'tankless', 'upgrades', 'upgrade', 'emergency', 'commercial', 'residential', 'other', 'more', 'misc', 'general', 'consultation', 'estimates', 'estimate']);
 export const vagueService = (name: string) => { const w = name.toLowerCase().replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter(Boolean); return w.length === 1 && VAGUE.has(w[0]); };
 
-/** A service's picture fits when its own words (alt text, file name) name what the service is about. */
-export function serviceImageFits(service: string, image: { alt?: string; url: string }): boolean {
+/** A service's picture fits when its own words (alt text, file name) name what the service is about.
+ *  The business's own name is not evidence: "Radiant Plumbing van" says nothing about plumbing work. */
+export function serviceImageFits(service: string, image: { alt?: string; url: string }, business = ''): boolean {
   const generic = new Set(['service', 'services', 'repair', 'repairs', 'installation', 'replacement', 'maintenance', 'and', 'the', 'for', 'your']);
   const words = (t: string) => t.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 3 && !generic.has(w));
   const want = words(service);
-  const have = words(`${image.alt ?? ''} ${decodeURIComponent(image.url.split('/').pop() ?? '').replace(/\.[a-z]+$/, '')}`);
+  const brand = words(business);
+  const raw = words(`${image.alt ?? ''} ${decodeURIComponent(image.url.split('/').pop() ?? '').replace(/\.[a-z]+$/, '')}`);
+  // drop the business name wherever it appears: its first word and the name words that follow it
+  const have: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (brand.length && raw[i] === brand[0]) { while (i + 1 < raw.length && brand.includes(raw[i + 1])) i++; continue; }
+    have.push(raw[i]);
+  }
   const near = (a: string, b: string) => a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b.slice(0, 5)) || b.startsWith(a.slice(0, 5))));
   return want.some((w) => have.some((h) => near(w, h)));
 }

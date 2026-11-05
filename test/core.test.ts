@@ -187,4 +187,9 @@ test('vague one-word service labels are dropped; a service photo needs words tha
   assert.equal(serviceImageFits('Water Heaters', { url: 'https://x/tankless-water-heater-install.jpg' }), true);
   assert.equal(serviceImageFits('Drains & Sewers', { alt: 'Radiant technician with van', url: 'https://x/IMG_2041.jpg' }), false);
   assert.equal(serviceImageFits('Electrical', { url: 'https://x/team-photo.jpg' }), false);
+  // the business's own name is not evidence of what the picture shows
+  const biz = 'Radiant Plumbing, Air Conditioning, & Electrical';
+  assert.equal(serviceImageFits('Plumbing', { alt: 'Radiant Plumbing technician beside the van', url: 'https://x/radiant-plumbing-van.jpg' }, biz), false);
+  assert.equal(serviceImageFits('Plumbing', { alt: 'Radiant plumber repairing a kitchen sink pipe', url: 'https://x/a.jpg' }, biz), true);
+  assert.equal(serviceImageFits('Heating & Air Conditioning', { alt: 'Technician next to an air conditioning condenser', url: 'https://x/b.jpg' }, biz), true);
 });
