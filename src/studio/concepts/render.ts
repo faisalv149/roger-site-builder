@@ -6,7 +6,7 @@ import { fetchWithRetry } from '../discover.js';
 import { sha256 } from '../snapshot.js';
 import { launchBrowser } from '../../render/og.js';
 import type { Catalog } from './review.js';
-import { RENDERERS, VARIANT_CSS, baseCss, esc, siteFooter, siteHeader, type RenderCtx } from './library.js';
+import { MENU_JS, RENDERERS, VARIANT_CSS, baseCss, esc, siteFooter, siteHeader, type RenderCtx } from './library.js';
 import type { Concept } from './types.js';
 import { LISTING_CSS, isListing, placeholderSrc } from './listing-photos.js';
 
@@ -90,6 +90,7 @@ ${siteHeader(ctx, hero === 'full-bleed' ? 'overlay' : hero === 'split' ? 'bar' :
 ${body}
 </main>
 ${siteFooter(ctx)}
+<script>${MENU_JS}</script>
 </body></html>`;
 }
 

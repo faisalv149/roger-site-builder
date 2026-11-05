@@ -469,3 +469,89 @@ test("the chosen concept's design tokens drive the homepage and the inner pages,
   const sections = [...fs.readFileSync(path.join(dir, 'index.html'), 'utf8').matchAll(/<section[^>]*data-kind="([a-z]+)" data-variant="([a-z-]+)"/g)].map((m) => `${m[1]}:${m[2]}`);
   assert.deepEqual(sections, concept.sections.map((s) => `${s.kind}:${s.variant}`));
 });
+
+// ───────────────────────── one design across the site: menu, inner-page shell, spacing (concept C of another business) ─────────────────────────
+async function conceptSite(_preferred: 'a' | 'b' | 'c') {
+  const { startSiteJob, getSiteJob, conceptDesign } = await import('../src/studio/concepts/site.js');
+  const { getDraft } = await import('../src/drafts.js');
+  const set = await roofSet();
+  // a concept whose design uses a page family with inner pages (the classic one is a single page)
+  const conceptId = set.concepts.find((x) => x.id !== 'b' && conceptDesign(x).layout.direction !== 'clean-professional')?.id ?? set.concepts.find((x) => conceptDesign(x).layout.direction !== 'clean-professional')!.id;
+  let job; for (job = (await getSiteJob((await startSiteJob(set.id, conceptId)).id))!; job.status !== 'done' && job.status !== 'failed'; job = (await getSiteJob(job.id))!) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(job.status, 'done', job.error ?? '');
+  // the owner asks for separate pages, so there are inner pages to check
+  const { saveDraft } = await import('../src/drafts.js');
+  const first = (await getDraft(job.draftId!))!;
+  const d = await saveDraft(first, { revision: first.revision, siteMode: 'multi' });
+  return { set, job, d, dir: path.join(config.dirs.sites, d.slug) };
+}
+
+test('the concept homepage has a working phone menu with every page; desktop keeps the concept header', { timeout: 400_000, skip: !screenshotsAvailable() }, async () => {
+  const { job, d } = await conceptSite('c');
+  const routes = (d.sitePlan?.pages ?? []).filter((p) => p.route && p.type !== 'home' && !p.offeringId).map((p) => p.route);
+  assert.ok(routes.length > 0, 'the fixture has inner pages');
+  const { chromium } = await import('playwright-core');
+  const browser = await chromium.launch({ executablePath: config.chromiumPath });
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await page.goto(job.siteUrl!, { waitUntil: 'load' });
+    const state = () => page.evaluate('({ expanded: document.querySelector(".menu-btn").getAttribute("aria-expanded"), navShown: getComputedStyle(document.querySelector("#site-menu")).display !== "none", btnShown: getComputedStyle(document.querySelector(".menu-btn")).display !== "none", overflow: document.documentElement.scrollWidth > innerWidth + 1, links: [...document.querySelectorAll("#site-menu a")].map((a) => a.getAttribute("href")) })') as Promise<{ expanded: string; navShown: boolean; btnShown: boolean; overflow: boolean; links: string[] }>;
+    let s = await state();
+    assert.deepEqual([s.btnShown, s.navShown, s.expanded, s.overflow], [true, false, 'false', false], JSON.stringify(s));
+    for (const r of routes) assert.ok(s.links.includes(r), `the menu lacks ${r}: ${s.links.join(', ')}`);
+    await page.click('.menu-btn');
+    s = await state();
+    assert.deepEqual([s.navShown, s.expanded], [true, 'true'], 'opens');
+    await page.keyboard.press('Escape');
+    s = await state();
+    assert.deepEqual([s.navShown, s.expanded], [false, 'false'], 'Escape closes');
+    await page.click('.menu-btn');
+    await page.click(`#site-menu a[href="${routes[0]}"]`);
+    await page.waitForLoadState('load');
+    assert.ok(page.url().endsWith(routes[0]), `the menu link goes to ${routes[0]}: ${page.url()}`);
+    await page.close();
+    const desk = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    await desk.goto(job.siteUrl!, { waitUntil: 'load' });
+    const ds = await desk.evaluate('({ btn: getComputedStyle(document.querySelector(".menu-btn")).display, nav: getComputedStyle(document.querySelector("#site-menu")).display })') as { btn: string; nav: string };
+    assert.equal(ds.btn, 'none');
+    assert.notEqual(ds.nav, 'none');
+    await desk.close();
+  } finally { await browser.close(); }
+});
+
+test('inner pages wear the chosen concept header and footer; their content, forms and SEO stay; every header link works', { timeout: 400_000 }, async () => {
+  const { job, d, dir } = await conceptSite('c');
+  const home = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  const headClass = home.match(/<header class="(site-head[^"]*)"/)![1];
+  const inner = (fs.readdirSync(dir, { recursive: true }) as string[]).map(String).filter((f) => f.endsWith('index.html') && f !== 'index.html');
+  assert.ok(inner.length > 0);
+  let forms = 0;
+  for (const f of inner) {
+    const h = fs.readFileSync(path.join(dir, f), 'utf8');
+    assert.ok(h.includes(`<div class="cx cx-head"><header class="${headClass}"`), `${f}: not the concept header`);
+    assert.ok(h.includes('<div class="cx cx-foot"><footer class="site-foot'), `${f}: not the concept footer`);
+    assert.ok(!/<header class="f[a-z]-head/.test(h) && !/<footer class="f[a-z]-foot/.test(h), `${f}: the builder header or footer is still there`);
+    assert.match(h, /<link rel="canonical"/, `${f}: SEO head`);
+    assert.match(h, /<main[\s>]/, `${f}: page content`);
+    forms += (h.match(/<form\b/g) || []).length;
+    // every link in the concept header resolves on this page
+    const base = new URL(f.replace(/\\/g, '/').replace(/index\.html$/, ''), job.siteUrl!);
+    for (const href of [...h.slice(h.indexOf('cx-head'), h.indexOf('</header>')).matchAll(/href="([^"]+)"/g)].map((m) => m[1]).filter((x) => !/^(tel|mailto|https?):/.test(x))) {
+      const u = new URL(href, base);
+      if (!u.href.startsWith(job.siteUrl!)) continue;
+      assert.equal((await fetch(u.href.split('#')[0])).status, 200, `${f}: ${href} → ${u.href}`);
+    }
+  }
+  assert.ok(forms > 0, 'the inner pages keep their forms');
+  void d;
+});
+
+test("the owner's spacing setting reaches the inner pages as well as the homepage", { timeout: 400_000 }, async () => {
+  const { saveDraft } = await import('../src/drafts.js');
+  const { d, dir } = await conceptSite('c');
+  await saveDraft(d, { revision: d.revision, appearance: { ...d.appearance, spacing: 'spacious' } });
+  const home = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  assert.match(home, /--sp:1\.2\b/, 'homepage spacing');
+  const inner = (fs.readdirSync(dir, { recursive: true }) as string[]).map(String).filter((f) => f.endsWith('index.html') && f !== 'index.html');
+  for (const f of inner) assert.match(fs.readFileSync(path.join(dir, f), 'utf8'), /--section-y:67px}@media \(min-width:900px\)\{:root:root\{--section-y:115px}/, `${f}: spacing`);
+});

@@ -57,7 +57,7 @@ export function siteHeader(c: RenderCtx, style: 'overlay' | 'bar' | 'center', na
   const kind = p ? (p.actionId === 'find-location' ? 'locations' : c.cat.actions.find((a) => a.id === p.actionId)?.kind) : undefined;
   // on a phone the header keeps a one-word action, or none (the hero carries it)
   const short = kind === 'call' ? 'Call' : kind === 'book' ? 'Book' : kind === 'menu' ? 'Menu' : kind === 'directions' ? 'Directions' : kind === 'locations' ? 'Locations' : '';
-  return `<header class="site-head site-head--${style}"${scrim}><div class="wrap site-head__in"><a class="brand" href="#top" aria-label="${esc(c.cat.business.name)}, top of the page">${brand}</a><nav aria-label="Sections"><ul>${nav.map((n) => `<li><a href="${n.href}">${esc(n.label)}</a></li>`).join('')}</ul></nav>${p ? `<a class="btn btn--${style === 'overlay' ? 'invert-light' : style === 'center' ? 'deep' : 'primary'} btn--small" href="${esc(p.href)}"${ext(p.href)} data-action="${esc(p.actionId)}" aria-label="${esc(p.label)}"${short ? '' : ' data-hide-sm'}><span class="lbl-l">${esc(p.label)}</span><span class="lbl-s">${esc(short)}</span></a>` : ''}</div></header>`;
+  return `<header class="site-head site-head--${style}"${scrim}><div class="wrap site-head__in"><a class="brand" href="#top" aria-label="${esc(c.cat.business.name)}, top of the page">${brand}</a><button type="button" class="menu-btn" aria-expanded="false" aria-controls="site-menu">Menu</button><nav id="site-menu" aria-label="Sections"><ul>${nav.map((n) => `<li><a href="${n.href}">${esc(n.label)}</a></li>`).join('')}</ul></nav>${p ? `<a class="btn btn--${style === 'overlay' ? 'invert-light' : style === 'center' ? 'deep' : 'primary'} btn--small" href="${esc(p.href)}"${ext(p.href)} data-action="${esc(p.actionId)}" aria-label="${esc(p.label)}"${short ? '' : ' data-hide-sm'}><span class="lbl-l">${esc(p.label)}</span><span class="lbl-s">${esc(short)}</span></a>` : ''}</div></header>`;
 }
 
 export function siteFooter(c: RenderCtx) {
@@ -315,7 +315,8 @@ h2{font-size:clamp(2rem,4.2vw,3.4rem);margin-bottom:.45em}h3{font-size:1.3rem;li
 /* footer */
 .site-foot{background:var(--deep);color:var(--onDeep);padding:56px 0 40px;font-size:.95rem}.site-foot__in{display:grid;grid-template-columns:1fr 1fr;gap:24px}.site-foot a{color:inherit}.site-foot__name{font:var(--hw) 1.35rem/1.1 var(--hf);text-transform:var(--case)}.site-foot__note{grid-column:1/-1;border-top:1px solid color-mix(in srgb,var(--onDeep) 30%,transparent);padding-top:20px;margin:8px 0 0}
 .lbl-s{display:none}
-@media (max-width:760px){.site-head nav{display:none}.site-foot__in{grid-template-columns:1fr}.site-head .lbl-l{display:none}.site-head .lbl-s{display:inline}.site-head [data-hide-sm]{display:none}}
+.menu-btn{display:none}
+@media (max-width:760px){.site-head nav{display:none}.menu-btn{display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:0 14px;margin-left:auto;border:2px solid currentColor;border-radius:var(--r);background:transparent;color:inherit;font:700 .95rem/1 var(--bf);cursor:pointer}.site-head[data-menu=open] nav{display:block;position:absolute;left:0;right:0;top:100%;background:var(--surface);color:var(--ink);border-bottom:1px solid var(--line);box-shadow:0 14px 28px rgba(0,0,0,.14)}.site-head[data-menu=open] nav ul{flex-direction:column;padding:8px clamp(20px,4vw,48px) 16px}.site-foot__in{grid-template-columns:1fr}.site-head .lbl-l{display:none}.site-head .lbl-s{display:inline}.site-head [data-hide-sm]{display:none}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}`;
 }
 
@@ -381,3 +382,6 @@ export const VARIANT_CSS: Record<string, string> = {
   'contact:band': `.cb .cb__big{font:var(--hw) clamp(2.6rem,7vw,5.5rem)/1 var(--hf);margin:6px 0 10px}.cb__big a{color:inherit;text-decoration:none}.cb__dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;margin-top:40px;border-top:1px solid color-mix(in srgb,var(--onDeep) 35%,transparent);padding-top:28px}.cb__dl dt{font-weight:700;margin-bottom:6px}
 .cb .loc__grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:28px}.cb .loc__grid li{border:1px solid color-mix(in srgb,var(--onDeep) 40%,transparent);border-radius:var(--r);padding:18px}.cb .loc__grid p{margin:0 0 4px}.loc__street{font-weight:700}`,
 };
+
+/** The header's phone menu: the button opens and closes it, a chosen link or Escape closes it (aria-expanded kept in step). */
+export const MENU_JS = "document.querySelectorAll('.site-head').forEach(function(h){var b=h.querySelector('.menu-btn'),n=h.querySelector('nav');if(!b||!n)return;function set(o){h.setAttribute('data-menu',o?'open':'closed');b.setAttribute('aria-expanded',String(o))}b.addEventListener('click',function(){set(b.getAttribute('aria-expanded')!=='true')});n.addEventListener('click',function(e){if(e.target.closest('a'))set(false)});document.addEventListener('keydown',function(e){if(e.key==='Escape'&&b.getAttribute('aria-expanded')==='true'){set(false);b.focus()}})});";

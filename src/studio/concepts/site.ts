@@ -6,6 +6,7 @@ import { persistDir, readOut, restoreDir } from '../../files.js';
 import { TYPE_PRESET_DEFS, fontsUrl } from '../../design/directions.js';
 import { getReview, resolveCatalog, type Catalog } from './review.js';
 import { conceptHtml } from './render.js';
+import { applyConceptShell } from './shell.js';
 import type { DesignTokens } from './types.js';
 import { setDir } from './render.js';
 import { buildSite } from '../../pipeline.js';
@@ -230,9 +231,10 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
     if (same.test(html)) html = html.replace(same, `<li><a href="${p.route}">${label}</a></li>`);
     else add.push(`<li><a href="${p.route}">${label}</a></li>`);
   }
-  if (add.length) html = html.replace(/(<nav aria-label="Sections"><ul>[\s\S]*?)(<\/ul><\/nav>)/, `$1${add.join('')}$2`);
+  if (add.length) html = html.replace(/(<nav id="site-menu" aria-label="Sections"><ul>[\s\S]*?)(<\/ul><\/nav>)/, `$1${add.join('')}$2`);
   fs.writeFileSync(homeFile, html);
-  applyTokensToPages(siteDir, homeFile, tokens);
+  // inner pages in the concept's design: its header, menu and footer, its tokens (colour, type, corners, spacing)
+  applyConceptShell(siteDir, homeFile, html, tokens);
   await persistDir(siteDir);
   return true;
 }
@@ -269,14 +271,3 @@ function serviceLinksOf(d: DraftRecord, cat: Catalog): Record<string, { href: st
   return out;
 }
 
-/** The inner pages wear the concept's tokens: its colours, typefaces and corners override the builder's. */
-export function applyTokensToPages(siteDir: string, homeFile: string, t: DesignTokens) {
-  const c = t.colors;
-  const block = `<link rel="stylesheet" href="${t.fonts.href}" data-concept-tokens><style id="concept-tokens">:root:root{--brand:${c.action};--brand-ink:${c.onAction};--brand-text:${c.brandText};--ink:${c.ink};--ink-muted:${c.muted};--surface:${c.bg};--surface-alt:${c.surface};--font-heading:${t.fonts.heading.css};--font-body:${t.fonts.body.css};--r-sm:${Math.round(t.radius / 2)}px;--r-md:${t.radius}px;--r-lg:${Math.round(t.radius * 1.5)}px}</style>`;
-  const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'assets' ? [] : walk(path.join(dir, e.name))) : e.name.endsWith('.html') ? [path.join(dir, e.name)] : []));
-  for (const f of walk(siteDir)) {
-    if (f === homeFile) continue;
-    const html = fs.readFileSync(f, 'utf8').replace(/<link rel="stylesheet" href="[^"]*" data-concept-tokens><style id="concept-tokens">[\s\S]*?<\/style>/, '');
-    fs.writeFileSync(f, html.replace('</head>', `${block}</head>`));
-  }
-}
