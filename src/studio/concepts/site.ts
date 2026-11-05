@@ -1,4 +1,9 @@
 import { randomBytes } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from '../../config.js';
+import { persistDir, readOut } from '../../files.js';
+import { setDir } from './render.js';
 import { buildSite } from '../../pipeline.js';
 import { getDraft, issueOwnerKey, ownerUrl, putDraft, saveDraft, withDraftLock, type DraftRecord } from '../../drafts.js';
 import type { Appearance, LayoutChoice } from '../../design/schema.js';
@@ -61,6 +66,7 @@ export async function applyConcept(draftId: string, setId: string, concept: Conc
     if (!saved) throw last;
     saved.concept = { setId, conceptId: concept.id };
     await putDraft(saved);
+    await writeConceptHome(saved);
     return saved;
   });
 }
@@ -157,4 +163,57 @@ export async function nextConcept(current: { setId: string; conceptId: string })
   if (!set?.concepts.length) return undefined;
   const i = set.concepts.findIndex((c) => c.id === current.conceptId);
   return set.concepts[(i + 1) % set.concepts.length];
+}
+
+/**
+ * The homepage IS the chosen concept: its own rendered page from the Phase 2 renderer (same sections in the same order,
+ * hero composition, photos, type, colours and spacing), not a translation into the builder's theme. The builder keeps
+ * the inner pages, forms, SEO and owner editing; its home page lends the concept the SEO head (title, description,
+ * canonical, structured data, social cards) and the links to the inner pages. Re-applied after every owner save.
+ */
+export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
+  if (!d.concept) return false;
+  const set = await getConceptSet(d.concept.setId);
+  const concept = set?.concepts.find((c) => c.id === d.concept!.conceptId);
+  if (!set || !concept) return false;
+  const cdir = setDir(set.id);
+  const read = async (rel: string) => { const f = path.join(cdir, rel); return fs.existsSync(f) ? fs.readFileSync(f) : await readOut(`studio-concepts/${set.id}/${rel}`).catch(() => undefined); };
+  const src = await read(`${concept.id}.html`);
+  const siteDir = path.join(config.dirs.sites, d.slug);
+  const homeFile = path.join(siteDir, 'index.html');
+  if (!src || !fs.existsSync(homeFile)) return false;
+  let html = src.toString('utf8');
+  const legacy = fs.readFileSync(homeFile, 'utf8');
+  // the concept's own pictures, copied into the site (Google listing photos stay live stand-ins, never copied)
+  const dest = path.join(siteDir, 'assets', 'concept');
+  fs.mkdirSync(dest, { recursive: true });
+  for (const file of new Set([...html.matchAll(/(?:src|href)="img\/([A-Za-z0-9_.-]+)"/g)].map((m) => m[1]))) {
+    const data = await read(`img/${file}`);
+    if (data) fs.writeFileSync(path.join(dest, file), data);
+  }
+  html = html.replace(/((?:src|href)=")img\//g, '$1assets/concept/');
+  // the SEO head from the builder's home page
+  const pick = (re: RegExp) => [...legacy.matchAll(re)].map((m) => m[0]).join('\n');
+  const title = legacy.match(/<title>[\s\S]*?<\/title>/)?.[0];
+  const seo = [
+    pick(/<meta name="(?:description|robots)"[^>]*>/g), pick(/<link rel="(?:canonical|icon|apple-touch-icon|manifest)"[^>]*>/g),
+    pick(/<meta (?:property="og:|name="twitter:)[^>]*>/g), pick(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g),
+  ].filter(Boolean).join('\n');
+  html = html.replace(/<meta name="robots"[^>]*>/, '');
+  if (title) html = html.replace(/<title>[\s\S]*?<\/title>/, title);
+  html = html.replace('</head>', `${seo}\n</head>`);
+  // the inner pages, after the concept's own section links
+  const inner = (d.sitePlan?.pages ?? []).filter((p) => p.route && p.type !== 'home' && !p.offeringId);
+  // a section link with the same name as an inner page ("Services") goes to that page instead of appearing twice
+  const add: string[] = [];
+  for (const p of inner) {
+    const label = (p.navLabel ?? p.route.replace(/\/$/, '')).replace(/[<>&"]/g, '');
+    const same = new RegExp(`<li><a href="#[a-z0-9-]+">${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</a></li>`);
+    if (same.test(html)) html = html.replace(same, `<li><a href="${p.route}">${label}</a></li>`);
+    else add.push(`<li><a href="${p.route}">${label}</a></li>`);
+  }
+  if (add.length) html = html.replace(/(<nav aria-label="Sections"><ul>[\s\S]*?)(<\/ul><\/nav>)/, `$1${add.join('')}$2`);
+  fs.writeFileSync(homeFile, html);
+  await persistDir(siteDir);
+  return true;
 }

@@ -76,8 +76,9 @@ app.use('/sites', async (req, res, next) => {
   if (rel.includes('..')) return next();
   const file = path.join(config.dirs.sites, rel);
   const html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : (await readOut(`sites${rel}`).catch(() => undefined))?.toString('utf8');
-  if (!html || !html.includes('⟦g:')) return next();
-  res.set({ 'cache-control': 'private, no-store' }).type('html').send(await fillGoogleContent(html));
+  if (!html || (!html.includes('⟦g:') && !html.includes('data-gphoto'))) return next();
+  res.set({ 'cache-control': 'private, no-store' }).type('html').send(await fillListingPhotos(await fillGoogleContent(html)));
+
 });
 app.use('/sites', express.static(config.dirs.sites));
 app.use('/reports', express.static(config.dirs.reports));

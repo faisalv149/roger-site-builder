@@ -341,3 +341,29 @@ test('a chosen concept becomes the full site in its design; refining keeps it; "
   assert.equal(sw.draftId, job.draftId);
   assert.deepEqual((await getDraft(sw.draftId!))!.concept, { setId: set.id, conceptId: 'c' });
 });
+
+test('the chosen concept survives the handoff: the homepage has its sections in order and its images, also after an owner save', { timeout: 400_000 }, async () => {
+  const { startSiteJob, getSiteJob } = await import('../src/studio/concepts/site.js');
+  const { getDraft, saveDraft } = await import('../src/drafts.js');
+  const brief = await waitForStudioJob((await startStudioJob({ google: placeId(CASES[4]) })).id);
+  const judge: typeof judgeListingPhotos = (pid, business) => judgeListingPhotos(pid, business, { label: async (items) => ({ kinds: items.map((_, i) => (i === 5 ? 'other' : 'work')), seen: items.map(() => 'work'), source: 'vision' }) });
+  const cj = await waitForConceptJob((await startConceptJob({ businessKey: brief.businessKey! }, { transport: null, judgeListing: judge })).id);
+  const set = (await getConceptSet(cj.setId))!;
+  const concept = set.concepts.find((x) => x.id === 'b')!;
+  const conceptHtml = fs.readFileSync(path.join(setDir(set.id), concept.preview!.html), 'utf8');
+  const sections = (h: string) => [...h.matchAll(/<section[^>]*data-kind="([a-z]+)" data-variant="([a-z-]+)"/g)].map((m) => `${m[1]}:${m[2]}`);
+  const assets = (h: string) => [...h.matchAll(/data-asset="([^"]+)"/g)].map((m) => m[1]).filter((x) => x !== 'logo');
+  assert.deepEqual(sections(conceptHtml), concept.sections.map((s) => `${s.kind}:${s.variant}`));
+  let job; for (job = (await getSiteJob((await startSiteJob(set.id, 'b')).id))!; job.status !== 'done' && job.status !== 'failed'; job = (await getSiteJob(job.id))!) await new Promise((r) => setTimeout(r, 200));
+  assert.equal(job.status, 'done', job.error ?? '');
+  const d = (await getDraft(job.draftId!))!;
+  const home = () => fs.readFileSync(path.join(config.dirs.sites, d.slug, 'index.html'), 'utf8');
+  for (const when of ['after the handoff', 'after an owner save']) {
+    const h = home();
+    assert.deepEqual(sections(h), concept.sections.map((s) => `${s.kind}:${s.variant}`), `section order ${when}`);
+    assert.deepEqual(assets(h), assets(conceptHtml), `image ids ${when}`);
+    assert.ok(assets(h).every((id) => concept.images.includes(id) || set.concepts.length), 'an image the concept does not record');
+    assert.match(h, /<link rel="canonical"/, `SEO head ${when}`);
+    if (when === 'after the handoff') await saveDraft(d, { revision: d.revision, appearance: { ...d.appearance, textSize: 'comfortable' } });
+  }
+});
