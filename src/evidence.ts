@@ -389,7 +389,8 @@ export function notAService(name: string, places: string[] = []): 'vague' | 'men
   }
   // symptom phrases: a sentence about the customer's problem, a list of noises, or a phrase opening with an article
   // …or a clause about what happens to the customer ("Gums that bleed when you brush")
-  const clause = words.length >= 4 && (/\b(?:when|whenever) (?:you|it|they|the|your)\b/i.test(t) || /^\w+ (?:that|which) \w+/i.test(t));
+  // ("Running water you cannot find", "Slower recovery than it used to have"): a service name never speaks of "you", "it" or "than"
+  const clause = words.length >= 4 && (/\b(?:when|whenever) (?:you|it|they|the|your)\b/i.test(t) || /^\w+ (?:that|which) \w+/i.test(t) || /\b(?:you|it|they|than|used to|cannot|can'?t)\b/i.test(t));
   if (clause || SYMPTOM_WORDS.test(t) ||/^(?:the|a|an|past|when|if|your|my)\s/i.test(t) || (/,/.test(t) && /\bor\b/i.test(t))) return 'symptom';
   return undefined;
 }

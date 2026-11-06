@@ -69,6 +69,7 @@ test('service lists: categories, places, vague labels and symptoms are not servi
     ['All plumbing services', 'menu'], ['Every indoor air service we offer', 'menu'],
     ['Austin Plumbers', 'location'], ['San Antonio Plumbers', 'location'], ['Round Rock Dentists', 'location'], ['Hair Salon in Austin', 'location'],
     ['Water at the base of the tank', 'symptom'], ['Rusty hot water', 'symptom'], ['Rumbling, popping or banging', 'symptom'], ['The second repair this year', 'symptom'], ['Past ten years and never serviced', 'symptom'], ['Gums that bleed when you brush', 'symptom'],
+    ['Slower recovery than it used to have', 'symptom'], ['Running water you cannot find', 'symptom'], ['Hair that breaks when it is brushed', 'symptom'],
   ];
   for (const [n, why] of not) assert.equal(notAService(n, places), why, n);
   for (const n of ['AC Repair', 'A/C Repair', 'Water Heater Repair', 'Emergency Plumbers', 'Electrical (Austin)', 'Drain Cleaning', 'Teeth Whitening', 'Root Canal Therapy', 'Balayage', 'Kitchen Remodeling', 'Leak Detection'])
