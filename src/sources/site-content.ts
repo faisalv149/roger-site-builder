@@ -405,6 +405,22 @@ function servicesOf($: $, base: string, links: Anchor[]): { items: SourceService
 }
 
 // ───────────────────────── story ─────────────────────────
+/** Where a page keeps its customers' words: testimonials, reviews, quotes. */
+const REVIEW_BOX = 'blockquote, q, [itemtype*="Review"], [class*="testimonial" i], [id*="testimonial" i], [class*="review" i], [id*="review" i]';
+/**
+ * Text written by a customer about the business, not by the business about itself:
+ * "We reached out to Radiant… They sent a tech… he did a great job… highly recommend".
+ */
+export function reviewLike(text: string): boolean {
+  const signals = [
+    /\b(?:we|i)\s+(?:called|reached out|contacted|hired|used)\b/i,
+    /\b(?:they|he|she)\s+(?:sent|came|showed up|arrived|did|was|were|explained|fixed|looked)\b/i,
+    /\b(?:highly recommend|would recommend|will (?:definitely )?use (?:them|again)|five stars|5 stars|thank you|thanks to|great job|so happy|very happy)\b/i,
+    /\b(?:our|my)\s+(?:\d+[- ]year[- ]old|old)\s+\w+|\b(?:our|my)\s+(?:ac|a\/c|hvac system|water heater|furnace|toilet|sink|roof|car|teeth|dog|cat)\b/i,
+    /\b(?:tech|technician)\s+(?:named\s+)?[A-Z][a-z]+\b/,
+  ];
+  return signals.filter((r) => r.test(text)).length >= 2;
+}
 const STORY_LABEL = /^(?:our |the )?(?:story|about(?: us)?(?: [\w&' -]{2,30})?|who we are|our mission|our practice|meet (?:the )?[\w&' .-]{2,40}|welcome)$/i;
 function storyOf($: $, description?: string): SiteContent['story'] {
   const labels = $('h1,h2,h3,h4,h5,h6,p,span,div,strong').filter((_, e) => { const t = clean($(e).text()); return t.length <= 40 && STORY_LABEL.test(t) && !$(e).closest(INSIDE_CHROME).length && !/^welcome$/i.test(t); }).toArray() as Element[];
@@ -414,7 +430,8 @@ function storyOf($: $, description?: string): SiteContent['story'] {
       box = box.parent();
       const blocks = box.find('p, span, div').filter((_, e) => {
         const own = clean($(e).clone().children().remove().end().text());
-        return own.length >= 80 && own.length <= 1600 && !$(e).closest('nav, footer, header, form, button, a').length;
+        // a customer's review is never the business's story, however close it sits to an "About" heading
+        return own.length >= 80 && own.length <= 1600 && !$(e).closest('nav, footer, header, form, button, a').length && !$(e).closest(REVIEW_BOX).length && !reviewLike(own);
       }).toArray();
       if (!blocks.length) continue;
       const best = blocks.map((b) => clean($(b).clone().children().remove().end().text())).sort((a, c) => c.length - a.length)[0];

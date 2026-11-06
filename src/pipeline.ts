@@ -9,7 +9,7 @@ import { formatDuration, imageKey, nameKey } from './sources/site-content.js';
 import { fetchServiceImages, type ServiceImageRecord } from './sources/service-images.js';
 import { buildBrandProfile, dominantColors, profileColors, type BrandProfile } from './sources/brand-profile.js';
 import { extractorResult } from './content/extraction.js';
-import { vagueService, featuredService, buildAssets, buildEvidenceModel, headlineRelevant, reconcileServices, reviewEvidence, serviceKey, type EvidenceModel } from './evidence.js';
+import { notAService, featuredService, buildAssets, buildEvidenceModel, headlineRelevant, reconcileServices, reviewEvidence, serviceKey, type EvidenceModel } from './evidence.js';
 import { iconFor, shorten, splitNote } from './content/facts.js';
 import { IdentityError } from './sources/website-business.js';
 import { fetchSiteImages, type ImageRecord } from './sources/site-images.js';
@@ -52,7 +52,7 @@ import { offeringsFrom, type Offering } from './design/offerings.js';
 import { toMeta, type PhotoInfo } from './design/photos.js';
 import type { Appearance } from './design/schema.js';
 import { withLiveReviews } from './sources/google-live.js';
-import { phoneKey } from './sources/site-content.js';
+import { phoneKey, reviewLike } from './sources/site-content.js';
 import { composeModel, findDraft, newDraftId, putDraft, tokensFor, type DraftBase, type DraftRecord } from './drafts.js';
 
 export interface BuildInput {
@@ -240,7 +240,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   // button, no number or map shown) until the owner settles it; the conflict stays in the review, the request form stays
   const google = { phone: b.phone, phoneE164: b.phoneE164, formattedAddress: b.formattedAddress, street: b.street, lat: b.lat, lng: b.lng };
   const held = content && b.source !== 'mock' ? heldContacts(b, content) : {};
-  if (held.phone) { b.phone = undefined; b.phoneE164 = undefined; warnings.push(`Phone held for the owner: Google lists ${held.phone.google}, the website ${held.phone.website}.`); }
+  if (held.phone) { b.phone = undefined; b.phoneE164 = undefined; b.phoneHeld = true; warnings.push(`Phone held for the owner: Google lists ${held.phone.google}, the website ${held.phone.website}.`); }
   if (held.address) { b.formattedAddress = undefined; b.street = undefined; b.lat = undefined; b.lng = undefined; warnings.push(`Address held for the owner: Google lists ${held.address.google}, the website ${held.address.website}.`); }
   // the website's own photographs (fetched at full size, measured, de-duplicated; failures recorded)
   let siteImages: Awaited<ReturnType<typeof fetchSiteImages>> | undefined;
@@ -345,7 +345,9 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   }
 
   // 5) Services (before the design plan, which leads with one of them)
-  factsRes.services = factsRes.services.filter((x) => !vagueService(x.name));
+  // categories, places, vague words and symptoms are not services: the site's lists and the owner's review agree on this
+  const places = [...new Set([...(content?.areas?.places ?? []), b.city ?? ''].filter(Boolean))];
+  factsRes.services = factsRes.services.filter((x) => !notAService(x.name, places));
   const services = pickServices(theme, b, scan, factsRes.servicesMentioned, factsRes.serviceBlurbs, { emergencyOk: factsRes.facts.emergency || factsRes.facts.open24h, own: factsRes.services, ownFromWebsite: factsRes.services.some((x) => x.fromWebsite) });
   emit({ type: 'step', step: 'Services', status: 'done', note: services.source === 'business' ? `${services.items.length} from the business's own website` : services.hidden ? 'none verified, section hidden' : `theme's standard list (${factsRes.services.length} own services found, need ${(theme.sectionRules.services as any)?.min ?? 3})` });
   const evidence = evidenceFor(theme, b, factsRes.facts, content?.areas?.places);
@@ -395,6 +397,11 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       videos.push({ title: v.title, duration: formatDuration(v.duration), kind: v.kind, url: v.url, pageUrl: v.pageUrl, poster, note: v.note });
     }
     const primary = content.booking.primary;
+    // the About story is the business's own words: one that repeats a customer's review is dropped, never rewritten as the story
+    if (content.story && storyFromReview(content.story.text, [...content.testimonials.map((t) => t.text), ...b.reviews.map((r) => r.text)])) {
+      warnings.push(`About text left out: the website's "${content.story.heading}" text repeats a customer review.`);
+      content.story = undefined;
+    }
     storyEdit = content.story ? await editStory({ name: b.name, heading: content.story.heading, text: content.story.text }) : undefined;
     const heroCta = content.hero?.primary;
     const second = content.hero?.secondary;
@@ -463,6 +470,8 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       const headline = own.length >= 8 && own.length <= 90 && headlineRelevant(own, ctx) ? own : composed.slice(0, 90);
       plan.copy = { headline, subline: subOk ? content.hero.subline!.slice(0, 220) : plan.copy.subline, source: 'source' };
     }
+    // a held phone: the hero never tells visitors to call ("… - Just Call Radiant" → "For Plumbing, HVAC & Electrical Services")
+    if (b.phoneHeld) plan.copy = { ...plan.copy, headline: withoutCallWording(plan.copy.headline) || plan.copy.headline, subline: withoutCallWording(plan.copy.subline) || plan.copy.subline };
     themeReason = `${themeReason}. Page layout, type and spacing come from the design plan (${DIRECTION_LABEL[plan.direction]}, ${profileFor(category).label.toLowerCase()}); the theme supplies copy patterns and services`;
     warnings.push(...planOut.warnings);
     personalise.recommended = { style: planOut.recommended.direction, goal: planOut.recommended.goal, service: planOut.recommended.service };
@@ -557,7 +566,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     serviceImages: serviceImgs?.byService.size,
   });
   const evFindings = evModel ? reviewEvidence(evModel, {
-    servicesShown: offerings.length ? offerings.map((o) => o.name) : model.services.items.map((x) => x.label),
+    servicesShown: offerings.length ? offerings.map((o) => o.name) : model.services.items.map((x) => x.label), places,
     headline: model.copy.hero, typeLabel: b.primaryTypeLabel,
     primaryCtaLabel: model.design ? (sourceBundle?.cta?.primary?.label ? sourceBundle.cta.primary.label : undefined) : undefined,
     galleryTitle: sourceBundle?.galleryTitle, storyChars: storyEdit?.method === "edited" ? 0 : model.design?.intro?.length,
@@ -701,6 +710,31 @@ export async function runAudit(input: { website: string; google?: string; placeI
  * ("- Just Call Radiant -" → "Just Call Radiant"), which read as a typo once the words stand alone.
  */
 export const tidyHeadline = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/^[\s\-–—|:•·~*]+|[\s\-–—|:•·~*]+$/g, '').trim();
+
+/**
+ * Text without the parts that tell visitors to phone: for a site whose phone is held for the owner.
+ * Whole clauses go ("… - Just Call Radiant", "Call us today!"); empty when nothing else is left.
+ */
+export function withoutCallWording(s: string): string {
+  const CALL = /\b(?:call|calls|calling|phone|ring|dial|give us a call)\b/i;
+  const parts = s.split(/(\s+[-–—|•·:]\s+|[.!?]+\s*)/);
+  const kept: string[] = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const clause = parts[i] ?? '';
+    if (!clause.trim() || CALL.test(clause)) continue;
+    kept.push(clause.trim() + (/^[.!?]/.test((parts[i + 1] ?? '').trim()) ? (parts[i + 1] ?? '').trim() : ''));
+  }
+  return tidyHeadline(kept.join(kept.some((k) => /[.!?]$/.test(k)) ? ' ' : ' - '));
+}
+
+/** A story whose text is a customer's review: it shares a run of eight words with one, or reads as a customer's account. */
+export function storyFromReview(story: string, reviews: string[]): boolean {
+  if (reviewLike(story)) return true;
+  const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9'\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const runs = (w: string[]) => { const out = new Set<string>(); for (let i = 0; i + 8 <= w.length; i++) out.add(w.slice(i, i + 8).join(' ')); return out; };
+  const mine = runs(words(story));
+  return mine.size > 0 && reviews.some((r) => [...runs(words(r))].some((x) => mine.has(x)));
+}
 
 /** The website and Google disagree: the phone (by number) or the address (by ZIP). Both values, for the owner. */
 export function heldContacts(b: Pick<Business, 'phone' | 'formattedAddress'>, c: { phones: { primary?: string }; address?: { zip: string; formatted: string } }): { phone?: { google: string; website: string }; address?: { google: string; website: string } } {

@@ -360,21 +360,61 @@ export function headlineRelevant(headline: string, ctx: { typeLabel?: string; se
 const VAGUE = new Set(['installation', 'installations', 'install', 'installs', 'maintenance', 'repair', 'repairs', 'replacement', 'replacements', 'service', 'services', 'inspection', 'inspections', 'cleaning', 'tankless', 'upgrades', 'upgrade', 'emergency', 'commercial', 'residential', 'other', 'more', 'misc', 'general', 'consultation', 'estimates', 'estimate']);
 export const vagueService = (name: string) => { const w = name.toLowerCase().replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter(Boolean); return w.length === 1 && VAGUE.has(w[0]); };
 /** A menu link to a list, not a service: "Every plumbing service we offer", "All indoor air quality services". */
-const MENU_PHRASE = /^(?:every|all)\b.*\b(?:services?|we offer)$/i;
+const MENU_PHRASE = /^(?:every|all|other|more)\b.*\b(?:services?|we offer|options)$/i;
+/** Rooms and places in a home: where work happens, not what the work is ("Bathrooms", "Kitchens"). */
+const ROOMS = new Set(['bathroom', 'bathrooms', 'kitchen', 'kitchens', 'basement', 'basements', 'attic', 'attics', 'garage', 'garages', 'outdoor', 'outdoors', 'indoor', 'indoors', 'exterior', 'interior', 'home', 'homes', 'business', 'businesses']);
+/** The trade named as people: "Austin Plumbers", "San Antonio Electricians" are location pages, not services. */
+const PEOPLE = /\b(?:plumbers?|electricians?|contractors?|roofers?|dentists?|technicians?|landscapers?|painters?|cleaners?|movers?|lawyers?|attorneys?|doctors?|chiropractors?|mechanics?|experts?|specialists?|pros?|company|companies)$/i;
+/** Words that make "<word> Plumbers" an offering ("Emergency Plumbers"), not a place. */
+const OFFER_MODIFIERS = new Set(['emergency', 'commercial', 'residential', 'licensed', 'local', 'certified', 'master', 'affordable', 'same', 'day', 'hour', 'night', 'weekend', 'family', 'pediatric', 'cosmetic', 'general']);
+/** What a customer notices, not what the business sells: "Rusty hot water", "Water at the base of the tank". */
+const SYMPTOM_WORDS = /\b(?:rusty|leaking|leaky|dripping|rumbling|popping|banging|gurgling|smelly|smells?|odou?rs?|never|won'?t|doesn'?t|isn'?t|not working|stopped|broken|base of|this year|last year|years? old)\b/i;
+
+/**
+ * Why a label is not a distinct service the business offers (undefined when it is one).
+ * Shared by the site's service lists and the owner's review, so neither lists a category, a place, a vague word or a symptom.
+ */
+export function notAService(name: string, places: string[] = []): 'vague' | 'menu' | 'location' | 'symptom' | undefined {
+  const t = name.trim();
+  const words = t.toLowerCase().replace(/[^a-z0-9'\s]/g, ' ').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return 'vague';
+  if (vagueService(t) || (words.length === 1 && ROOMS.has(words[0]))) return 'vague';
+  if (MENU_PHRASE.test(t)) return 'menu';
+  // a place the business serves, named in the label with the trade ("Plumbing in Austin", "Austin Plumbers")
+  const placeHit = places.some((p) => p.length > 2 && new RegExp(`\\b${p.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(t.toLowerCase()));
+  if (/\b(?:in|near|serving)\s+[A-Z][a-z]+/.test(t) && (placeHit || PEOPLE.test(t))) return 'location';
+  if (PEOPLE.test(t)) {
+    const lead = t.replace(PEOPLE, '').trim().split(/\s+/).filter(Boolean);
+    if (placeHit || (lead.length >= 1 && lead.length <= 3 && lead.every((w) => /^[A-Z][a-z]+\.?$/.test(w) && !OFFER_MODIFIERS.has(w.toLowerCase())))) return 'location';
+  }
+  // symptom phrases: a sentence about the customer's problem, a list of noises, or a phrase opening with an article
+  // …or a clause about what happens to the customer ("Gums that bleed when you brush")
+  const clause = words.length >= 4 && (/\b(?:when|whenever) (?:you|it|they|the|your)\b/i.test(t) || /^\w+ (?:that|which) \w+/i.test(t));
+  if (clause || SYMPTOM_WORDS.test(t) ||/^(?:the|a|an|past|when|if|your|my)\s/i.test(t) || (/,/.test(t) && /\bor\b/i.test(t))) return 'symptom';
+  return undefined;
+}
+
+/** A label already covered by a service the site shows: a category ("Electrical" beside "Electrical (Austin)"), or the same words ("Cleaner Air" ~ "Clean Air & Water"). */
+export function coveredBy(name: string, shown: string[]): boolean {
+  const stem = (w: string) => w.replace(/(?:ers?|ing|s)$/, '');
+  const toks = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && w !== 'and').map(stem);
+  const want = toks(name);
+  return want.length > 0 && shown.some((s) => { const have = new Set(toks(s)); return want.every((w) => have.has(w)); });
+}
 
 /** What the model says about whether the site may be published as built. Used by the build review and the publish gate. */
-export function reviewEvidence(m: EvidenceModel, built: { servicesShown: string[]; headline?: string; typeLabel?: string; primaryCtaLabel?: string; galleryTitle?: string; storyChars?: number; serviceCardImages: number }): EvidenceFinding[] {
+export function reviewEvidence(m: EvidenceModel, built: { servicesShown: string[]; places?: string[]; headline?: string; typeLabel?: string; primaryCtaLabel?: string; galleryTitle?: string; storyChars?: number; serviceCardImages: number }): EvidenceFinding[] {
   const out: EvidenceFinding[] = [];
   const shown = new Set(built.servicesShown.map(tokenKey));
   const primary = m.services.filter((s) => s.isPrimary && s.status === 'verified');
   const missing = primary.filter((s) => !shown.has(tokenKey(s.canonicalName)) && !s.aliases.some((a) => shown.has(tokenKey(a))));
   if (missing.length) out.push({ id: 'primary-services-missing', level: 'block', message: `The business's own services are missing from the site: ${missing.map((s) => s.canonicalName).join(', ')}.` });
-  // vague labels ("Installation") and menu wording ("Every plumbing service we offer") are not services the site left out
-  const secondary = m.services.filter((s) => !s.isPrimary && s.status === 'verified' && !shown.has(tokenKey(s.canonicalName)) && !vagueService(s.canonicalName) && !MENU_PHRASE.test(s.canonicalName));
+  // vague labels, menu wording, location pages, symptoms and categories already covered are not services the site left out
+  const secondary = m.services.filter((s) => !s.isPrimary && s.status === 'verified' && !shown.has(tokenKey(s.canonicalName)) && !notAService(s.canonicalName, built.places) && !coveredBy(s.canonicalName, built.servicesShown));
   if (secondary.length) out.push({ id: 'secondary-services-missing', level: 'review', message: `Services listed in the website's menu are not on the site: ${secondary.map((s) => s.canonicalName).join(', ')}.` });
   const fromText = m.services.filter((s) => s.status === 'verified' && s.mentions.length > 0 && s.mentions.every((x) => x.kind === 'page-text') && shown.has(tokenKey(s.canonicalName)));
   if (fromText.length) out.push({ id: 'services-from-text', level: 'review', message: `${fromText.length} service${fromText.length > 1 ? 's were' : ' was'} read from the website's wording, not from a list of services: ${fromText.map((s) => s.canonicalName).slice(0, 5).join(', ')}. Confirm ${fromText.length > 1 ? 'them' : 'it'}.` });
-  const proposed = m.services.filter((s) => s.status === 'needs_review');
+  const proposed = m.services.filter((s) => s.status === 'needs_review' && !notAService(s.canonicalName, built.places));
   if (proposed.length) out.push({ id: 'services-unverified', level: 'review', message: `Not shown, because the website doesn't list ${proposed.length === 1 ? 'it' : 'them'} itself: ${proposed.map((s) => s.canonicalName).slice(0, 5).join(', ')}. Confirm before adding.` });
   if (m.hero?.primaryCta && built.primaryCtaLabel && nameKey(m.hero.primaryCta.label) !== nameKey(built.primaryCtaLabel)) out.push({ id: 'primary-cta-changed', level: 'block', message: `The website's main action "${m.hero.primaryCta.label}" is replaced by "${built.primaryCtaLabel}".${/^(Request an appointment|Send a request)$/.test(built.primaryCtaLabel) ? ' It opens the request form, because no verified booking or confirmed phone number is available yet. Confirm, or give the booking link.' : ''}` });
   if (built.headline && !headlineRelevant(built.headline, { typeLabel: built.typeLabel, services: m.services.filter((s) => s.isPrimary).map((s) => s.canonicalName) })) out.push({ id: 'hero-relevance', level: 'review', message: `The headline "${built.headline}" doesn't say what the business does.` });

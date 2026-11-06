@@ -4,6 +4,7 @@ import { esc } from '../util/text.js';
 import { icon } from './icons.js';
 import { reviewSlider } from './widgets.js';
 import {
+  tileSrc,
   colsVar, gi, head, hoursTable, ic, img, leadForm, mapEmbed, nextSteps, primaryCta, ratingBadge, secondaryCta, stars, title, trustRow,
 } from './parts.js';
 
@@ -206,7 +207,7 @@ export function quote(ctx: Ctx): string {
 /* ───────────────────────────── GALLERY ───────────────────────────── */
 // each photo opens the full-screen viewer (src/render/widgets.ts); more = photos not shown in the grid
 function fig(p: SiteModel['images']['gallery'][number], i: number, total: number, cls = '', more = 0) {
-  return `<figure class="${cls}"><button type="button" class="lb-open" data-lb-i="${i}" aria-label="${more ? `Open photos (${more} more)` : `Open photo ${i + 1} of ${total}`}">${img(p)}${more ? `<span class="gal-more">+${more}</span>` : ''}</button>${p.credit ? `<figcaption>${esc(p.credit)}</figcaption>` : ''}</figure>`;
+  return `<figure class="${cls}"><button type="button" class="lb-open" data-lb-i="${i}" aria-label="${more ? `Open photos (${more} more)` : `Open photo ${i + 1} of ${total}`}"><img ${tileSrc(p.publicPath)} width="${p.width}" height="${p.height}" alt="${esc(p.alt)}" loading="lazy" decoding="async">${more ? `<span class="gal-more">+${more}</span>` : ''}</button>${p.credit ? `<figcaption>${esc(p.credit)}</figcaption>` : ''}</figure>`;
 }
 const arrows = (inner: string) => `<div class="gal-wrap"><button type="button" class="gal-arrow l" aria-label="Previous photos">${icon('chevron-left', { size: 22 })}</button>${inner}<button type="button" class="gal-arrow r" aria-label="More photos">${icon('chevron-right', { size: 22 })}</button></div>`;
 export function gallery(ctx: Ctx): string {
