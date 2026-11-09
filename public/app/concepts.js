@@ -1,4 +1,4 @@
-// Homepage concepts (design studio, phase 2): start a concept set for a business, watch it, compare the three.
+// Homepage concepts (design studio, phase 2): start a concept set for a business, watch it, compare its ranked directions (staff only; clients see one preview at a time).
 (() => {
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -58,7 +58,9 @@
         ${s.gate.blockers.length ? `<ul class="plain">${s.gate.blockers.map((b) => `<li>${esc(b.what)}${b.questionId ? ` <span class="muted">(${esc(b.questionId)})</span>` : ''}</li>`).join('')}</ul>` : ''}
         <div class="scroll" style="margin-top:12px"><table><tr><th>Pair</th><th>Plan differences</th><th>First screen (desktop)</th><th>First screen (mobile)</th><th>Whole page</th><th></th></tr>
         ${s.distinctness.pairs.map((p) => `<tr><td>${p.a.toUpperCase()}–${p.b.toUpperCase()}</td><td>${esc(p.plan.join(', '))}</td><td>${p.heroDesktop}</td><td>${p.heroMobile}</td><td>${p.page}</td><td>${pill(p.pass ? 'pass' : 'fail')}</td></tr>`).join('')}</table></div>
-        <p class="muted" style="font-size:13px">Similarity of the screenshots' structure (edges, not colours); a pair is distinct below ${s.distinctness.thresholds.heroDesktop} / ${s.distinctness.thresholds.heroMobile} / ${s.distinctness.thresholds.page}.</p></section>
+        <p class="muted" style="font-size:13px">Similarity of the screenshots' structure (edges, not colours); a pair is distinct below ${s.distinctness.thresholds.heroDesktop} / ${s.distinctness.thresholds.heroMobile} / ${s.distinctness.thresholds.page}.</p>
+        ${s.ranking ? `<h3 style="margin-top:18px">Directions considered (up to ${s.ranking.max})</h3><div class="scroll"><table><tr><th>Concept</th><th>Direction</th><th>Fit</th><th>Status</th><th>Why</th></tr>
+        ${s.ranking.considered.map((d) => `<tr><td>${d.conceptId ? d.conceptId.toUpperCase() : '–'}</td><td>${esc(d.name)} <span class="muted">(${esc(d.directionId)})</span></td><td>${d.score}</td><td>${pill(d.status === 'kept' ? 'pass' : 'review')} ${esc(d.status)}</td><td>${esc(d.reasons.slice(0, 2).join('; '))}</td></tr>`).join('')}</table></div>` : ''}</section>
       <div class="concepts">${s.concepts.map((c) => `
         <article class="card concept"><h3>${c.id.toUpperCase()} · ${esc(c.name)}</h3><p class="thesis">${esc(c.thesis)}</p>
           <div class="chips">${Object.entries(c.axes).map(([k, v]) => `<span title="${esc(k)}">${esc(v)}</span>`).join('')}<span>${esc(c.tokens.fonts.heading.family)}</span><span>${c.planSource === 'ai' ? 'planned by Claude' : 'deterministic plan'}</span></div>

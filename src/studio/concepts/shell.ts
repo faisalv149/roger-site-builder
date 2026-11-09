@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { MENU_JS, baseCss } from './library.js';
-import type { DesignTokens } from './types.js';
+import { MENU_JS, baseCss, shellCss } from './library.js';
+import type { DesignTokens, Shell } from './types.js';
 
 /**
  * Inner pages in the chosen concept's design: its header (with the phone menu) and footer replace the builder's, and its
@@ -63,10 +63,11 @@ function tokenCss(t: DesignTokens): string {
  * menu of every page), its scoped styles, the tokens and the menu script. Each run starts from the builder's page
  * (inner pages are rewritten by every save), so it never stacks.
  */
-export function applyConceptShell(siteDir: string, homeFile: string, homeHtml: string, t: DesignTokens): { pages: number; shelled: number } {
+export function applyConceptShell(siteDir: string, homeFile: string, homeHtml: string, t: DesignTokens, shell?: Shell): { pages: number; shelled: number } {
   const header = homeHtml.match(/<header class="site-head[\s\S]*?<\/header>/)?.[0];
   const footer = homeHtml.match(/<footer class="site-foot[\s\S]*?<\/footer>/)?.[0];
-  const style = `<link rel="stylesheet" href="${t.fonts.href}" data-concept-tokens><style id="concept-tokens">${tokenCss(t)}</style><style id="concept-shell">${scopeCss(baseCss(t))}</style>`;
+  // the direction's own header and footer styles go with them (a masthead, a utility strip, a colophon)
+  const style = `<link rel="stylesheet" href="${t.fonts.href}" data-concept-tokens><style id="concept-tokens">${tokenCss(t)}</style><style id="concept-shell">${scopeCss(baseCss(t) + (shell ? shellCss(shell) : ''))}</style>`;
   const walk = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'assets' ? [] : walk(path.join(dir, e.name))) : e.name.endsWith('.html') ? [path.join(dir, e.name)] : []));
   let pages = 0, shelled = 0;
   for (const f of walk(siteDir)) {

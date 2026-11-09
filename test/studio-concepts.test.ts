@@ -216,12 +216,13 @@ test('written copy frames the facts and adds none: invented numbers, names and c
 });
 
 // ───────────────────────── plans and distinctness rules ─────────────────────────
-test('three directions must differ in hero, offer layout, structure, voice and colour: the fallback planner passes; colour swaps and reordered copies do not', async () => {
+test('directions must differ in hero, offer layout, structure and enough else: the ranked planner passes; colour swaps and reordered copies do not', async () => {
   const { agreed, inventory } = await getBriefs();
   const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
   const plans = fallbackPlans(cat, agreed);
   assert.deepEqual(validatePlans(plans, cat), []);
-  assert.equal(new Set(plans.map((p) => p.sections[0].variant)).size, 3);
+  assert.ok(plans.length >= 3 && plans.length <= 5, `${plans.length} directions`);
+  assert.equal(new Set(plans.map((p) => p.sections[0].variant)).size, plans.length, 'a hero each');
   const colourSwaps: DirectionPlan[] = (['brand-dominant', 'brand-accent', 'neutral-with-brand-action'] as const).map((c, i) => ({ ...plans[0], name: `copy ${i}`, axes: { ...plans[0].axes, colorStrategy: c, typeVoice: (['grotesk', 'serif', 'display'] as const)[i] } }));
   const errs = validatePlans(colourSwaps, cat);
   assert.ok(errs.some((e) => /same hero variant/.test(e)) && errs.some((e) => /same offer variant/.test(e)) && errs.some((e) => /same structure/.test(e)), errs.join('\n'));
@@ -316,19 +317,23 @@ const answerOf = (plans: DirectionPlan[]) => ({ concepts: plans.map((p, i) => ({
   titles: [{ kind: 'offer', title: 'What we fix', intro: 'Drains, water heaters and hidden leaks.' }], primaryAction: p.primaryAction ?? '', secondaryAction: p.secondaryAction ?? '', featureIds: p.featureIds, galleryImageIds: p.galleryImageIds, storyImageId: p.storyImageId ?? '', storyText: '',
 })) });
 
-test('a concept set end to end: three rendered concepts that pass every check, are distinct on screen, and say what the preview left out', { skip: !chrome && 'no Chrome here' }, async () => {
+test('a concept set end to end: ranked rendered concepts that pass every check, are distinct on screen, and say what the preview left out', { skip: !chrome && 'no Chrome here' }, async () => {
   const { agreed, inventory } = await getBriefs();
   const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
-  const t = fakeTransport([answerOf(fallbackPlans(cat, agreed))], 0.06);
+  const planned = fallbackPlans(cat, agreed);
+  const t = fakeTransport([answerOf(planned)], 0.06);
   const job = await startConceptJob({ businessKey: agreed.businessKey, revision: agreed.revision, briefHash: agreed.briefHash }, { transport: t });
   const done = await waitForConceptJob(job.id);
   assert.equal(done.status, 'done', done.error ?? '');
   const set = (await getConceptSet(done.setId))!;
-  assert.equal(set.concepts.length, 3);
+  assert.ok(set.concepts.length >= 3 && set.concepts.length <= planned.length, `${set.concepts.length} concepts`);
+  assert.deepEqual(set.concepts.map((c) => c.id), set.concepts.map((_, i) => String.fromCharCode(97 + i)), 'a, b, c, … in rank order');
+  assert.ok(set.ranking && set.ranking.considered.filter((x) => x.status === 'kept').length === set.concepts.length, 'the ranking is saved with the set');
+  for (const c of set.concepts) assert.ok(c.recipe?.directionId && c.recipe.reasons.length, `${c.id}: its recipe and evidence are saved`);
   assert.ok(set.concepts.every((c) => c.planSource === 'ai'));
   for (const c of set.concepts) for (const k of c.checks) assert.equal(k.level, 'pass', `${c.id} ${k.id}: ${k.message} ${(k.details ?? []).join('; ')}`);
   assert.ok(set.distinctness.pairs.every((p) => p.pass), JSON.stringify(set.distinctness.pairs));
-  assert.equal(new Set(set.concepts.map((c) => c.axes.heroComposition)).size, 3);
+  assert.equal(new Set(set.concepts.map((c) => c.axes.heroComposition)).size, set.concepts.length);
   assert.deepEqual([set.cost.calls.length, set.cost.spentUsd, set.cost.capUsd], [1, 0.06, 3], done.stages.find((s) => s.name === 'directions')!.notes.join('\n'));
   for (const c of set.concepts) for (const f of [c.preview!.html, c.preview!.desktop, c.preview!.mobile]) assert.ok(fs.existsSync(path.join(setDir(set.id), f)), f);
   assert.equal(set.gate.publishable, false, 'a preview is not a publication');
@@ -412,7 +417,8 @@ test('the Veracruz C case: several locations, none chosen, and a plan that picks
   // the plan does what Claude did for Veracruz C: its primary action is directions to one of the locations
   const first = cat.locations[0];
   const plans = fallbackPlans(cat, b).map((p) => ({ ...p, primaryAction: first.directions }));
-  const concept = compose(plans[2], 'c', 'ai', cat, b, false);
+  // the reputation direction ("Every location") when this business's photos support it; the strongest one otherwise
+  const concept = compose(plans.find((p) => p.sections[0].variant === 'type-collage') ?? plans[0], 'c', 'ai', cat, b, false);
   assert.deepEqual(concept.actions.find((a) => a.slot === 'primary'), { slot: 'primary', actionId: 'find-location', label: 'Find a location', href: '#visit', factId: 'locations' });
   assert.match(concept.notes!.join(), /no main location is chosen/);
   const [r] = await renderSet([concept], cat, setId);

@@ -2,6 +2,7 @@ import { studioDocs } from '../../store.js';
 import { phoneKey } from '../../sources/site-content.js';
 import { sha256, stableStringify } from '../snapshot.js';
 import type { BusinessBrief, SiteInventory, SourceRef } from '../schema.js';
+import { seasonOf } from './seasonal.js';
 import { ownerReview, type BriefRef, type Concept, type OwnerReview, type PublicationGate } from './types.js';
 import { stateName } from '../address.js';
 
@@ -39,12 +40,14 @@ export function checkPinned(brief: BusinessBrief, review: OwnerReview) {
 
 // ───────────────────────── the catalog ─────────────────────────
 export interface Fact { id: string; kind: string; label: string; text: string; sources: SourceRef[] }
-export interface ActionDef { id: string; label: string; href: string; kind: 'call' | 'email' | 'book' | 'site' | 'menu' | 'directions' | 'reviews'; factId: string }
-export interface Photo { id: string; url: string; width: number; height: number; orientation: 'landscape' | 'portrait' | 'square'; uses: string[]; alt: string; services: string[] }
+export interface ActionDef { id: string; label: string; href: string; kind: 'call' | 'email' | 'book' | 'site' | 'menu' | 'directions' | 'reviews'; factId: string; /** time-limited: never the main action */ seasonal?: string }
+export interface Photo { id: string; url: string; width: number; height: number; orientation: 'landscape' | 'portrait' | 'square'; uses: string[]; alt: string; services: string[]; /** the website pages it appears on */ pages?: string[]; /** what an image check saw in it (when it has no description) */ seen?: string; seenKind?: string }
 export interface Catalog {
   brief: BriefRef;
   business: { name: string; category: string | null; website: string | null; summary: string | null };
   facts: Record<string, Fact>;
+  /** the business's own short lines: its website's headings (home and about pages first), in its own words */
+  ownLines: string[];
   /**
    * a service's picture: the one the website itself shows on that service's card or page (and on no other service's),
    * or the one the owner tied to it in review. Never a stand-in: a service with neither has no picture.
@@ -181,7 +184,8 @@ export function resolveCatalog(brief: BusinessBrief, inventory: SiteInventory, r
   // what the business sells: its services, or its menu (services get their pictures below, once the photos are known)
   const services: Catalog['services'] = brief.services.items.map((s) => {
     add({ id: s.id, kind: 'service', label: 'service', text: `${s.name}${s.description?.value ? ` ${s.description.value}` : ''}`, sources: s.evidence.map((e) => web(e.url, e.locator ?? e.kind)) });
-    return { id: s.id, name: s.name, ...(s.description?.value ? { description: s.description.value } : {}) };
+    const description = s.description?.value?.replace(/^\s*0?\d{1,2}[.)]?\s*(?=[A-Z])/, '');
+    return { id: s.id, name: s.name, ...(description ? { description } : {}) };
   });
   const pricesApproved = !!review.offerings?.pricesApproved;
   let heldPrices = 0;
@@ -201,7 +205,7 @@ export function resolveCatalog(brief: BusinessBrief, inventory: SiteInventory, r
   // a picture whose own words call it a diagram, chart or graphic is not a photograph of the business
   const NOT_PHOTO = /\b(diagram|infographic|chart|illustration|graphic|logo|badge|icon|screenshot|map|flyer|poster|coupon|certificate)\b/i;
   const photos: Photo[] = inventory.assets.filter((a) => a.origin === 'website' && a.outcome === 'usable' && a.width && a.height && !['poster', 'logo', 'social', 'icon'].includes(a.role) && !NOT_PHOTO.test(`${a.alt ?? ''} ${a.context ?? ''}`))
-    .map((a) => ({ id: a.id, url: a.url, width: a.width!, height: a.height!, orientation: a.width! / a.height! > 1.15 ? 'landscape' as const : a.height! / a.width! > 1.15 ? 'portrait' as const : 'square' as const, uses: a.uses, alt: meaningful(a.alt) ? a.alt! : meaningful(a.context) ? a.context! : '', services: a.services }));
+    .map((a) => ({ id: a.id, url: a.url, width: a.width!, height: a.height!, orientation: a.width! / a.height! > 1.15 ? 'landscape' as const : a.height! / a.width! > 1.15 ? 'portrait' as const : 'square' as const, uses: a.uses, alt: meaningful(a.alt) ? a.alt! : meaningful(a.context) ? a.context! : '', services: a.services, pages: a.pages }));
   // too few of the business's own photos: the Google listing's photos may fill the preview (shown live with their
   // credits, never copied; preview-only, see listing-photos.ts). The concept job keeps only those that fit the business.
   if (photos.length < 3) {
@@ -232,8 +236,13 @@ export function resolveCatalog(brief: BusinessBrief, inventory: SiteInventory, r
     if (!c || c.kind === 'phone' || /^tel:/i.test(c.href)) continue;
     const href = absolute(c.href, site);
     if (actions.some((a) => a.href === href)) continue;
+    // a seasonal offer whose season or date has passed is not offered; one still running is never the main action
+    // a label that only names an icon ("map marker pin", "arrow right") says nothing a visitor can act on
+    if (/^(?:[a-z]+ )?(?:icon|marker|pin|arrow|chevron|caret|svg|glyph)(?: [a-z]+)?$/i.test(c.label.trim()) || /\b(?:icon|svg|glyph)\b/i.test(c.label)) { omitted.push({ what: `the "${c.label}" link`, reason: 'its label is an icon name, not an action' }); continue; }
+    const season = seasonOf(c.label);
+    if (season.expired) { omitted.push({ what: `the "${c.label}" link`, reason: season.why ?? 'its season has passed' }); continue; }
     add({ id: `cta-${slot}`, kind: 'action', label: 'call to action', text: c.label, sources: [web(site ?? href, c.locator)] });
-    actions.push({ id: `cta-${slot}`, label: c.label, href, kind: 'site', factId: `cta-${slot}` });
+    actions.push({ id: `cta-${slot}`, label: c.label, href, kind: 'site', factId: `cta-${slot}`, ...(season.seasonal ? { seasonal: season.why } : {}) });
   }
   if (email) actions.push({ id: 'email', label: 'Email us', href: `mailto:${email}`, kind: 'email', factId: 'email' });
   brief.offerings.documents.filter((d) => d.items > 0).forEach((d, i) => {
@@ -250,11 +259,12 @@ export function resolveCatalog(brief: BusinessBrief, inventory: SiteInventory, r
   const counts = [locations.length, area?.length ?? 0, services.length, menu.length].filter((n) => n > 1).join(' ');
   // the website's own address is named in the footer ("Its facts come from …"), digits and all
   const host = site ? (() => { try { return new URL(site).hostname.replace(/^www\./, ''); } catch { return ''; } })() : '';
-  const allowedText = [...Object.values(facts).map((f) => f.text), hours?.join(' ') ?? '', locations.map((l) => `${l.street} ${l.cityLine}`).join(' '), counts, phone?.display ?? '', host].join('\n');
+  const ownLines = ownLinesOf(inventory);
+  const allowedText = [...ownLines, ...Object.values(facts).map((f) => f.text), hours?.join(' ') ?? '', locations.map((l) => `${l.street} ${l.cityLine}`).join(' '), counts, phone?.display ?? '', host].join('\n');
   return {
     brief: review.brief,
     business: { name, category: brief.identity.category.value, website: site, summary: brief.summary.status === 'written' ? brief.summary.text : null },
-    facts, services, sectionImages, items: menu, locations, address, phone, email, hours, area, rating, claims, pledges, story, photos, logo, actions,
+    facts, ownLines, services, sectionImages, items: menu, locations, address, phone, email, hours, area, rating, claims, pledges, story, photos, logo, actions,
     chooser: locations.length > 1 && !address ? { id: 'find-location', label: 'Find a location', href: '#visit' } : null,
     omitted, allowedText, forbidden,
   };
@@ -287,4 +297,25 @@ export function publicationGate(brief: BusinessBrief, catalog: Catalog, review: 
   // and publishing itself: a chosen concept goes on to inner pages and a full build first
   blockers.push({ kind: 'not-built', what: 'publishing is not built yet: a chosen concept goes on to inner pages and a full build first' });
   return { publishable: false, blockers };
+}
+
+/**
+ * The business's own short lines: the headings of its website (home and about pages first), with a heading split over
+ * two lines joined back ("The Story Behind Austin's" + "Most Iconic Tacos") and words run together by extraction
+ * separated ("forStorm" → "for Storm").
+ */
+function ownLinesOf(inventory: SiteInventory): string[] {
+  const order = (u: string) => { try { const p = new URL(u).pathname; return p === '/' || /home/i.test(p) ? 0 : /about|story/i.test(p) ? 1 : 2; } catch { return 3; } };
+  const clean = (t: string) => t.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([a-z])&/g, '$1 &').replace(/\s+/g, ' ').trim();
+  const out: string[] = [];
+  for (const p of [...inventory.pages].filter((x) => x.headings?.length).sort((a, b) => order(a.url) - order(b.url))) {
+    const hs = p.headings.filter((h) => h.level <= 3).map((h) => ({ level: h.level, text: clean(h.text) }));
+    for (let i = 0; i < hs.length; i++) {
+      let t = hs[i].text;
+      // a heading set over two lines: the first ends mid-phrase ("… Austin's", "… for")
+      while (i + 1 < hs.length && hs[i + 1].level === hs[i].level && /(?:['\u2019]s|\b(?:the|of|for|and|behind|in|to|a|an|with|from|our))$/i.test(t)) { t = `${t} ${hs[i + 1].text}`; i++; }
+      out.push(t);
+    }
+  }
+  return [...new Set(out)];
 }

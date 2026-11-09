@@ -28,7 +28,7 @@
   .st .notes{margin:4px 0 0;padding-left:16px;font-size:13px;color:var(--ink-2)}.st .e{color:var(--bad);font-weight:600;font-size:13px}
   .pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600;background:var(--surface-2);border:1px solid var(--line)}
   .pill.pass,.pill.done{background:var(--ok-50);border-color:var(--ok-200);color:var(--ok)}.pill.fail,.pill.failed{background:var(--bad-50);border-color:#FECACA;color:var(--bad)}.pill.review{background:var(--warn-50);border-color:#FDE68A;color:var(--warn)}
-  .concepts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+  .concepts{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
   .concept h3{margin:0 0 4px;font-size:18px}.concept .thesis{color:var(--ink-2);font-size:14px}
   .shots{display:grid;grid-template-columns:1fr 92px;gap:10px;align-items:start;margin:12px 0}
   .shots img{width:100%;border:1px solid var(--line);border-radius:8px;display:block}
@@ -47,8 +47,8 @@
 </header>
 <main class="cs">
   <section class="card" aria-labelledby="start-h">
-    <h2 id="start-h">Make three concepts</h2>
-    <p class="sub">From a business's latest brief. Facts the owner has not settled yet (a disputed phone number, a main location, unconfirmed prices) are left out of the previews; publishing is a separate gate. Claude plans the three directions with a hard cost cap per set.</p>
+    <h2 id="start-h">Make design directions</h2>
+    <p class="sub">From a business's latest brief. Facts the owner has not settled yet (a disputed phone number, a main location, unconfirmed prices) are left out of the previews; publishing is a separate gate. Claude plans up to five ranked directions with a hard cost cap per set.</p>
     <form class="row" id="start">
       <label for="business" class="muted">Business</label>
       <select id="business" required></select>

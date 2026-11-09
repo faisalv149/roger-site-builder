@@ -6,14 +6,16 @@ import { config } from '../../config.js';
 import { getBrief } from '../jobs.js';
 import { sha256, stableStringify } from '../snapshot.js';
 import { aiJson, conceptCapUsd, conceptModel, CostCapExceeded, CostLedger, defaultTransport, type AiTransport } from './ai.js';
-import { compose, fallbackPlans, fromAnswer, PLAN_SCHEMA, planPrompt, PROMPT_VERSION, validatePlans } from './plan.js';
+import { compose, fromAnswer, PLAN_SCHEMA, planPrompt, PROMPT_VERSION, validatePlans } from './plan.js';
+import { conceptLetter, photoRole, rankDirections, rankPlans } from './directions.js';
 import { renderSet, preparePhotos, setDir, type Rendered } from './render.js';
 import { emptyReview, getReview, publicationGate, resolveCatalog, saveReview, StaleBrief, type Catalog } from './review.js';
 import { checkConcept, distinctness } from './validate.js';
 import { HEARTBEAT_MS, keepAlive, STALE_MS } from '../keepalive.js';
 import { persistDir, restoreDir } from '../../files.js';
 import { isListing, judgeListingPhotos, matchLive, parseListing, type ListingJudgement } from './listing-photos.js';
-import type { Concept, ConceptSet, DirectionPlan, UsageRecord } from './types.js';
+import { labelPhotos, LABEL_LIMIT } from '../../design/photos.js';
+import type { Concept, ConceptSet, DirectionPlan, DirectionRanking, UsageRecord } from './types.js';
 
 /**
  * Concept jobs: resolve → photos → directions → compose → render → validate. Like Phase 1's jobs, each is saved
@@ -28,11 +30,11 @@ export interface ConceptJob {
   input: { businessKey: string; revision: number; reviewId: string };
   setId: string;
   stages: { name: Stage; status: 'pending' | 'running' | 'done' | 'failed'; attempts: number; notes: string[]; error?: string; startedAt?: string; finishedAt?: string }[];
-  work: { photos?: string[]; listing?: { labelled: string; note?: string; items: ListingJudgement[] }; plans?: DirectionPlan[]; planSource?: 'ai' | 'fallback'; concepts?: Concept[]; calls: UsageRecord[]; rendered?: Rendered[] };
+  work: { photos?: string[]; /** what an image check saw in each undescribed photo, by id */ seen?: Record<string, { kind: string; seen?: string }>; listing?: { labelled: string; note?: string; items: ListingJudgement[] }; plans?: DirectionPlan[]; ranking?: DirectionRanking; planSource?: 'ai' | 'fallback'; concepts?: Concept[]; calls: UsageRecord[]; rendered?: Rendered[] };
   error?: string;
   resumes: number;
 }
-export interface ConceptHooks { transport?: AiTransport | null; fetchImage?: (url: string) => Promise<Buffer | null>; judgeListing?: typeof judgeListingPhotos; render?: typeof renderSet; chunkRender?: boolean }
+export interface ConceptHooks { /** the image check (vision) for undescribed photos; null: none */ label?: typeof labelPhotos | null; transport?: AiTransport | null; fetchImage?: (url: string) => Promise<Buffer | null>; judgeListing?: typeof judgeListingPhotos; render?: typeof renderSet; chunkRender?: boolean }
 
 const now = () => new Date().toISOString();
 const save = (j: ConceptJob) => studioDocs.put('studio-concept-jobs', j.id, { ...j, updatedAt: now() });
@@ -120,6 +122,8 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
       if (!brief || !inventory || !review) throw new Error('the brief, inventory or review is missing');
       cat = resolveCatalog(brief, inventory, review);
       if (job.work.photos) cat.photos = cat.photos.filter((p) => job.work.photos!.includes(p.id));
+      // what the image check saw in undescribed photos (saved with the job, so a resumed stage or a re-render uses the same)
+      if (job.work.seen) for (const p of cat.photos) { const v = job.work.seen[p.id]; if (v) { p.seenKind = v.kind; if (v.seen) p.seen = v.seen; } }
       switch (st.name) {
         case 'resolve':
           note(`${Object.keys(cat.facts).length} facts usable in previews; ${cat.omitted.length} left out until the owner answers: ${cat.omitted.map((o) => o.what).join('; ') || 'none'}`);
@@ -145,6 +149,26 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
             }
           }
           job.work.photos = [...own, ...fits];
+          // the business's own photos with no description: an image check says what each shows, so a photo's subject is
+          // verified before it can lead a page (never guessed from its size or position)
+          const label = hooks.label === undefined ? labelPhotos : hooks.label;
+          const blind = cat.photos.filter((p) => own.includes(p.id) && !isListing(p) && photoRole(p, cat!).role === 'unknown');
+          if (label && blind.length) {
+            const seen: NonNullable<ConceptJob['work']['seen']> = {};
+            for (let i = 0; i < blind.length; i += LABEL_LIMIT) {
+              const chunk = blind.slice(i, i + LABEL_LIMIT).filter((p) => fs.existsSync(path.join(setDir(job.setId), 'img', `${p.id}.jpg`)));
+              if (!chunk.length) continue;
+              const items = chunk.map((p) => ({ raw: fs.readFileSync(path.join(setDir(job.setId), 'img', `${p.id}.jpg`)), photo: { ref: p.id, width: p.width, height: p.height, authors: [] }, image: { publicPath: '', width: p.width, height: p.height, alt: '', source: 'website' as const } }));
+              // one retry: a vision call can fail transiently (the photos then simply stay unverified)
+              const ask = () => label(items as never, { name: cat!.business.name, category: cat!.business.category ?? undefined }).catch(() => undefined);
+              let r = await ask();
+              if (r?.source !== 'vision') r = await ask();
+              if (r?.source === 'vision') chunk.forEach((p, k) => { if (r.kinds[k] !== 'unknown') seen[p.id] = { kind: r.kinds[k], ...(r.seen[k] ? { seen: r.seen[k] } : {}) }; });
+            }
+            job.work.seen = seen;
+            const n = Object.keys(seen).length;
+            note(n ? `image check: ${n} of ${blind.length} undescribed photo(s) identified (${Object.values(seen).map((v) => v.seen ?? v.kind).slice(0, 6).join('; ')}${n > 6 ? '; …' : ''})` : `image check: none of ${blind.length} undescribed photo(s) could be identified (vision unavailable or no answer); they will not lead a page`);
+          }
           if (!job.work.photos.length) note('no usable photos: the concepts will say so and need the owner\'s photos');
           break;
         }
@@ -160,7 +184,7 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
                 plans = fromAnswer(r.last);
                 note(`Claude's last answer was kept: its structure passes every rule; ${r.errors.length} line(s) of copy that did not (${r.errors.slice(0, 3).join('; ')}) use the default wording instead`);
               }
-              if (r.data) { plans = fromAnswer(r.data); note(`Claude (${transport.model}, via ${transport.via}) proposed three directions that pass every rule, after ${r.attempts} attempt(s)`); }
+              if (r.data) { plans = fromAnswer(r.data); note(`Claude (${transport.model}, via ${transport.via}) proposed ${plans.length} direction(s) that pass every rule, after ${r.attempts} attempt(s)`); }
               else if (!plans) note(`Claude's directions still broke ${r.errors.length} rule(s) after ${r.attempts} attempts (${r.errors.slice(0, 3).join('; ')}); the deterministic planner is used instead`);
             } catch (e) {
               if (!(e instanceof CostCapExceeded)) throw e;
@@ -168,7 +192,11 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
             }
           } else note('Claude is off here: the deterministic planner assigns the library variants');
           job.work.planSource = plans ? 'ai' : 'fallback';
-          plans ??= fallbackPlans(cat, brief);
+          // ranked either way: the library's recipes for this business, or Claude's directions in the library's order of strength
+          const ranked = plans ? rankPlans(plans, cat, brief) : rankDirections(cat, brief);
+          plans = ranked.plans;
+          job.work.ranking = ranked.ranking;
+          for (const c of ranked.ranking.considered) note(`${c.status === 'kept' ? `${c.conceptId!.toUpperCase()} kept` : `left out (${c.status})`}: "${c.name}" (${c.directionId}, fit ${c.score})${c.reasons.length ? ` — ${c.reasons.slice(0, 2).join('; ')}` : ''}`);
           const errs = validatePlans(plans, cat);
           if (errs.length) note(`the plans break ${errs.length} rule(s): ${errs.slice(0, 4).join('; ')}`);
           job.work.plans = plans;
@@ -179,7 +207,7 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
         case 'compose': {
           const plans = job.work.plans!;
           const brandIdx = Math.max(0, plans.findIndex((p) => p.axes.colorStrategy === 'brand-dominant'));
-          job.work.concepts = plans.map((p, i) => compose(p, (['a', 'b', 'c'] as const)[i], job.work.planSource ?? 'fallback', cat!, brief, i === brandIdx));
+          job.work.concepts = plans.map((p, i) => compose(p, conceptLetter(i), job.work.planSource ?? 'fallback', cat!, brief, i === brandIdx));
           for (const c of job.work.concepts) note(`${c.id.toUpperCase()} "${c.name}": ${c.sections.map((s) => `${s.kind}:${s.variant}`).join(' → ')} · ${c.axes.typeVoice}, ${c.axes.colorStrategy} (${c.tokens.fonts.heading.family})`);
           break;
         }
@@ -217,25 +245,36 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
           break;
         }
         case 'validate': {
-          const concepts = job.work.concepts!, rendered = job.work.rendered!;
+          const all = job.work.concepts!, rendered = job.work.rendered!;
           if (!fs.existsSync(rendered[0].desktop.hero)) await restoreDir(path.relative(config.dirs.out, setDir(job.setId)).split(path.sep).join('/'));
-          for (const c of concepts) {
+          for (const c of all) {
             const r = rendered.find((x) => x.conceptId === c.id)!;
             c.checks = checkConcept(c, r, cat, cat.photos.length);
             const rel = (f: string) => path.relative(setDir(job.setId), f).replace(/\\/g, '/');
             c.preview = { html: rel(r.html), desktop: rel(r.desktop.full), mobile: rel(r.mobile.full), desktopHero: rel(r.desktop.hero), mobileHero: rel(r.mobile.hero), desktopHeight: r.desktop.metrics.height, mobileHeight: r.mobile.metrics.height };
           }
-          const dist = await distinctness(concepts, rendered);
+          const measured = await distinctness(all, all.map((c) => rendered.find((x) => x.conceptId === c.id)!));
+          // a direction whose rendered pages come out too close to a stronger one is dropped (the set gets smaller,
+          // never weaker): pairs run strongest-first, so the second of a failing pair is the lower-ranked one
+          const dropped = new Map<string, string>();
+          for (const p of measured.pairs) if (!p.pass && !dropped.has(p.a) && !dropped.has(p.b) && all.length - dropped.size > 1) dropped.set(p.b, p.a);
+          const concepts = all.filter((c) => !dropped.has(c.id));
+          for (const [id, by] of dropped) {
+            note(`${id.toUpperCase()} left out: its rendered pages are too close to ${by.toUpperCase()}'s`);
+            const entry = job.work.ranking?.considered.find((x) => x.conceptId === id);
+            if (entry) { entry.status = 'duplicate'; entry.reasons = [`rendered too close to ${by.toUpperCase()} (screenshot structure)`, ...entry.reasons]; delete entry.conceptId; }
+          }
+          const dist = { pairs: measured.pairs.filter((p) => !dropped.has(p.a) && !dropped.has(p.b)), thresholds: measured.thresholds };
           const gate = publicationGate(brief, cat, review, concepts, { id: job.setId, conceptIds: concepts.map((c) => c.id) });
           const failing = concepts.flatMap((c) => c.checks.filter((x) => x.level === 'fail').map((x) => `${c.id.toUpperCase()} ${x.id}`));
           const checks = [
             { id: 'distinct', level: dist.pairs.every((p) => p.pass) ? 'pass' as const : 'fail' as const, message: dist.pairs.map((p) => `${p.a.toUpperCase()}–${p.b.toUpperCase()}: ${p.plan.length} plan differences; screenshot structure similarity ${p.heroDesktop} desktop first screen, ${p.heroMobile} mobile, ${p.page} whole page${p.pass ? '' : ' (too similar)'}`).join(' · ') },
-            { id: 'concepts', level: failing.length ? 'fail' as const : 'pass' as const, message: failing.length ? `failing: ${failing.join(', ')}` : 'All three concepts pass grounding, rights, links and accessibility.' },
+            { id: 'concepts', level: failing.length ? 'fail' as const : 'pass' as const, message: failing.length ? `failing: ${failing.join(', ')}` : `All ${concepts.length} concept(s) pass grounding, rights, links and accessibility.` },
             { id: 'cost', level: ledger.spentUsd <= ledger.capUsd ? 'pass' as const : 'fail' as const, message: `$${ledger.spentUsd.toFixed(4)} spent of the $${ledger.capUsd} cap in ${ledger.calls.length} call(s)` },
           ];
           const set: Omit<ConceptSet, 'setHash'> = {
             schema: 'roger.concept-set', version: 1, id: job.setId, brief: review.brief, reviewId: review.id, mode: 'preview', model: transport?.model ?? conceptModel(), promptVersion: PROMPT_VERSION, createdAt: job.createdAt,
-            concepts, distinctness: dist, checks, cost: { capUsd: ledger.capUsd, spentUsd: ledger.spentUsd, calls: ledger.calls }, gate,
+            concepts, ...(job.work.ranking ? { ranking: job.work.ranking } : {}), distinctness: dist, checks, cost: { capUsd: ledger.capUsd, spentUsd: ledger.spentUsd, calls: ledger.calls }, gate,
             photos: photoTraceOf(cat, job.work.listing, concepts, rendered),
           };
           const setHash = sha256(stableStringify({ brief: set.brief, reviewId: set.reviewId, concepts: concepts.map((c) => ({ ...c, checks: undefined, preview: undefined })) }));

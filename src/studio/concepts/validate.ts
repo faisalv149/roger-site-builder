@@ -4,6 +4,7 @@ import { findAddresses } from '../address.js';
 import type { Catalog } from './review.js';
 import type { PageMetrics, Rendered } from './render.js';
 import { isListing } from './listing-photos.js';
+import { photoRole } from './directions.js';
 import type { Check, Concept } from './types.js';
 
 /**
@@ -80,6 +81,9 @@ export function rights(m: PageMetrics, cat: Catalog, concept: Concept, html = ''
 export function photosShown(m: PageMetrics, cat: Catalog, available: number): Check {
   const shown = new Set(m.images.map((i) => i.asset).filter((x): x is string => !!x && x !== 'logo')).size;
   if (!available) return { id: 'photos', level: 'review', message: 'No usable photos: neither the website nor the Google listing gave one that fits. This concept needs photos from the owner before it is finished.' };
+  // photos exist but none can be verified to show the business (undescribed, or showing something else): leaving them
+  // out is the rule, not a failure; the concept needs the owner's photos or descriptions
+  if (!shown && !cat.photos.some((p) => photoRole(p, cat).role === 'subject')) return { id: 'photos', level: 'review', message: `${available} photo(s) available, but none is verified to show the business (no description ties it to what the business does), so none is shown. The owner's photos or descriptions are needed.` };
   if (!shown) return { id: 'photos', level: 'fail', message: `${available} usable photo(s) available, but this concept shows none.` };
   return { id: 'photos', level: 'pass', message: `${shown} of ${available} usable photo(s) shown.` };
 }

@@ -7,6 +7,7 @@ import { TYPE_PRESET_DEFS, fontsUrl } from '../../design/directions.js';
 import { getReview, resolveCatalog, type Catalog } from './review.js';
 import { conceptHtml } from './render.js';
 import { applyConceptShell } from './shell.js';
+import { shellOf } from './directions.js';
 import type { DesignTokens } from './types.js';
 import { setDir } from './render.js';
 import { buildSite } from '../../pipeline.js';
@@ -22,7 +23,7 @@ import type { Concept } from './types.js';
  * A chosen Phase 2 concept becomes the business's full site, through the existing builder: it researches the
  * business as usual (facts, photos, offerings, forms, SEO, review checks, the owner's draft), then the concept's design
  * is applied as the owner's own layout and appearance choices, so it is locked: edits refine it and keep its layout,
- * type, colour, shapes and image direction. "Try another design" switches to another of the set's three concepts,
+ * type, colour, shapes and image direction. "Try another design" switches to the set's next concept in rank order,
  * never a random new one. Publishing stays behind the draft's gates (facts, photo rights, lead delivery).
  */
 const HERO: Record<string, LayoutChoice['hero']> = { 'full-bleed': 'photo-led', split: 'split', 'type-collage': 'type-led' };
@@ -95,7 +96,7 @@ async function ownerLink(draftId: string) {
 export async function startSiteJob(setId: string, conceptId: string): Promise<SiteJob> {
   const set = await getConceptSet(setId);
   if (!set) throw new Error('No such concept set');
-  if (!set.concepts.some((c) => c.id === conceptId)) throw new Error('conceptId must be a, b or c of this set');
+  if (!set.concepts.some((c) => c.id === conceptId)) throw new Error(`conceptId must be one of this set's concepts (${set.concepts.map((c) => c.id).join(', ')})`);
   const now = new Date().toISOString();
   const job: SiteJob = { id: `sj_${randomBytes(6).toString('hex')}`, setId, conceptId, status: 'queued', stages: [], createdAt: now, updatedAt: now, resumes: 0 };
   await save(job);
@@ -162,7 +163,7 @@ export async function resumeSiteIfStale(j: SiteJob): Promise<SiteJob> {
   return j;
 }
 
-/** The set's concept after the current one (a → b → c → a): "Try another design" never invents a fourth. */
+/** The set's next concept in rank order (a → b → … → a): "Try another design" re-renders a saved recipe, never a new crawl or a direction outside the set. */
 export async function nextConcept(current: { setId: string; conceptId: string }): Promise<Concept | undefined> {
   const set = await getConceptSet(current.setId);
   if (!set?.concepts.length) return undefined;
@@ -234,7 +235,7 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
   if (add.length) html = html.replace(/(<nav id="site-menu" aria-label="Sections"><ul>[\s\S]*?)(<\/ul><\/nav>)/, `$1${add.join('')}$2`);
   fs.writeFileSync(homeFile, html);
   // inner pages in the concept's design: its header, menu and footer, its tokens (colour, type, corners, spacing)
-  applyConceptShell(siteDir, homeFile, html, tokens);
+  applyConceptShell(siteDir, homeFile, html, tokens, shellOf(concept));
   await persistDir(siteDir);
   return true;
 }

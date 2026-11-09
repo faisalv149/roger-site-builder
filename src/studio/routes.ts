@@ -74,7 +74,7 @@ studioRoutes.get('/snapshots/:id', wrap(async (req, res) => {
  *   GET  /api/studio/businesses                 every business with a brief: its latest revision, name and hash
  *   POST /api/studio/reviews                    an owner review of one pinned brief revision → 201 { id }; 409 if the brief has moved on
  *   GET  /api/studio/reviews/:id
- *   POST /api/studio/concepts                   { businessKey, revision?, briefHash?, reviewId? } → 202 { id, setId }: three homepage concepts (preview)
+ *   POST /api/studio/concepts                   { businessKey, revision?, briefHash?, reviewId? } → 202 { id, setId }: up to STUDIO_MAX_DIRECTIONS ranked homepage concepts (preview)
  *   GET  /api/studio/concept-jobs/:id           the concept job: its stages, notes and errors
  *   GET  /api/studio/concept-sets/:id           the concept set: concepts, checks, distinctness, cost, publication gate
  *   Previews (HTML and screenshots): /studio-previews/<setId>/...
@@ -202,7 +202,7 @@ studioRoutes.post('/concept-sets/:id/share', wrap(async (req, res) => {
   const set = await getConceptSet(String(req.params.id));
   if (!set) return res.status(404).json({ error: 'No such concept set' });
   const conceptId = String((req.body || {}).conceptId || '');
-  if (!set.concepts.some((c) => c.id === conceptId)) return res.status(400).json({ error: 'conceptId must be a, b or c of this set' });
+  if (!set.concepts.some((c) => c.id === conceptId)) return res.status(400).json({ error: `conceptId must be one of this set's concepts (${set.concepts.map((c) => c.id).join(', ')})` });
   const share = await createShare({ setId: set.id, conceptId, businessKey: set.brief.businessKey, revision: set.brief.revision });
   res.status(201).json({ url: shareUrl(share.token), token: share.token, setId: set.id, conceptId, kind: 'homepage preview (not a published website)' });
 }));

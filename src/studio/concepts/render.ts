@@ -6,7 +6,8 @@ import { fetchWithRetry } from '../discover.js';
 import { sha256 } from '../snapshot.js';
 import { launchBrowser } from '../../render/og.js';
 import type { Catalog } from './review.js';
-import { MENU_JS, RENDERERS, VARIANT_CSS, baseCss, esc, siteFooter, siteHeader, type RenderCtx } from './library.js';
+import { MENU_JS, RENDERERS, VARIANT_CSS, baseCss, esc, shellCss, siteFooter, siteHeader, type RenderCtx } from './library.js';
+import { shellOf } from './directions.js';
 import type { Concept } from './types.js';
 import { LISTING_CSS, isListing, placeholderSrc } from './listing-photos.js';
 
@@ -63,7 +64,7 @@ async function defaultFetch(url: string): Promise<Buffer | null> {
   throw new Error(`download failed after ${attempts} tries: ${res.error || `HTTP ${res.status}`}${res.truncated ? ' (too large)' : ''}`);
 }
 
-const NAV: Record<string, (cat: Catalog) => string> = { offer: (c) => (c.items.length ? 'Menu' : 'Services'), story: () => 'Story', gallery: () => 'Photos', proof: (c) => (c.rating ? 'Reviews' : 'Why us'), contact: (c) => (c.locations.length > 1 ? 'Locations' : 'Visit') };
+const NAV: Record<string, (cat: Catalog) => string> = { offer: (c) => (c.items.length ? 'Menu' : 'Services'), story: () => 'Story', gallery: () => 'Photos', proof: (c) => (c.rating ? 'Reviews' : 'Why us'), contact: (c) => (c.locations.length > 1 ? 'Locations' : c.address || c.locations.length ? 'Visit' : 'Contact') };
 
 /** The concept as one HTML document (relative image paths: img/<id>.jpg). */
 export function conceptHtml(concept: Concept, cat: Catalog, setId: string, opts: { serviceLinks?: RenderCtx["serviceLinks"] } = {}): string {
@@ -80,21 +81,33 @@ export function conceptHtml(concept: Concept, cat: Catalog, setId: string, opts:
       return { src: `img/${id}.jpg`, width: p.width, height: p.height, alt: p.alt || `Photo from ${cat.business.name}`, photo: p };
     },
   };
-  const hero = concept.sections[0]?.variant;
-  const nav = concept.sections.filter((s) => s.kind !== 'hero').map((s) => ({ href: `#${s.id}`, label: NAV[s.kind](cat) }));
-  const body = concept.sections.map((s) => RENDERERS[`${s.kind}:${s.variant}`](ctx, s)).join('\n');
-  const css = baseCss(concept.tokens) + VARIANT_CSS['svc-go'] + concept.sections.map((s) => VARIANT_CSS[`${s.kind}:${s.variant}`] ?? '').join('\n') + (cat.photos.some(isListing) ? `\n${LISTING_CSS}` : '');
+  // the direction's shell (its recipe's, or for a concept from before recipes, the one its hero belongs with)
+  const shell = shellOf(concept);
+  // each section once, in order; one that has nothing to show (a gallery whose photos don't fit its heading) is left
+  // off the page and out of the menu and the page index, never shown empty
+  const parts = concept.sections.map((s) => ({ s, html: RENDERERS[`${s.kind}:${s.variant}`](ctx, s) }));
+  const shown = new Set(parts.filter((p) => p.html.trim()).map((p) => p.s.id));
+  if (shown.size !== parts.length) {
+    // the masthead's own index lists the page's sections: render again without the empty ones
+    ctx.used.clear();
+    const kept = { ...concept, sections: concept.sections.filter((s) => shown.has(s.id)) };
+    ctx.concept = kept;
+    parts.splice(0, parts.length, ...kept.sections.map((s) => ({ s, html: RENDERERS[`${s.kind}:${s.variant}`](ctx, s) })));
+  }
+  const nav = parts.filter((p) => p.s.kind !== 'hero' && p.html.trim()).map((p) => ({ href: `#${p.s.id}`, label: NAV[p.s.kind](cat) }));
+  const body = parts.map((p) => p.html).filter((h) => h.trim()).join('\n');
+  const css = baseCss(concept.tokens) + shellCss(shell) + VARIANT_CSS['svc-go'] + concept.sections.map((s) => VARIANT_CSS[`${s.kind}:${s.variant}`] ?? '').join('\n') + (cat.photos.some(isListing) ? `\n${LISTING_CSS}` : '');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
 <title>${esc(cat.business.name)}: concept ${concept.id.toUpperCase()}, ${esc(concept.name)} (preview)</title>
 ${process.env.STUDIO_CONCEPT_FONTS === '0' ? '' : `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="${esc(concept.tokens.fonts.href)}">`}
 <style>${css}</style></head>
 <body><a class="skip" href="#main">Skip to content</a>
-${siteHeader(ctx, hero === 'full-bleed' ? 'overlay' : hero === 'split' ? 'bar' : 'center', nav)}
+${siteHeader(ctx, shell.header, nav)}
 <main id="main">
 ${body}
 </main>
-${siteFooter(ctx)}
+${siteFooter(ctx, shell.footer, nav)}
 <script>${MENU_JS}</script>
 </body></html>`;
 }

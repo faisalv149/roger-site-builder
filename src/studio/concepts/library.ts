@@ -1,5 +1,5 @@
 import type { Catalog, Photo } from './review.js';
-import type { ComposedSection, Concept, ConceptAction, DesignTokens } from './types.js';
+import type { ComposedSection, Concept, ConceptAction, DesignTokens, FooterStyle, HeaderStyle } from './types.js';
 import { capWidth, contrast, DISPLAY_ONLY } from './tokens.js';
 
 /**
@@ -42,10 +42,47 @@ const head = (s: ComposedSection, cls = '') => `<header class="sec-head ${cls}">
 const ratingLine = (c: RenderCtx) => { const r = c.cat.rating!; return `${r.value} on Google from ${fmt(r.count)} reviews${r.scope ? ` (${esc(r.scope)})` : ''}`; };
 /** the first of these pictures not yet on the page */
 const fresh = (c: RenderCtx, ids: (string | undefined)[]) => ids.find((id) => id && c.img(id) && !c.used.has(id));
-const firstSentences = (t: string, max: number) => { const s = t.replace(/\s+/g, ' ').trim().match(/[^.!?]+[.!?]+(?=\s|$)/g) ?? [t]; let out = ''; for (const x of s) { if ((out + x).length > max && out) break; out += x; } return out.trim(); };
+const firstSentences = (t: string, max: number) => { const s = t.replace(/\s+/g, ' ').trim().match(/(?:[^.!?]|[.!?](?=\S))+[.!?]+(?=\s|$)/g) ?? [t]; let out = ''; for (const x of s) { if ((out + x).length > max && out) break; out += x; } return out.trim(); };
 
 // ───────────────────────── header and footer ─────────────────────────
-export function siteHeader(c: RenderCtx, style: 'overlay' | 'bar' | 'center', nav: { href: string; label: string }[]) {
+/** the header's action: the concept's primary one, with a one-word label for a phone (or none: the hero carries it) */
+function headAction(c: RenderCtx, cls: string) {
+  const p = action(c, 'primary');
+  if (!p) return '';
+  const kind = p.actionId === 'find-location' ? 'locations' : c.cat.actions.find((a) => a.id === p.actionId)?.kind;
+  const short = kind === 'call' ? 'Call' : kind === 'book' ? 'Book' : kind === 'menu' ? 'View menu' : kind === 'directions' ? 'Directions' : kind === 'locations' ? 'Locations' : '';
+  return `<a class="btn ${cls} btn--small" href="${esc(p.href)}"${ext(p.href)} data-action="${esc(p.actionId)}" aria-label="${esc(p.label)}"${short ? '' : ' data-hide-sm'}><span class="lbl-l">${esc(p.label)}</span><span class="lbl-s">${esc(short)}</span></a>`;
+}
+const brandMark = (c: RenderCtx, bg: string) => {
+  const logoOk = !!c.cat.logo && c.img('logo') !== undefined && (c.cat.logo.colors.length ? Math.max(...c.cat.logo.colors.slice(0, 2).map((x) => contrast(x, bg))) >= 3 : true);
+  return logoOk ? image(c, 'logo', 'brand__logo') : `<span class="brand__word">${esc(c.cat.business.name)}</span>`;
+};
+const navList = (nav: { href: string; label: string }[]) => `<nav id="site-menu" aria-label="Sections"><ul>${nav.map((n) => `<li><a href="${n.href}">${esc(n.label)}</a></li>`).join('')}</ul></nav>`;
+const menuBtn = '<button type="button" class="menu-btn" aria-expanded="false" aria-controls="site-menu">Menu</button>';
+/** the first line of the opening hours that isn't "closed": what a dateline or a top strip shows */
+const openLine = (c: RenderCtx) => (c.cat.hours ? c.cat.hours.find((h) => !/closed/i.test(h)) ?? c.cat.hours[0] : '');
+const placeLine = (c: RenderCtx) => (c.cat.locations.length > 1 ? `${c.cat.locations.length} locations` : c.cat.locations[0]?.cityLine.replace(/\s\d{5}(-\d{4})?$/, '') ?? c.cat.area?.slice(0, 3).join(', ') ?? '');
+
+/** A newspaper's top: a slim row (what it is, where), the name centred between rules, the sections below it. */
+function headMasthead(c: RenderCtx, nav: { href: string; label: string }[]) {
+  // the place only: the front page's dateline below carries what the business is and when it opens
+  const line = placeLine(c);
+  return `<header class="site-head site-head--masthead"><div class="wrap"><div class="site-head__in"><p class="mh__line">${esc(line)}</p><a class="brand" href="#top" aria-label="${esc(c.cat.business.name)}, top of the page">${brandMark(c, c.concept.tokens.colors.bg)}</a>${menuBtn}${headAction(c, 'btn--primary')}</div>${navList(nav)}</div></header>`;
+}
+/** A front desk's top: a strip of when and how to reach the business, then the brand, the sections and the action. */
+function headUtility(c: RenderCtx, nav: { href: string; label: string }[]) {
+  const cat = c.cat;
+  const strip = [
+    openLine(c) ? `<li data-fact="hours"><span class="u__k">Hours</span> ${esc(openLine(c))}</li>` : '',
+    cat.phone ? `<li data-fact="phone"><a href="${cat.phone.href}">${esc(cat.phone.display)}</a></li>` : '',
+    cat.address ? `<li data-fact="${esc(cat.address.id)}">${esc(cat.address.formatted.replace(/,\s*(USA|United States)$/, ''))}</li>` : cat.locations.length > 1 ? `<li data-fact="locations"><a href="#visit">${cat.locations.length} locations</a></li>` : '',
+  ].filter(Boolean).join('');
+  return `<header class="site-head site-head--utility">${strip ? `<div class="u__strip"><ul class="wrap">${strip}</ul></div>` : ''}<div class="wrap site-head__in"><a class="brand" href="#top" aria-label="${esc(cat.business.name)}, top of the page">${brandMark(c, c.concept.tokens.colors.surface)}</a>${menuBtn}${navList(nav)}${headAction(c, 'btn--primary')}</div></header>`;
+}
+
+export function siteHeader(c: RenderCtx, style: HeaderStyle, nav: { href: string; label: string }[]) {
+  if (style === 'masthead') return headMasthead(c, nav);
+  if (style === 'utility') return headUtility(c, nav);
   const t = c.concept.tokens;
   const t0 = c.concept.tokens.colors;
   const headBg = style === 'center' ? t0.brand : t0.surface;
@@ -56,16 +93,33 @@ export function siteHeader(c: RenderCtx, style: 'overlay' | 'bar' | 'center', na
   void t;
   const kind = p ? (p.actionId === 'find-location' ? 'locations' : c.cat.actions.find((a) => a.id === p.actionId)?.kind) : undefined;
   // on a phone the header keeps a one-word action, or none (the hero carries it)
-  const short = kind === 'call' ? 'Call' : kind === 'book' ? 'Book' : kind === 'menu' ? 'Menu' : kind === 'directions' ? 'Directions' : kind === 'locations' ? 'Locations' : '';
+  const short = kind === 'call' ? 'Call' : kind === 'book' ? 'Book' : kind === 'menu' ? 'View menu' : kind === 'directions' ? 'Directions' : kind === 'locations' ? 'Locations' : '';
   return `<header class="site-head site-head--${style}"${scrim}><div class="wrap site-head__in"><a class="brand" href="#top" aria-label="${esc(c.cat.business.name)}, top of the page">${brand}</a><button type="button" class="menu-btn" aria-expanded="false" aria-controls="site-menu">Menu</button><nav id="site-menu" aria-label="Sections"><ul>${nav.map((n) => `<li><a href="${n.href}">${esc(n.label)}</a></li>`).join('')}</ul></nav>${p ? `<a class="btn btn--${style === 'overlay' ? 'invert-light' : style === 'center' ? 'deep' : 'primary'} btn--small" href="${esc(p.href)}"${ext(p.href)} data-action="${esc(p.actionId)}" aria-label="${esc(p.label)}"${short ? '' : ' data-hide-sm'}><span class="lbl-l">${esc(p.label)}</span><span class="lbl-s">${esc(short)}</span></a>` : ''}</div></header>`;
 }
 
-export function siteFooter(c: RenderCtx) {
+export function siteFooter(c: RenderCtx, style: FooterStyle = 'standard', nav: { href: string; label: string }[] = []) {
   const cat = c.cat;
   const where = cat.address ? esc(cat.address.formatted) : cat.locations.length > 1 ? `${cat.locations.length} locations` : cat.locations[0] ? esc(cat.locations[0].formatted) : '';
   const contact = [cat.phone ? `<a href="${cat.phone.href}">${esc(cat.phone.display)}</a>` : '', cat.email ? `<a href="mailto:${esc(cat.email)}">${esc(cat.email)}</a>` : ''].filter(Boolean).join(' · ');
   const site = cat.business.website ? new URL(cat.business.website).hostname.replace(/^www\./, '') : '';
-  return `<footer class="site-foot"><div class="wrap site-foot__in"><div><p class="site-foot__name">${esc(cat.business.name)}</p>${cat.business.category ? `<p>${esc(cat.business.category)}</p>` : ''}</div><div>${where ? `<p>${where}</p>` : ''}${contact ? `<p>${contact}</p>` : ''}</div><p class="site-foot__note">A concept preview by Roger, not a published site. Its facts come from ${esc(site || 'the business')}${cat.rating ? ' and its Google listing' : ''}.</p></div></footer>`;
+  const note = `<p class="site-foot__note">A concept preview by Roger, not a published site. Its facts come from ${esc(site || 'the business')}${cat.rating ? ' and its Google listing' : ''}.</p>`;
+  if (style === 'colophon') {
+    // a newspaper's last page: the name set large across the page, then visit, contact and the page's own index
+    return `<footer class="site-foot site-foot--colophon"><div class="wrap"><p class="cf__name">${esc(cat.business.name)}</p><div class="cf__cols">
+      ${where || openLine(c) ? `<div><p class="cf__h">Visit</p>${where ? `<p>${where}</p>` : ''}${openLine(c) ? `<p data-fact="hours">${esc(openLine(c))}</p>` : ''}</div>` : ''}
+      <div><p class="cf__h">Contact</p>${contact ? `<p>${contact}</p>` : `<p>${esc(cat.business.category ?? '')}</p>`}</div>
+      ${nav.length ? `<div><p class="cf__h">On this page</p><ul>${nav.map((n) => `<li><a href="${n.href}">${esc(n.label)}</a></li>`).join('')}</ul></div>` : ''}
+    </div>${note}</div></footer>`;
+  }
+  if (style === 'utility') {
+    // a front desk's last word: the actions again, large, then the week's hours and where to find it
+    const acts = [btn(action(c, 'primary'), 'invert'), btn(action(c, 'secondary'), 'ghost')].join('');
+    return `<footer class="site-foot site-foot--utility"><div class="wrap">${acts.trim() ? `<div class="uf__acts"><p class="uf__ask">${esc(cat.business.name)}</p><div class="actions">${acts}</div></div>` : ''}<div class="uf__cols">
+      ${cat.hours ? `<div data-fact="hours"><p class="cf__h">Hours</p><ul class="hours">${cat.hours.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>` : ''}
+      <div><p class="cf__h">Find us</p>${where ? `<p>${where}</p>` : ''}${contact ? `<p>${contact}</p>` : ''}</div>
+    </div>${note}</div></footer>`;
+  }
+  return `<footer class="site-foot"><div class="wrap site-foot__in"><div><p class="site-foot__name">${esc(cat.business.name)}</p>${cat.business.category ? `<p>${esc(cat.business.category)}</p>` : ''}</div><div>${where ? `<p>${where}</p>` : ''}${contact ? `<p>${contact}</p>` : ''}</div>${note}</div></footer>`;
 }
 
 // ───────────────────────── hero ─────────────────────────
@@ -98,15 +152,22 @@ function heroSplit(c: RenderCtx, s: ComposedSection) {
     cat.area ? `<div><dt>Serving</dt><dd>${esc(cat.area.join(', '))}</dd></div>` : cat.locations.length > 1 ? `<div><dt>Locations</dt><dd>${cat.locations.length} around ${esc([...new Set(cat.locations.map((l) => l.cityLine.split(',')[0]))].slice(0, 3).join(', '))}</dd></div>` : cat.address ? `<div><dt>Find us</dt><dd>${esc(cat.address.formatted)}</dd></div>` : '',
     cat.hours ? (() => { const open = cat.hours!.find((h) => !/closed/i.test(h)) ?? cat.hours![0]; return `<div><dt>Hours</dt><dd>${esc(open)}${cat.hours!.length > 1 ? '…' : ''}</dd></div>`; })() : '',
   ].filter(Boolean).join('');
-  return `<section class="hero hs" id="top" data-kind="hero" data-variant="split"><div class="wrap hs__grid"><div class="hs__text"><p class="eyebrow">${esc(copyOf(c, 'hero.eyebrow'))}</p><h1${fit(c)}>${esc(copyOf(c, 'hero.headline'))}</h1><p class="lede">${esc(copyOf(c, 'hero.subline'))}</p>
+  const pic = image(c, s.imageIds[0], '', true);
+  return `<section class="hero hs${pic ? '' : ' hs--type'}" id="top" data-kind="hero" data-variant="split"><div class="wrap hs__grid"><div class="hs__text"><p class="eyebrow">${esc(copyOf(c, 'hero.eyebrow'))}</p><h1${fit(c)}>${esc(copyOf(c, 'hero.headline'))}</h1><p class="lede">${esc(copyOf(c, 'hero.subline'))}</p>
   <div class="actions">${btn(action(c, 'primary'), 'primary')}${btn(action(c, 'secondary'), 'ghost')}</div>${facts ? `<dl class="hs__facts">${facts}</dl>` : ''}</div>
-  <figure class="hs__media">${image(c, s.imageIds[0], '', true)}</figure></div></section>`;
+  ${pic ? `<figure class="hs__media">${pic}</figure>` : ''}</div></section>`;
+}
+/** the business's own menu art (an image of its menu, never a lead image), above the menu it shows */
+function menuArtHtml(c: RenderCtx, s: ComposedSection) {
+  if (s.kind !== 'offer' || !c.cat.items.length) return '';
+  const figs = s.imageIds.map((id) => image(c, id)).filter(Boolean);
+  return figs.length ? `<div class="menu-art">${figs.map((f) => `<figure>${f}</figure>`).join('')}</div>` : '';
 }
 function heroTypeCollage(c: RenderCtx, s: ComposedSection) {
   const names = c.cat.items.length ? c.cat.items.map((i) => i.name) : c.cat.services.map((x) => x.name);
   const ticker = names.length ? `<div class="ht__ticker"><p>${[...names, ...names].slice(0, 18).map((n) => `<span>${esc(n)}</span>`).join('')}</p></div>` : '';
   const pics = s.imageIds.slice(0, 3).map((id, i) => `<figure class="ht__pic ht__pic--${i + 1}">${image(c, id, '', i === 0)}</figure>`).join('');
-  return `<section class="hero ht" id="top" data-kind="hero" data-variant="type-collage"><div class="wrap ht__grid"><div class="ht__text"><p class="eyebrow">${esc(copyOf(c, 'hero.eyebrow'))}</p><h1${fit(c)}>${esc(copyOf(c, 'hero.headline'))}</h1>
+  return `<section class="hero ht" id="top" data-kind="hero" data-variant="type-collage"><div class="wrap ht__grid${pics ? "" : " ht__grid--type"}"><div class="ht__text"><p class="eyebrow">${esc(copyOf(c, 'hero.eyebrow'))}</p><h1${fit(c)}>${esc(copyOf(c, 'hero.headline'))}</h1>
   <p class="lede">${esc(copyOf(c, 'hero.subline'))}</p><div class="actions">${btn(action(c, 'primary'), 'deep')}${btn(action(c, 'secondary'), 'ghost')}</div></div>${pics ? `<div class="ht__collage">${pics}</div>` : ''}</div>${ticker}</section>`;
 }
 
@@ -131,21 +192,29 @@ function serviceAction(c: RenderCtx, x: { id: string; name: string }) {
   if (c.concept.sections.some((sec) => sec.kind === 'contact')) return `<a class="svc-go" href="#visit">Ask about ${esc(x.name)}</a>`;
   return '';
 }
+/**
+ * A service layout shows the services' own verified photos (the website's picture for that service, or the owner's
+ * choice) when most of them have one; each shows only its own, and the rest keep a text treatment, never a stand-in.
+ */
+function servicePhotosShown(c: RenderCtx, svc: { imageId?: string }[]) {
+  const own = svc.filter((x) => fresh(c, [x.imageId])).length;
+  return own >= 2 && own * 2 >= svc.length;
+}
 function offerCards(c: RenderCtx, s: ComposedSection) {
   const cat = c.cat;
   if (cat.items.length) {
     const items = ordered(cat.items, s.factIds).slice(0, 9);
-    return `<section class="sec offer oc" id="offer" data-kind="offer" data-variant="cards"><div class="wrap">${head(s)}<ul class="oc__grid">${items.map((i) => `<li class="oc__card oc__card--menu" data-fact="${esc(i.id)}"><div class="oc__top"><h3>${esc(i.name)}</h3>${price(i)}</div>${i.description ? `<p>${esc(i.description)}</p>` : ''}${tags(i.tags)}</li>`).join('')}</ul>${menuMore(c)}</div></section>`;
+    return `<section class="sec offer oc" id="offer" data-kind="offer" data-variant="cards"><div class="wrap">${head(s)}${menuArtHtml(c, s)}<ul class="oc__grid">${items.map((i) => `<li class="oc__card oc__card--menu" data-fact="${esc(i.id)}"><div class="oc__top"><h3>${esc(i.name)}</h3>${price(i)}</div>${i.description ? `<p>${esc(i.description)}</p>` : ''}${tags(i.tags)}</li>`).join('')}</ul>${menuMore(c)}</div></section>`;
   }
   const svc = ordered(cat.services, s.factIds);
-  const pictured = svc.every((x) => fresh(c, [x.imageId]));
-  return `<section class="sec offer oc" id="offer" data-kind="offer" data-variant="cards"><div class="wrap">${head(s)}<ul class="oc__grid">${svc.map((x, i) => `<li class="oc__card" data-fact="${esc(x.id)}">${pictured ? `<div class="oc__img">${image(c, x.imageId)}</div>` : `<div class="oc__num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</div>`}<h3>${esc(x.name)}</h3>${x.description ? `<p>${esc(firstSentences(x.description, 220))}</p>` : ''}${serviceAction(c, x)}</li>`).join('')}</ul></div></section>`;
+  const pictured = servicePhotosShown(c, svc);
+  return `<section class="sec offer oc" id="offer" data-kind="offer" data-variant="cards"><div class="wrap">${head(s)}<ul class="oc__grid">${svc.map((x, i) => `<li class="oc__card" data-fact="${esc(x.id)}">${pictured && fresh(c, [x.imageId]) ? `<div class="oc__img">${image(c, x.imageId)}</div>` : `<div class="oc__num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</div>`}<h3>${esc(x.name)}</h3>${x.description ? `<p>${esc(firstSentences(x.description, 220))}</p>` : ''}${serviceAction(c, x)}</li>`).join('')}</ul></div></section>`;
 }
 function offerBoard(c: RenderCtx, s: ComposedSection) {
   const cat = c.cat;
   if (cat.items.length) {
     const sections = [...new Set(cat.items.map((i) => i.section ?? ''))];
-    return `<section class="sec offer ob ob--menu" id="offer" data-kind="offer" data-variant="board"><div class="wrap">${head(s)}<div class="ob__cols">${sections.map((sec) => `<div class="ob__group">${sec ? `<h3>${esc(sec)}</h3>` : ''}<ul>${cat.items.filter((i) => (i.section ?? '') === sec).map((i) => `<li data-fact="${esc(i.id)}"><div class="ob__row"><span class="ob__name">${esc(i.name)}</span><span class="ob__dots" aria-hidden="true"></span>${price(i)}</div>${i.description ? `<p>${esc(firstSentences(i.description, 140))}</p>` : ''}</li>`).join('')}</ul></div>`).join('')}</div>${menuMore(c)}</div></section>`;
+    return `<section class="sec offer ob ob--menu" id="offer" data-kind="offer" data-variant="board"><div class="wrap">${head(s)}${menuArtHtml(c, s)}<div class="ob__cols">${sections.map((sec) => `<div class="ob__group">${sec ? `<h3>${esc(sec)}</h3>` : ''}<ul>${cat.items.filter((i) => (i.section ?? '') === sec).map((i) => `<li data-fact="${esc(i.id)}"><div class="ob__row"><span class="ob__name">${esc(i.name)}</span><span class="ob__dots" aria-hidden="true"></span>${price(i)}</div>${i.description ? `<p>${esc(firstSentences(i.description, 140))}</p>` : ''}</li>`).join('')}</ul></div>`).join('')}</div>${menuMore(c)}</div></section>`;
   }
   const svc = ordered(cat.services, s.factIds);
   return `<section class="sec offer ob" id="offer" data-kind="offer" data-variant="board"><div class="wrap">${head(s)}<ol class="ob__index">${svc.map((x, i) => `<li data-fact="${esc(x.id)}"><span class="ob__n" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span><div><h3>${esc(x.name)}</h3>${x.description ? `<p>${esc(firstSentences(x.description, 180))}</p>` : ''}${serviceAction(c, x)}</div></li>`).join('')}</ol></div></section>`;
@@ -154,7 +223,7 @@ function offerRows(c: RenderCtx, s: ComposedSection) {
   const cat = c.cat;
   if (cat.items.length) {
     const groups = [...new Set(cat.items.map((i) => i.section ?? ''))];
-    return `<section class="sec offer or or--menu" id="offer" data-kind="offer" data-variant="rows"><div class="wrap">${head(s)}${groups.map((g, gi) => {
+    return `<section class="sec offer or or--menu" id="offer" data-kind="offer" data-variant="rows"><div class="wrap">${head(s)}${menuArtHtml(c, s)}${groups.map((g, gi) => {
       const its = ordered(cat.items.filter((i) => (i.section ?? '') === g), s.factIds);
       const tied = fresh(c, [cat.sectionImages[`section:${g}`]]);
       return `<article class="or__row${tied ? (gi % 2 ? ' or__row--flip' : '') : ' or__row--text'}" data-fact="section:${esc(g)}">${tied ? `<div class="or__media">${image(c, tied)}</div>` : ''}<div class="or__text">${g ? `<h3>${esc(g)}</h3>` : ''}<ul class="or__list">${its.slice(0, 8).map((i) => `<li data-fact="${esc(i.id)}"><span>${esc(i.name)}</span>${price(i)}</li>`).join('')}</ul>${its.length > 8 ? '<p class="or__more">More on the full menu.</p>' : ''}</div></article>`;
@@ -192,7 +261,7 @@ function proofStats(c: RenderCtx, s: ComposedSection) {
 }
 
 // ───────────────────────── gallery ─────────────────────────
-const STOP = new Set(['the', 'and', 'for', 'from', 'with', 'our', 'your', 'around', 'recent', 'latest', 'work', 'photos', 'photo', 'pictures', 'gallery', 'look', 'take', 'inside', 'see', 'some', 'what', 'we', 'do', 'done', 'jobs', 'projects', 'here', 'more', 'a', 'of', 'in', 'on', 'at', 'to', 'by', 'up', 'out']);
+const STOP = new Set(['closer', 'the', 'and', 'for', 'from', 'with', 'our', 'your', 'around', 'recent', 'latest', 'work', 'photos', 'photo', 'pictures', 'gallery', 'look', 'take', 'inside', 'see', 'some', 'what', 'we', 'do', 'done', 'jobs', 'projects', 'here', 'more', 'a', 'of', 'in', 'on', 'at', 'to', 'by', 'up', 'out']);
 const stem = (w: string) => w.toLowerCase().replace(/(ing|ings|ed|es|s)$/, '');
 const words = (t: string) => new Set(t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !STOP.has(w)).map(stem));
 /**
@@ -214,16 +283,25 @@ export function galleryFits(c: RenderCtx, s: ComposedSection, ids: string[]): st
     return topic.some((w) => ev.has(w));
   });
 }
+/** a gallery with too few photos that fit is left off the page (and out of the menu), never shown as an empty section */
+const MIN_GALLERY = 3;
+/** a gallery shows photos not already on the page (the hero's, the story's, a service's own) */
+const unseen = (c: RenderCtx, s: ComposedSection) => s.imageIds.filter((id) => c.img(id) && !c.used.has(id));
 function galleryMosaic(c: RenderCtx, s: ComposedSection) {
-  const ids = galleryFits(c, s, s.imageIds.filter((id) => c.img(id)));
+  const ids = galleryFits(c, s, unseen(c, s));
+  if (ids.length < MIN_GALLERY) return '';
   const n = ids.length >= 8 ? 8 : Math.min(5, ids.length);
   return `<section class="sec gallery gm gm--${n}" id="gallery" data-kind="gallery" data-variant="mosaic"><div class="wrap">${head(s)}<div class="gm__grid">${ids.slice(0, n).map((id, i) => `<figure class="gm__i gm__i--${i + 1}">${image(c, id)}</figure>`).join('')}</div></div></section>`;
 }
 function galleryFilmstrip(c: RenderCtx, s: ComposedSection) {
-  return `<section class="sec gallery gf" id="gallery" data-kind="gallery" data-variant="filmstrip"><div class="wrap">${head(s)}</div><div class="gf__strip" role="region" aria-label="Photos" tabindex="0">${galleryFits(c, s, s.imageIds).slice(0, 8).map((id) => `<figure>${image(c, id)}</figure>`).join('')}</div></section>`;
+  const ids = galleryFits(c, s, unseen(c, s));
+  if (ids.length < MIN_GALLERY) return '';
+  return `<section class="sec gallery gf" id="gallery" data-kind="gallery" data-variant="filmstrip"><div class="wrap">${head(s)}</div><div class="gf__strip" role="region" aria-label="Photos" tabindex="0">${ids.slice(0, 8).map((id) => `<figure>${image(c, id)}</figure>`).join('')}</div></section>`;
 }
 function galleryFeature(c: RenderCtx, s: ComposedSection) {
-  return `<section class="sec gallery gg" id="gallery" data-kind="gallery" data-variant="feature-grid"><div class="wrap">${head(s)}<div class="gg__grid">${galleryFits(c, s, s.imageIds).slice(0, 5).map((id, i) => `<figure class="gg__i${i === 0 ? ' gg__i--big' : ''}">${image(c, id)}</figure>`).join('')}</div></div></section>`;
+  const ids = galleryFits(c, s, unseen(c, s));
+  if (ids.length < MIN_GALLERY) return '';
+  return `<section class="sec gallery gg" id="gallery" data-kind="gallery" data-variant="feature-grid"><div class="wrap">${head(s)}<div class="gg__grid">${ids.slice(0, 5).map((id, i) => `<figure class="gg__i${i === 0 ? ' gg__i--big' : ''}">${image(c, id)}</figure>`).join('')}</div></div></section>`;
 }
 
 // ───────────────────────── story ─────────────────────────
@@ -269,13 +347,81 @@ function contactBand(c: RenderCtx, s: ComposedSection) {
   <dl class="cb__dl">${contactRows(c).replace(/<div data-fact="phone">.*?<\/div>/, cat.phone && big ? '' : '$&')}</dl>${!cat.address && cat.locations.length > 1 ? locationCards(c) : ''}</div></section>`;
 }
 
+// ───────────────────────── the front page (masthead) and the front desk ─────────────────────────
+/**
+ * A newspaper front page: a dateline between rules (what the business is, where, when it opens), the headline as the
+ * masthead across the page, then the lead photograph beside the opening column and the page's own index.
+ */
+function heroMasthead(c: RenderCtx, s: ComposedSection) {
+  const cat = c.cat;
+  // what it is and when it opens (the header's line already says where)
+  const dateline = [copyOf(c, 'hero.eyebrow') ? `<span>${esc(copyOf(c, 'hero.eyebrow'))}</span>` : '', openLine(c) ? `<span data-fact="hours">${esc(openLine(c))}</span>` : ''].filter(Boolean).join('');
+  const toc = c.concept.sections.filter((x) => x.kind !== 'hero' && x.title).map((x) => `<li><a href="#${x.id}">${esc(x.title)}</a></li>`).join('');
+  const lead = image(c, s.imageIds[0], '', true);
+  return `<section class="hero hm" id="top" data-kind="hero" data-variant="masthead"><div class="wrap">${dateline ? `<p class="hm__dateline">${dateline}</p>` : ''}<h1 class="hm__title"${fit(c)}>${esc(copyOf(c, 'hero.headline'))}</h1>
+  <div class="hm__grid${lead ? '' : ' hm__grid--text'}">${lead ? `<figure class="hm__lead">${lead}</figure>` : ''}<div class="hm__col">${copyOf(c, 'hero.subline') ? `<p class="hm__deck">${esc(copyOf(c, 'hero.subline'))}</p>` : ''}
+  ${cat.rating ? `<p class="hm__rating" data-fact="rating">${stars(cat.rating.value)} ${ratingLine(c)}</p>` : ''}<div class="actions">${btn(action(c, 'primary'), 'primary')}${btn(action(c, 'secondary'), 'ghost')}</div>
+  ${toc ? `<div class="hm__toc"><p class="hm__toc-h">On this page</p><ol>${toc}</ol></div>` : ''}</div></div></div></section>`;
+}
+/**
+ * A front desk: the headline and the main action beside a panel of what a visitor needs first (when it opens, where it
+ * is, how to reach it), with at most one photograph as a band below.
+ */
+function heroDesk(c: RenderCtx, s: ComposedSection) {
+  const cat = c.cat;
+  const dir = cat.address ? cat.actions.find((a) => a.id === `dir-${cat.address!.id}`) : undefined;
+  const rows = [
+    cat.hours ? `<div data-fact="hours"><dt>Hours</dt><dd><ul class="hours">${cat.hours.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></dd></div>` : '',
+    cat.address ? `<div data-fact="${esc(cat.address.id)}"><dt>Address</dt><dd>${esc(cat.address.formatted)}${dir ? `<br>${linkTo(dir)}` : ''}</dd></div>` : cat.locations.length > 1 ? `<div data-fact="locations"><dt>Locations</dt><dd>${cat.locations.length} locations. <a class="link" href="#visit">Find a location</a></dd></div>` : '',
+    cat.phone ? `<div data-fact="phone"><dt>Phone</dt><dd><a class="link" href="${cat.phone.href}">${esc(cat.phone.display)}</a></dd></div>` : '',
+    cat.area ? `<div data-fact="area"><dt>Serving</dt><dd>${esc(cat.area.join(', '))}</dd></div>` : '',
+  ].filter(Boolean).join('');
+  const band = s.imageIds[0] ? image(c, s.imageIds[0]) : '';
+  return `<section class="hero hd" id="top" data-kind="hero" data-variant="desk"><div class="wrap hd__grid"><div class="hd__text"><p class="eyebrow">${esc(copyOf(c, 'hero.eyebrow'))}</p><h1${fit(c)}>${esc(copyOf(c, 'hero.headline'))}</h1>${copyOf(c, 'hero.subline') ? `<p class="lede">${esc(copyOf(c, 'hero.subline'))}</p>` : ''}
+  <div class="actions">${btn(action(c, 'primary'), 'primary')}${btn(action(c, 'secondary'), 'ghost')}</div>${cat.rating ? `<p class="hd__rating" data-fact="rating">${stars(cat.rating.value)} ${ratingLine(c)}</p>` : ''}</div>
+  ${rows ? `<aside class="hd__desk" aria-label="Visit details"><p class="hd__desk-h">Before you come</p><dl>${rows}</dl></aside>` : ''}</div>${band ? `<figure class="hd__band">${band}</figure>` : ''}</section>`;
+}
+
+/** A ruled ledger: each service or dish on its own line (name, description, price or next step), grouped under rules. */
+function offerLedger(c: RenderCtx, s: ComposedSection) {
+  const cat = c.cat;
+  if (cat.items.length) {
+    const groups = [...new Set(cat.items.map((i) => i.section ?? ''))];
+    return `<section class="sec offer lg" id="offer" data-kind="offer" data-variant="ledger"><div class="wrap">${head(s)}${menuArtHtml(c, s)}${groups.map((g) => `<div class="lg__group">${g ? `<h3 class="lg__sec">${esc(g)}</h3>` : ''}<ol class="lg__list">${ordered(cat.items.filter((i) => (i.section ?? '') === g), s.factIds).map((i) => `<li data-fact="${esc(i.id)}"><span class="lg__name">${esc(i.name)}</span><span class="lg__desc">${i.description ? esc(firstSentences(i.description, 160)) : ''}</span>${price(i) || '<span></span>'}</li>`).join('')}</ol></div>`).join('')}${menuMore(c)}</div></section>`;
+  }
+  const svc = ordered(cat.services, s.factIds);
+  return `<section class="sec offer lg lg--svc" id="offer" data-kind="offer" data-variant="ledger"><div class="wrap">${head(s)}<ol class="lg__list">${svc.map((x, i) => `<li data-fact="${esc(x.id)}"><span class="lg__n" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span><div><h3>${esc(x.name)}</h3>${x.description ? `<p>${esc(firstSentences(x.description, 200))}</p>` : ''}</div>${serviceAction(c, x)}</li>`).join('')}</ol></div></section>`;
+}
+/** Quick tiles: a row of chips to jump to each menu section, then compact tiles; services as tiles with their next step. */
+function offerTiles(c: RenderCtx, s: ComposedSection) {
+  const cat = c.cat;
+  if (cat.items.length) {
+    const groups = [...new Set(cat.items.map((i) => i.section ?? ''))];
+    const jump = groups.length > 1 && groups.every(Boolean) ? `<nav class="tl__jump" aria-label="${esc(s.title || 'Menu')} sections"><ul>${groups.map((g, gi) => `<li><a href="#tl-${gi}">${esc(g)}</a></li>`).join('')}</ul></nav>` : '';
+    return `<section class="sec offer tl" id="offer" data-kind="offer" data-variant="tiles"><div class="wrap">${head(s)}${menuArtHtml(c, s)}${jump}${groups.map((g, gi) => `<div class="tl__group" id="tl-${gi}">${g ? `<h3>${esc(g)}</h3>` : ''}<ul class="tl__grid">${ordered(cat.items.filter((i) => (i.section ?? '') === g), s.factIds).map((i) => `<li class="tl__tile" data-fact="${esc(i.id)}"><div class="tl__top"><span class="tl__name">${esc(i.name)}</span>${price(i)}</div>${i.description ? `<p>${esc(firstSentences(i.description, 90))}</p>` : ''}</li>`).join('')}</ul></div>`).join('')}${menuMore(c)}</div></section>`;
+  }
+  const svc = ordered(cat.services, s.factIds);
+  const pictured = servicePhotosShown(c, svc);
+  return `<section class="sec offer tl" id="offer" data-kind="offer" data-variant="tiles"><div class="wrap">${head(s)}<ul class="tl__grid tl__grid--svc">${svc.map((x) => `<li class="tl__tile${pictured && fresh(c, [x.imageId]) ? " tl__tile--pic" : ""}" data-fact="${esc(x.id)}">${pictured && fresh(c, [x.imageId]) ? `<div class="tl__img">${image(c, x.imageId)}</div>` : ""}<h3>${esc(x.name)}</h3>${x.description ? `<p>${esc(firstSentences(x.description, 120))}</p>` : ''}${serviceAction(c, x)}</li>`).join('')}</ul></div></section>`;
+}
+/** The week's opening hours as a large timetable beside where the business is, how to reach it, and its actions. */
+function contactTimetable(c: RenderCtx, s: ComposedSection) {
+  const cat = c.cat;
+  // "Monday: 9:00 AM – 5:00 PM" → Monday | 9:00 AM – 5:00 PM (the day never holds a digit, so a time's colon is never split)
+  const week = (cat.hours ?? []).map((h) => { const m = h.match(/^([^:\d]{2,24}):\s*(.+)$/); return m ? `<div><dt>${esc(m[1])}</dt><dd>${esc(m[2])}</dd></div>` : `<div><dd>${esc(h)}</dd></div>`; }).join('');
+  const rows = contactRows(c).replace(/<div data-fact="hours">[\s\S]*?<\/ul><\/dd><\/div>/, '');
+  const more = others(c, ['menu', 'book', 'email', 'site']);
+  return `<section class="sec contact tt" id="visit" data-kind="contact" data-variant="timetable"><div class="wrap">${head(s)}<div class="tt__grid">${week ? `<div class="tt__week" data-fact="hours"><p class="tt__h">Opening hours</p><dl>${week}</dl></div>` : ''}
+  <div class="tt__info">${rows ? `<dl class="tt__dl">${rows}</dl>` : ''}${!cat.address && cat.locations.length > 1 ? locationCards(c) : ''}<div class="actions">${btn(action(c, 'primary'), 'primary')}${btn(action(c, 'secondary'), 'ghost')}${more.slice(0, 2).map((a) => linkTo(a, 'btn btn--ghost')).join('')}</div></div></div></div></section>`;
+}
+
 export const RENDERERS: Record<string, (c: RenderCtx, s: ComposedSection) => string> = {
-  'hero:full-bleed': heroFullBleed, 'hero:split': heroSplit, 'hero:type-collage': heroTypeCollage,
-  'offer:cards': offerCards, 'offer:board': offerBoard, 'offer:rows': offerRows,
+  'hero:full-bleed': heroFullBleed, 'hero:split': heroSplit, 'hero:type-collage': heroTypeCollage, 'hero:masthead': heroMasthead, 'hero:desk': heroDesk,
+  'offer:cards': offerCards, 'offer:board': offerBoard, 'offer:rows': offerRows, 'offer:ledger': offerLedger, 'offer:tiles': offerTiles,
   'proof:rating-band': proofRatingBand, 'proof:pledges': proofPledges, 'proof:stat-strip': proofStats,
   'gallery:mosaic': galleryMosaic, 'gallery:filmstrip': galleryFilmstrip, 'gallery:feature-grid': galleryFeature,
   'story:columns': storyColumns, 'story:portrait': storyPortrait,
-  'contact:panel': contactPanel, 'contact:locations': contactLocations, 'contact:band': contactBand,
+  'contact:panel': contactPanel, 'contact:locations': contactLocations, 'contact:band': contactBand, 'contact:timetable': contactTimetable,
 };
 
 // ───────────────────────── styles ─────────────────────────
@@ -316,12 +462,15 @@ h2{font-size:clamp(2rem,4.2vw,3.4rem);margin-bottom:.45em}h3{font-size:1.3rem;li
 .site-foot{background:var(--deep);color:var(--onDeep);padding:56px 0 40px;font-size:.95rem}.site-foot__in{display:grid;grid-template-columns:1fr 1fr;gap:24px}.site-foot a{color:inherit}.site-foot__name{font:var(--hw) 1.35rem/1.1 var(--hf);text-transform:var(--case)}.site-foot__note{grid-column:1/-1;border-top:1px solid color-mix(in srgb,var(--onDeep) 30%,transparent);padding-top:20px;margin:8px 0 0}
 .lbl-s{display:none}
 .menu-btn{display:none}
-@media (max-width:760px){.site-head nav{display:none}.menu-btn{display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:0 14px;margin-left:auto;border:2px solid currentColor;border-radius:var(--r);background:transparent;color:inherit;font:700 .95rem/1 var(--bf);cursor:pointer}.site-head[data-menu=open] nav{display:block;position:absolute;left:0;right:0;top:100%;background:var(--surface);color:var(--ink);border-bottom:1px solid var(--line);box-shadow:0 14px 28px rgba(0,0,0,.14)}.site-head[data-menu=open] nav ul{flex-direction:column;padding:8px clamp(20px,4vw,48px) 16px}.site-foot__in{grid-template-columns:1fr}.site-head .lbl-l{display:none}.site-head .lbl-s{display:inline}.site-head [data-hide-sm]{display:none}}
+@media (max-width:760px){.site-head nav{display:none}.menu-btn{display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:0 14px;margin-left:auto;border:2px solid currentColor;border-radius:var(--r);background:transparent;color:inherit;font:700 .95rem/1 var(--bf);cursor:pointer}.site-head[data-menu=open] nav{display:block;position:absolute;left:0;right:0;top:100%;background:var(--surface);color:var(--ink);border-bottom:1px solid var(--line);box-shadow:0 14px 28px rgba(0,0,0,.14)}.site-head[data-menu=open] nav ul{flex-direction:column;padding:8px clamp(20px,4vw,48px) 16px}.site-foot__in{grid-template-columns:1fr}.site-head .lbl-l{display:none}.site-head .lbl-s{display:inline}.site-head [data-hide-sm]{display:none}
+/* a wide logo gives way on a phone; the menu button and the action never shrink under their labels */
+.site-head .menu-btn,.site-head__in>.btn{flex-shrink:0}.site-head .brand{min-width:0;flex:0 1 auto}.brand__logo{max-width:100%}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}`;
 }
 
 export const VARIANT_CSS: Record<string, string> = {
-  'svc-go': `.svc-go{margin-top:auto;padding-top:6px;font-weight:700;color:var(--brandText);text-decoration:underline;text-underline-offset:3px;min-height:44px;display:inline-flex;align-items:center}`,
+  'svc-go': `.menu-art{display:flex;flex-wrap:wrap;gap:16px;margin:0 0 calc(32px*var(--sp))}.menu-art figure{position:relative;flex:1 1 240px;max-width:380px}.menu-art img{width:100%;height:auto;border-radius:var(--r)}
+.svc-go{margin-top:auto;padding-top:6px;font-weight:700;color:var(--brandText);text-decoration:underline;text-underline-offset:3px;min-height:44px;display:inline-flex;align-items:center}`,
   'hero:full-bleed': `.hb{position:relative;min-height:clamp(600px,94vh,900px);display:flex;align-items:flex-end;color:#fff;overflow:hidden;isolation:isolate}
 .hb__img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:-2}.hb__scrim{position:absolute;inset:0;z-index:-1;background:linear-gradient(180deg,rgba(11,12,16,.66) 0%,rgba(11,12,16,.6) 45%,rgba(11,12,16,.84) 100%)}
 .hb__body{padding-block:150px calc(76px*var(--sp))}.hb h1{font-size:min(clamp(2.7rem,6.6vw,6.2rem),calc(min(860px,92vw) / var(--fit,8)));max-width:max(13ch,calc(var(--fit,8) * 1em));line-height:.98}.hb .lede{margin-top:22px;color:#F1F2F4}
@@ -329,9 +478,10 @@ export const VARIANT_CSS: Record<string, string> = {
   'hero:split': `.hs{background:var(--surface);padding-block:calc(56px*var(--sp)) calc(88px*var(--sp))}.hs__grid{display:grid;grid-template-columns:1.08fr .92fr;gap:clamp(32px,6vw,88px);align-items:center}
 .hs h1{font-size:min(clamp(2.5rem,5.2vw,4.8rem),calc(min(620px,88vw) / var(--fit,8)));color:var(--ink)}.hs .eyebrow{color:var(--brandText)}.hs .lede{margin-top:20px;color:var(--muted)}
 .hs__facts{display:grid;gap:14px;margin-top:36px;padding-top:24px;border-top:1px solid var(--line)}.hs__facts div{display:grid;grid-template-columns:130px 1fr;gap:12px}.hs__facts dt{font-weight:700;color:var(--muted);font-size:.9rem;text-transform:uppercase;letter-spacing:.08em}
+.hs--type .hs__grid{grid-template-columns:minmax(0,1fr);max-width:980px}.hs--type h1{font-size:min(clamp(2.6rem,6vw,5.6rem),calc(min(980px,100vw - 40px) / var(--fit,8)))}.hs--type .lede{max-width:60ch}
 .hs__media{position:relative}.hs__media::before{content:"";position:absolute;inset:22px -22px -22px 22px;background:var(--brand);border-radius:var(--r);z-index:0}.hs__media img{position:relative;z-index:1;width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:var(--r)}
 @media (max-width:860px){.hs__grid{grid-template-columns:1fr}.hs__media{margin:28px 22px 0 0}.hs__media img{aspect-ratio:16/10}.hs__facts div{grid-template-columns:1fr;gap:2px}}`,
-  'hero:type-collage': `.ht{background:var(--brand);color:var(--onBrand);padding-top:calc(40px*var(--sp));overflow:hidden}.ht__grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(340px,.9fr);gap:48px;align-items:center;padding-bottom:calc(72px*var(--sp))}
+  'hero:type-collage': `.ht{background:var(--brand);color:var(--onBrand);padding-top:calc(40px*var(--sp));overflow:hidden}.ht__grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(340px,.9fr);gap:48px;align-items:center;padding-bottom:calc(72px*var(--sp))}.ht__grid--type{grid-template-columns:minmax(0,1fr)}.ht__grid--type .ht__text{max-width:980px}.ht .ht__grid--type h1{font-size:min(clamp(2.6rem,8.4vw,8.4rem),calc(min(980px,100vw - 48px) / var(--fit,8)))}
 .ht h1{font-size:min(clamp(3rem,7.2vw,7rem),calc(min(640px,50vw) / var(--fit,8)));line-height:.92;letter-spacing:-.025em}
 @media (max-width:860px){.ht h1{font-size:min(clamp(2.6rem,11vw,4.5rem),calc((100vw - 48px) / var(--fit,8)))}}.ht .lede{margin-top:26px}
 .ht__collage{display:grid;grid-template-columns:1.1fr .9fr;grid-template-rows:210px 210px;gap:16px}.ht__pic{overflow:hidden;border:6px solid var(--bg);border-radius:var(--r)}.ht__pic img{width:100%;height:100%;object-fit:cover}
@@ -381,7 +531,75 @@ export const VARIANT_CSS: Record<string, string> = {
 .cl__dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;margin-top:36px}.cl__dl dt{font-weight:700;margin-bottom:6px}.hours li{padding:2px 0}`,
   'contact:band': `.cb .cb__big{font:var(--hw) clamp(2.6rem,7vw,5.5rem)/1 var(--hf);margin:6px 0 10px}.cb__big a{color:inherit;text-decoration:none}.cb__dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;margin-top:40px;border-top:1px solid color-mix(in srgb,var(--onDeep) 35%,transparent);padding-top:28px}.cb__dl dt{font-weight:700;margin-bottom:6px}
 .cb .loc__grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-top:28px}.cb .loc__grid li{border:1px solid color-mix(in srgb,var(--onDeep) 40%,transparent);border-radius:var(--r);padding:18px}.cb .loc__grid p{margin:0 0 4px}.loc__street{font-weight:700}`,
+  'hero:masthead': `.hm{background:var(--bg);padding-block:calc(20px*var(--sp)) calc(64px*var(--sp))}
+.hm__dateline{display:flex;flex-wrap:wrap;gap:4px 24px;justify-content:space-between;border-block:1px solid var(--ink);padding:10px 0;margin:0 0 clamp(14px,2vw,24px);font:600 .8rem/1.4 var(--bf);letter-spacing:.12em;text-transform:uppercase}
+.hm__title{font-size:min(clamp(2.6rem,8.6vw,8.2rem),calc(min(1200px,100vw - 2*clamp(20px,4vw,48px)) / var(--fit,8)));line-height:.9;letter-spacing:-.03em;text-align:center;margin:0 0 clamp(18px,2.4vw,28px);padding-bottom:clamp(16px,2vw,26px);border-bottom:6px solid var(--ink)}
+.hm__grid{display:grid;grid-template-columns:1.55fr 1fr;gap:clamp(24px,4vw,56px);align-items:start}.hm__grid--text{grid-template-columns:1fr;max-width:760px}
+.hm__lead{position:relative}.hm__lead img{width:100%;aspect-ratio:3/2;object-fit:cover}
+.hm__col{border-left:1px solid var(--line);padding-left:clamp(20px,3vw,40px)}.hm__col .eyebrow{color:var(--brandText)}
+.hm__deck{font-size:clamp(1.2rem,1.7vw,1.45rem);line-height:1.45;margin:0 0 6px}.hm__rating{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-weight:600;margin:18px 0 0}
+.hm__toc{margin-top:30px;border-top:2px solid var(--ink);padding-top:12px}.hm__toc-h{font:700 .78rem/1.3 var(--bf);letter-spacing:.14em;text-transform:uppercase;margin:0 0 4px}
+.hm__toc ol{counter-reset:t}.hm__toc li{counter-increment:t;border-bottom:1px solid var(--line)}
+.hm__toc a{display:flex;gap:14px;align-items:center;min-height:44px;color:inherit;text-decoration:none;font-weight:600}.hm__toc a::before{content:counter(t,decimal-leading-zero);font:var(--hw) .95rem/1 var(--hf);color:var(--brandText);min-width:2ch}.hm__toc a:hover{text-decoration:underline}
+@media (max-width:860px){.hm__grid{grid-template-columns:1fr}.hm__col{border-left:0;padding-left:0}.hm__title{text-align:left}}`,
+  'hero:desk': `.hd{background:var(--bg);padding-top:calc(48px*var(--sp))}
+.hd__grid{display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(28px,5vw,72px);align-items:start;padding-bottom:calc(52px*var(--sp))}
+.hd h1{font-size:min(clamp(2.4rem,5vw,4.4rem),calc(min(600px,100vw - 40px) / var(--fit,8)))}.hd .eyebrow{color:var(--brandText)}.hd .lede{margin-top:18px;color:var(--muted)}
+.hd__rating{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:26px 0 0;font-weight:600}
+.hd__desk{background:var(--brand);color:var(--onBrand);border-radius:var(--r);padding:clamp(22px,3vw,34px)}
+.hd__desk-h{font:700 .8rem/1.3 var(--bf);letter-spacing:.14em;text-transform:uppercase;margin:0 0 16px}
+.hd__desk dl{display:grid;gap:14px}.hd__desk dl>div{display:grid;grid-template-columns:96px 1fr;gap:12px;padding-bottom:14px;border-bottom:1px solid color-mix(in srgb,var(--onBrand) 30%,transparent)}.hd__desk dl>div:last-child{border-bottom:0;padding-bottom:0}
+.hd__desk dt{font-weight:700}.hd__desk .link{color:inherit}.hd__desk .hours li{padding:1px 0}
+.hd__band{position:relative;height:clamp(200px,28vw,360px);overflow:hidden}.hd__band img{width:100%;height:100%;object-fit:cover}
+@media (max-width:860px){.hd__grid{grid-template-columns:1fr}.hd__desk dl>div{grid-template-columns:1fr;gap:2px}}`,
+  'offer:ledger': `.lg .sec-head{border-bottom:6px solid var(--ink);max-width:none;padding-bottom:14px}
+.lg__group{margin-bottom:calc(40px*var(--sp))}.lg__sec{font-size:clamp(1.4rem,2.2vw,1.9rem);border-bottom:2px solid var(--ink);padding:18px 0 8px}
+.lg__list li{display:grid;grid-template-columns:minmax(150px,1fr) 2fr auto;gap:6px 28px;padding:14px 0;border-bottom:1px solid var(--line);align-items:baseline}
+.lg__name{font-weight:700}.lg__desc{color:var(--muted)}
+.lg--svc .lg__list li{grid-template-columns:56px minmax(0,1fr) auto;padding:20px 0}.lg__n{font:var(--hw) 1.5rem/1 var(--hf);color:var(--brandText)}.lg--svc h3{font-size:clamp(1.2rem,1.8vw,1.5rem)}.lg--svc p{margin:.4em 0 0;color:var(--muted);max-width:70ch}.lg--svc .svc-go{margin-top:0}
+@media (max-width:760px){.lg__list li{grid-template-columns:minmax(0,1fr) auto}.lg__desc{grid-column:1/-1;grid-row:2}.lg--svc .lg__list li{grid-template-columns:40px minmax(0,1fr)}.lg--svc .svc-go{grid-column:2}}`,
+  'offer:tiles': `.tl__jump ul{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:28px}
+.tl__jump a{display:inline-flex;align-items:center;min-height:44px;padding:0 16px;border-radius:999px;background:var(--brand);color:var(--onBrand);font-weight:700;text-decoration:none}.tl__jump a:hover{filter:brightness(1.08)}
+.tl__group{margin-bottom:32px;scroll-margin-top:16px}.tl__group h3{font-size:1.35rem;margin-bottom:12px}
+.tl__grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}.tl__grid--svc{grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.tl__tile{min-width:0;background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--brand);border-radius:var(--r);padding:16px 18px;display:flex;flex-direction:column;gap:6px}.sec:nth-of-type(even) .tl__tile{background:var(--bg)}
+.tl__img{position:relative;margin:-16px -18px 8px;overflow:hidden}.tl__img img{width:100%;aspect-ratio:3/2;object-fit:cover}
+.tl__top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}.tl__name{font-weight:700;min-width:0}.tl__tile p{margin:0;color:var(--muted);font-size:.95rem}.tl__tile h3{font-size:1.15rem}
+@media (max-width:760px){.tl__grid{grid-template-columns:1fr 1fr}.tl__grid--svc{grid-template-columns:1fr}.tl__top{flex-direction:column;gap:2px}}`,
+  'contact:timetable': `.tt__grid{display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(28px,5vw,64px);align-items:start}
+.tt__week{background:var(--deep);color:var(--onDeep);border-radius:var(--r);padding:clamp(22px,3vw,36px)}.tt__h{font:700 .8rem/1.3 var(--bf);letter-spacing:.14em;text-transform:uppercase;margin:0 0 10px}
+.tt__week dl>div{display:flex;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid color-mix(in srgb,var(--onDeep) 25%,transparent);font-size:clamp(1rem,1.4vw,1.15rem)}.tt__week dl>div:last-child{border-bottom:0}.tt__week dt{font-weight:700}.tt__week dd{text-align:right}
+.tt__dl{display:grid;gap:16px}.tt__dl div{padding-bottom:16px;border-bottom:1px solid var(--line)}.tt__dl dt{font-weight:700;margin-bottom:4px}.hours li{padding:2px 0}
+.tt .loc__grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:20px}.tt .loc__grid li{border:1px solid var(--line);border-radius:var(--r);padding:16px}.tt .loc__grid p{margin:0 0 4px}
+@media (max-width:860px){.tt__grid{grid-template-columns:1fr}}`,
 };
+
+/** The site shell's own styles: a direction's header and footer, on the homepage and every inner page. */
+export const SHELL_CSS: Record<string, string> = {
+  'head:masthead': `.site-head--masthead{background:var(--bg);color:var(--ink);border-bottom:4px double var(--ink)}
+.site-head--masthead .site-head__in{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;min-height:72px;gap:16px}
+.mh__line{margin:0;font:600 .76rem/1.3 var(--bf);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.site-head--masthead .brand{margin:0;justify-self:center}.site-head--masthead .brand__word{font-size:1.5rem}.site-head--masthead .site-head__in>.btn{justify-self:end}
+.site-head--masthead nav{border-top:1px solid var(--ink)}.site-head--masthead nav ul{justify-content:center;flex-wrap:wrap}.site-head--masthead nav a{text-transform:uppercase;letter-spacing:.12em;font-size:.8rem}
+@media (max-width:760px){.site-head--masthead .site-head__in{grid-template-columns:minmax(0,1fr) auto auto}.mh__line{display:none}.site-head--masthead .brand{justify-self:start}.site-head--masthead nav{border-top:0}.site-head--masthead .menu-btn{margin-left:0}}`,
+  'head:utility': `.site-head--utility{background:var(--surface);color:var(--ink);border-bottom:1px solid var(--line)}
+.u__strip{background:var(--deep);color:var(--onDeep);font-size:.9rem}.u__strip ul{display:flex;flex-wrap:wrap;align-items:center;gap:0 28px;min-height:44px}
+.u__strip li{display:flex;align-items:center}.u__strip a{color:inherit;font-weight:700;display:inline-flex;align-items:center;min-height:44px;min-width:44px}.u__k{font-weight:700;margin-right:6px}
+.site-head--utility nav{margin-left:auto}.site-head--utility .brand{margin-right:0}
+@media (max-width:760px){.u__strip li:nth-child(n+3){display:none}.u__strip ul{gap:0 16px}}`,
+  'foot:colophon': `.site-foot--colophon{background:var(--bg);color:var(--ink);border-top:4px double var(--ink);padding:48px 0 32px}
+.cf__name{font:var(--hw) clamp(2.2rem,7vw,6rem)/.95 var(--hf);text-transform:var(--case);letter-spacing:-.02em;margin:0 0 26px;overflow-wrap:break-word}
+.cf__cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:24px;border-top:1px solid var(--ink);padding-top:18px}
+.cf__h{font:700 .76rem/1.3 var(--bf);letter-spacing:.14em;text-transform:uppercase;margin:0 0 8px}
+.site-foot--colophon a{color:inherit}.site-foot--colophon li a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
+.site-foot--colophon .site-foot__note{border-top:1px solid var(--line);color:var(--muted);padding-top:18px;margin-top:24px}`,
+  'foot:utility': `.site-foot--utility .uf__acts{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px 32px;padding-bottom:30px;margin-bottom:26px;border-bottom:1px solid color-mix(in srgb,var(--onDeep) 30%,transparent)}
+.uf__ask{font:var(--hw) clamp(1.6rem,3.4vw,2.6rem)/1.1 var(--hf);text-transform:var(--case);margin:0}.uf__acts .actions{margin-top:0}.site-foot--utility .btn--invert{color:#111316}
+.uf__cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px}.site-foot--utility .cf__h{font:700 .76rem/1.3 var(--bf);letter-spacing:.14em;text-transform:uppercase;margin:0 0 8px}
+.site-foot--utility .site-foot__note{border-top:1px solid color-mix(in srgb,var(--onDeep) 30%,transparent);padding-top:18px;margin-top:24px}`,
+};
+/** the CSS for a shell's header and footer (the bar, overlay and centred headers and the standard footer are in baseCss) */
+export const shellCss = (s: { header: string; footer: string }) => `${SHELL_CSS[`head:${s.header}`] ?? ''}\n${SHELL_CSS[`foot:${s.footer}`] ?? ''}`;
 
 /** The header's phone menu: the button opens and closes it, a chosen link or Escape closes it (aria-expanded kept in step). */
 export const MENU_JS = "document.querySelectorAll('.site-head').forEach(function(h){var b=h.querySelector('.menu-btn'),n=h.querySelector('nav');if(!b||!n)return;function set(o){h.setAttribute('data-menu',o?'open':'closed');b.setAttribute('aria-expanded',String(o))}b.addEventListener('click',function(){set(b.getAttribute('aria-expanded')!=='true')});n.addEventListener('click',function(e){if(e.target.closest('a'))set(false)});document.addEventListener('keydown',function(e){if(e.key==='Escape'&&b.getAttribute('aria-expanded')==='true'){set(false);b.focus()}})});";
