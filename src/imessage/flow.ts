@@ -15,6 +15,7 @@ import { applyConcept, nextConcept } from '../studio/concepts/site.js';
 import { addComparisonToReport, canScoreNewSite, scoreMessage, scoreNewSite } from '../audit/compare.js';
 import { saveBuild } from '../store.js';
 import type { Job } from '../jobs.js';
+import { advanceIntake, conceptIntakeEnabled, newIntake, type IntakeRun } from './intake.js';
 
 /**
  * Reference conversation for the Roger iMessage flow. Your iMessage gateway posts each
@@ -46,6 +47,10 @@ interface Session {
   audit?: BuildResult['audit'];
   /** personalising the preview: which question is next and the answers so far (saved, so a restart resumes here) */
   personalise?: { step: Step; buildId: string; prefs: DesignPreferences; suggestions: string[]; phoneOk: boolean; emergencyVerified: boolean; category?: Category };
+  /** this conversation's preview comes from the design engine (brief → ranked concepts → chosen site), behind a flag */
+  intakeMode?: 'concepts';
+  /** the running (or finished) concept intake: which stage, which job holds it, and each stage's timing */
+  intake?: IntakeRun;
 }
 const fresh = (): Session => ({ state: 'start', candidates: [], idx: 0 });
 
@@ -104,8 +109,10 @@ interface Ctx { async: boolean; s: Session; pending?: InboundResult['pending'] }
  * async: reply "On it" right away and send the preview when the build finishes
  * (saved to the conversation and POSTed to IMESSAGE_OUTBOUND_URL). Otherwise everything comes back in one go.
  */
-export async function handleInbound(from: string, text: string, opts: { async?: boolean } = {}): Promise<InboundResult> {
+export async function handleInbound(from: string, text: string, opts: { async?: boolean; intake?: string } = {}): Promise<InboundResult> {
   const ctx: Ctx = { async: !!opts.async, s: await loadSession(from) };
+  // the concept intake: on for everyone only with ROGER_INTAKE_CONCEPTS=1; otherwise per conversation, by an authenticated test intake
+  if (conceptIntakeEnabled(opts.intake)) ctx.s.intakeMode = 'concepts';
   await record(from, [{ dir: 'in', at: new Date().toISOString(), text }], ctx.s);
   const replies = await respond(from, text, ctx);
   const c = await record(from, outgoing(replies), ctx.s);
@@ -123,6 +130,7 @@ const buildLimitMs = () => Number(process.env.BUILD_LIMIT_SECONDS || 900) * 1000
  * instance may be running it: a finished build has a saved record; until then it counts as running.
  */
 async function pending(s: Session): Promise<boolean> {
+  if (s.state === 'building' && s.intake) return s.intake.stage !== 'done' && s.intake.stage !== 'failed';
   if (s.state !== 'building' || !s.lastBuildId) return false;
   if (getJob(s.lastBuildId)) return true;
   if (!process.env.VERCEL) return false; // single server: no job here means it restarted mid-build
@@ -132,6 +140,40 @@ async function pending(s: Session): Promise<boolean> {
 }
 export async function isPending(from: string): Promise<boolean> {
   return pending(await loadSession(from));
+}
+
+/**
+ * Move a concept intake forward (each poll of the conversation calls this): resume the stage that stopped, start the
+ * next one, and send the top-ranked preview once the site is built. Safe to call often: it starts nothing twice.
+ */
+export async function pollIntake(from: string): Promise<IntakeRun | undefined> {
+  const s = await loadSession(from);
+  if (s.state !== 'building' || !s.intake || s.intake.stage === 'done' || s.intake.stage === 'failed') return s.intake;
+  const run = await advanceIntake(s.intake);
+  // another poll may have delivered meanwhile: only the one that sees it still building delivers
+  const latest = await loadSession(from);
+  if (latest.state !== 'building' || latest.intake?.id !== run.id) return latest.intake;
+  latest.intake = run;
+  const replies = intakeReplies(latest);
+  await record(from, outgoing(replies), latest);
+  if (replies.length) await channelFor(from).deliver(from, replies);
+  return run;
+}
+/** what the client gets when the intake ends: the top-ranked preview with its two choices, or an apology */
+function intakeReplies(s: Session): Reply[] {
+  const run = s.intake!;
+  if (run.stage === 'done' && run.siteUrl) {
+    s.state = 'done';
+    s.lastSiteUrl = run.siteUrl;
+    const checks = run.checks ?? [];
+    return [{ text: `Here's a preview of a new site for ${s.chosen?.name ?? 'your business'}.${checks.length ? ` A few things need your check before it goes live: ${checks.slice(0, 2).join('; ')}.` : ''}`, url: run.siteUrl, quickReplies: DONE_CHOICES }];
+  }
+  if (run.stage === 'failed') {
+    console.error(`[imessage] concept intake ${run.id} failed at ${run.failedStage}: ${run.error}`);
+    s.state = 'offer';
+    return [{ text: 'Sorry, something went wrong while building your preview. I\'ve flagged it for the team. Reply "try again" and I\'ll give it another go.', quickReplies: ['Try again'] }];
+  }
+  return [];
 }
 
 interface Finished { siteUrl?: string; ownerUrl?: string; replies: Reply[] }
@@ -230,6 +272,11 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
   if (/^(restart|reset|start over)$/i.test(msg)) { ctx.s = fresh(); return respond(from, 'hi', ctx); }
   const s = ctx.s;
 
+  if (s.state === 'building' && s.intake) {
+    s.intake = await advanceIntake(s.intake);
+    const done = intakeReplies(s);
+    return done.length ? done : [{ text: 'Still building your preview. I\'ll text you the link as soon as it\'s ready.' }];
+  }
   if (s.state === 'building') {
     if (await pending(s)) return [{ text: 'Still building your preview. I\'ll text you the link as soon as it\'s ready.' }];
     // the build finished but its delivery didn't reach this conversation: send it now
@@ -306,16 +353,18 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
     return build(from, ctx);
   }
 
-  if (s.state === 'done' && s.lastBuildId && s.lastSiteUrl) {
+  if (s.state === 'done' && (s.lastBuildId || s.intake?.draftId) && s.lastSiteUrl) {
     if (ALTERNATIVE.test(msg) || RETRY.test(msg)) {
-      // a site made from a concept set: the next of its three concepts, never a random fourth
-      const rec = await getBuild(s.lastBuildId);
-      const d = rec?.result?.draftId ? await getDraft(rec.result.draftId) : undefined;
+      // a site made from a concept set: the next of its saved concepts in rank order, never a new one
+      const rec = s.intake?.draftId ? undefined : await getBuild(s.lastBuildId!);
+      const draftId = s.intake?.draftId ?? rec?.result?.draftId;
+      const d = draftId ? await getDraft(draftId) : undefined;
       const next = d?.concept ? await nextConcept(d.concept) : undefined;
       if (d?.concept && next) {
         await applyConcept(d.id, d.concept.setId, next);
         return [{ text: `Here's design ${next.id.toUpperCase()}, "${next.name}": ${s.lastSiteUrl}`, url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
       }
+      if (!s.lastBuildId) return [{ text: `Your preview is here: ${s.lastSiteUrl}`, url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
       return refine(from, ctx, s.lastBuildId, {}, true);
     }
     // no design controls for the client: a change request is a request for another version
@@ -369,6 +418,7 @@ async function findBusiness(msg: string, s: Session): Promise<Reply[]> {
 /** "Yes, build it": start the build and send the preview when it is ready. */
 async function build(from: string, ctx: Ctx): Promise<Reply[]> {
   const s = ctx.s;
+  if (s.intakeMode === 'concepts') return buildConcepts(from, ctx);
   const job = startBuild({ placeId: s.chosen!.placeId, website: s.website, audit: false }, { source: 'imessage', from, audit: s.audit }); // the audit already ran
   s.lastBuildId = job.id;
   s.state = 'building';
@@ -376,6 +426,22 @@ async function build(from: string, ctx: Ctx): Promise<Reply[]> {
   s.buildEta = undefined;
   const ack: Reply = { text: 'On it! I\'m building your preview now. I\'ll text you the link as soon as it\'s ready.' };
   return deliver(from, ctx, job, 'build', ack);
+}
+
+/**
+ * The concept intake's first step: research (or the saved brief) → ranked concepts → the top-ranked site. "On it" now;
+ * the preview follows when the poll that finds the site built delivers it (pollIntake).
+ */
+async function buildConcepts(from: string, ctx: Ctx): Promise<Reply[]> {
+  const s = ctx.s;
+  s.intake = await advanceIntake(newIntake({ placeId: s.chosen!.placeId, website: s.website }));
+  s.state = 'building';
+  s.buildStartedAt = Date.now();
+  s.lastBuildId = undefined;
+  ctx.pending = { jobId: s.intake.id };
+  const ack: Reply = { text: 'On it! I\'m building your preview now. I\'ll text you the link as soon as it\'s ready.' };
+  const done = intakeReplies(s);
+  return done.length ? [ack, ...done] : [ack];
 }
 
 /** Wait for a build (or send "On it" now and the result later) and hand over what it produced. */
@@ -409,8 +475,7 @@ async function editorLink(s: Session, rec: BuildRecord | undefined): Promise<str
  * photo rights, lead delivery). The client gets no editor and no layout controls: one preview, approve or ask again.
  */
 async function goLive(s: Session): Promise<Reply[]> {
-  const rec = await getBuild(s.lastBuildId!);
-  const checks = openChecks(rec);
+  const checks = s.intake?.checks ?? openChecks(s.lastBuildId ? await getBuild(s.lastBuildId) : undefined);
   s.followUp = { at: new Date().toISOString(), reason: 'publish' };
   if (checks.length) {
     return [{ text: `Thanks, approved! Before it can go live, ${checks.length === 1 ? 'one thing needs' : 'a few things need'} confirming:\n${checks.slice(0, 4).map((c) => `• ${c}`).join('\n')}\n\nSomeone from the team will be in touch to sort ${checks.length === 1 ? 'it' : 'them'} out and publish it.` }];
@@ -419,8 +484,7 @@ async function goLive(s: Session): Promise<Reply[]> {
 }
 
 async function checkDetails(s: Session): Promise<Reply[]> {
-  const rec = await getBuild(s.lastBuildId!);
-  const checks = openChecks(rec);
+  const checks = s.intake?.checks ?? openChecks(s.lastBuildId ? await getBuild(s.lastBuildId) : undefined);
   const where = '';
   if (!checks.length) return [{ text: `Everything on your preview checked out, so there's nothing waiting on you.${where}`, quickReplies: DONE_CHOICES }];
   return [{ text: `Here's what I'd like you to check before it goes live:\n${checks.slice(0, 6).map((c) => `• ${c}`).join('\n')}\n${where}`.trim(), quickReplies: DONE_CHOICES }];

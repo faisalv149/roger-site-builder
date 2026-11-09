@@ -14,7 +14,7 @@ import { runAudit, type BuildInput } from './pipeline.js';
 import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
 import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead, recordLeadDelivery } from './store.js';
 import { deliverLead, ownerEmailOf, configuredChannels } from './lead-delivery.js';
-import { handleInbound, isPending, resetSession } from './imessage/flow.js';
+import { handleInbound, isPending, pollIntake, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { normalizeLead } from './leads.js';
 import { personaliseState, startRefinement } from './design/refine.js';
@@ -240,7 +240,8 @@ app.post('/api/imessage/inbound', wrap(async (req, res) => {
   const from = String(req.body.from || 'demo');
   const text = String(req.body.text || '');
   // async: true → "On it, about 20 seconds" now, the preview later (see handleInbound)
-  res.json(await handleInbound(from, text, { async: req.body.async === true || req.body.async === 'true' }));
+  // intake: "concepts" turns on the design-engine intake for this conversation (a test intake: the route needs the Studio login)
+  res.json(await handleInbound(from, text, { async: req.body.async === true || req.body.async === 'true', intake: typeof req.body.intake === 'string' ? req.body.intake : undefined }));
 }));
 app.post('/api/imessage/reset', wrap(async (req, res) => { await resetSession(String(req.body.from || 'demo')); res.json({ ok: true }); }));
 
@@ -362,10 +363,12 @@ app.get('/api/builds/:id', wrap(async (req, res) => {
 }));
 app.get('/api/conversations', wrap(async (_req, res) => res.json({ conversations: await listConversations() })));
 app.get('/api/conversations/:from', wrap(async (req, res) => {
+  // a concept intake moves forward on each poll (a stopped stage resumes; a finished one starts the next)
+  const intake = await pollIntake(String(req.params.from)).catch((e) => { console.warn(`[imessage] intake poll failed: ${(e as Error).message}`); return undefined; });
   const c = await getConversation(String(req.params.from));
   if (!c) return res.status(404).json({ error: 'not found' });
   const { session: _s, ...rest } = c; // flow internals stay server-side
-  res.json({ ...rest, pending: await isPending(c.from) });
+  res.json({ ...rest, pending: await isPending(c.from), ...(intake ? { intake } : {}) });
 }));
 
 app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
