@@ -116,3 +116,13 @@ test('the client is told plainly when no different-enough version could be made,
   assert.match(s.intake.next!.failedStage!, /^concepts: directions/);
   assert.equal(s.intake.shownVersion, 'in_x-v1', 'approval would still name the version they saw');
 });
+
+test('the owner preview address is open like /sites (owners use their own key, not the Studio password)', () => {
+  const src = fs.readFileSync(path.resolve('src/server.ts'), 'utf8');
+  const open = new RegExp(src.match(/const OPEN = \/(.*)\/;/)![1]);
+  assert.ok(open.test('/drafts/sugar-loaf/'), '/drafts is not behind the Studio password');
+  assert.ok(open.test('/drafts/sugar-loaf/assets/concept/a.jpg'));
+  assert.ok(open.test('/sites/sugar-loaf/'));
+  assert.ok(!open.test('/api/studio/jobs'), 'the Studio API stays protected');
+  assert.ok(!open.test('/api/imessage/inbound'), 'the test intake stays protected');
+});

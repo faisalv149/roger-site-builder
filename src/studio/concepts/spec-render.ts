@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
-import { launchBrowser } from '../../render/og.js';
+import { browserGone, launchBrowser } from '../../render/og.js';
 import type { Concept, ComposedSection, SectionKind } from './types.js';
 import { MEASURE_SCRIPT, setDir, singleProcessChrome, type PageMetrics, type Rendered } from './render.js';
 import type { Catalog } from './review.js';
@@ -317,7 +317,9 @@ export async function renderSpecSet(items: { concept: Concept; spec: DesignSpec 
           return { full, hero, metrics };
         } finally { await ctx.close().catch(() => undefined); if (!shared) await browser.close().catch(() => undefined); }
       };
-      out.push({ conceptId: concept.id, html, desktop: await shoot('desktop'), mobile: await shoot('mobile') });
+      // a browser that crashed under the page (serverless Chromium) gets one retry with a fresh browser
+      const again = async (kind: 'desktop' | 'mobile') => { try { return await shoot(kind); } catch (e) { if (!perPage || !browserGone(e)) throw e; step(`${concept.id} ${kind}: browser closed, one retry`); return shoot(kind); } };
+      out.push({ conceptId: concept.id, html, desktop: await again('desktop'), mobile: await again('mobile') });
     }
   } finally { await shared?.close().catch(() => undefined); }
   return out;

@@ -70,17 +70,32 @@ export function worstCase(t: AiTransport, req: AiRequest, maxOutputTokens: numbe
 }
 
 // ───────────────────────── transports ─────────────────────────
+/** a temporary service error worth waiting out: rate limited, a 5xx (overloaded, a moment's credential validation failure), a dropped connection */
+export function transientError(e: unknown): boolean {
+  const status = (e as { status?: number })?.status;
+  return status === 429 || (status !== undefined && status >= 500) || /overloaded|credential validation failed|ECONNRESET|socket hang up/i.test(String((e as Error)?.message ?? e));
+}
+
 export function apiTransport(model = conceptModel()): AiTransport {
   const client = new Anthropic({ apiKey: config.anthropicKey, timeout: 300_000, maxRetries: 0 });
   return {
     via: 'api', model,
     async call(req, limits) {
-      const msg = await client.messages.stream({
+      // a temporary service error (429, 5xx, "overloaded", a moment's credential validation failure) is waited out
+      // twice (2 s, then 6 s) before it counts as a failed attempt: nothing was generated, so nothing is spent
+      const ask = () => client.messages.stream({
         model, max_tokens: limits.maxOutputTokens,
         system: req.system,
         messages: [{ role: 'user', content: req.prompt }],
         output_config: { effort: effort(), format: { type: 'json_schema', schema: req.schema } },
       }).finalMessage();
+      let msg: Awaited<ReturnType<typeof ask>> | undefined;
+      for (let i = 0; ; i++) {
+        try { msg = await ask(); break; } catch (e) {
+          if (!transientError(e) || i >= 2) throw e;
+          await new Promise((r) => setTimeout(r, i === 0 ? 2000 : 6000));
+        }
+      }
       const u = msg.usage;
       const usage = { inputTokens: u.input_tokens, outputTokens: u.output_tokens, cacheReadTokens: u.cache_read_input_tokens ?? 0, cacheWriteTokens: u.cache_creation_input_tokens ?? 0 };
       if (msg.stop_reason === 'refusal') throw new Error('Claude declined the request (refusal)');

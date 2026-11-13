@@ -52,7 +52,34 @@ export const screenshotsAvailable = () => !!config.chromiumPath || !!process.env
 // written (ETXTBSY). Share the extraction promise across all launches in this process.
 let serverlessExecutable: Promise<string> | undefined;
 
+/**
+ * One browser at a time in this process where Chromium runs single-process (Vercel's serverless build): several jobs
+ * can share one Vercel instance (a research crawl, a reference inspection, a concept render), and two of these
+ * browsers side by side crash each other ("Target page, context or browser has been closed"). Each launch waits for
+ * the previous browser to close (at most 120 s, so a caller that forgets to close can never block the rest for good).
+ */
+let browserTurn: Promise<void> = Promise.resolve();
+const oneAtATime = () => process.env.STUDIO_SINGLE_PROCESS === '1' || (!config.chromiumPath && !!process.env.VERCEL);
 export async function launchBrowser() {
+  if (!oneAtATime()) return startBrowser();
+  let release!: () => void;
+  const previous = browserTurn;
+  browserTurn = new Promise<void>((r) => { release = r; });
+  await Promise.race([previous, new Promise((r) => setTimeout(r, 120_000))]);
+  try {
+    const browser = await startBrowser();
+    let done = false;
+    const free = () => { if (!done) { done = true; release(); } };
+    const close = browser.close.bind(browser);
+    browser.close = async (...a: Parameters<typeof close>) => { try { return await close(...a); } finally { free(); } };
+    browser.on('disconnected', free);
+    return browser;
+  } catch (e) { release(); throw e; }
+}
+/** a browser crashed or was closed under the page: worth one retry with a fresh browser */
+export const browserGone = (e: unknown) => /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/i.test(String((e as Error)?.message ?? e));
+
+async function startBrowser() {
   const { chromium } = await import('playwright-core');
   if (!config.chromiumPath && process.env.VERCEL) {
     const { default: serverless } = await import('@sparticuz/chromium'); // a Chromium build for serverless Linux

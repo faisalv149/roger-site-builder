@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import { config } from '../../config.js';
 import { fetchWithRetry } from '../discover.js';
 import { sha256 } from '../snapshot.js';
-import { launchBrowser } from '../../render/og.js';
+import { browserGone, launchBrowser } from '../../render/og.js';
 import type { Catalog } from './review.js';
 import { MENU_JS, RENDERERS, VARIANT_CSS, baseCss, esc, shellCss, siteFooter, siteHeader, type RenderCtx } from './library.js';
 import { shellOf } from './directions.js';
@@ -271,8 +271,10 @@ export async function renderSet(concepts: Concept[], cat: Catalog, setId: string
           if (!shared) { open.delete(browser); await browser.close().catch(() => undefined); }
         }
       };
-      const desktop = await shoot('desktop');
-      const mobile = await shoot('mobile');
+      // a browser that crashed under the page (serverless Chromium) gets one retry with a fresh browser
+      const again = async (kind: 'desktop' | 'mobile') => { try { return await shoot(kind); } catch (e) { if (!perPage || !browserGone(e)) throw e; step(`${name} ${kind}: browser closed, one retry`); return shoot(kind); } };
+      const desktop = await again('desktop');
+      const mobile = await again('mobile');
       out.push({ conceptId: concept.id, html, desktop, mobile });
     }
   } finally { if (watchdog) clearTimeout(watchdog); for (const b of open) await b.close().catch(() => undefined); }

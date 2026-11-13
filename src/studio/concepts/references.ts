@@ -6,7 +6,8 @@ import { config } from '../../config.js';
 import { getBrief } from '../jobs.js';
 import { HEARTBEAT_MS, keepAlive, STALE_MS } from '../keepalive.js';
 import { persistDir } from '../../files.js';
-import { launchBrowser } from '../../render/og.js';
+import { browserGone, launchBrowser } from '../../render/og.js';
+import { singleProcessChrome } from './render.js';
 import { aiJson, CostLedger, defaultTransport, type AiTransport } from './ai.js';
 import type { BusinessBrief } from '../schema.js';
 import type { UsageRecord } from './types.js';
@@ -512,10 +513,14 @@ const MEASURE = `(() => {
 
 /** Open a page at desktop and phone sizes, measure its design and take screenshots for staff. Keeps no text or images. */
 export async function inspectPage(url: string, dir: string, allow: (u: string) => boolean): Promise<{ desktop: ViewMetrics; mobile: ViewMetrics; screenshots: { desktop: string; mobile: string } }> {
-  const browser = await launchBrowser();
+  // serverless Chromium runs single-process: one context per browser, so each view gets its own browser there
+  const perView = singleProcessChrome();
+  const shared = perView ? undefined : await launchBrowser();
   try {
     const host = hostOf(url).replace(/[^a-z0-9.-]/gi, '_');
-    const view = async (mobile: boolean) => {
+    const once = async (mobile: boolean) => {
+      const browser = shared ?? await launchBrowser();
+      try {
       const ctx = await browser.newContext(mobile ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true } : { viewport: { width: 1440, height: 900 } });
       try {
         // every request the page makes is checked too: a public page cannot make the server fetch a private address
@@ -530,9 +535,12 @@ export async function inspectPage(url: string, dir: string, allow: (u: string) =
         await page.screenshot({ path: shot, timeout: 15_000 });
         return { metrics, shot: path.relative(config.dirs.out, shot).replace(/\\/g, '/') };
       } finally { await ctx.close().catch(() => undefined); }
+      } finally { if (!shared) await browser.close().catch(() => undefined); }
     };
+    // a browser that crashed under the page gets one retry with a fresh one
+    const view = async (mobile: boolean) => { try { return await once(mobile); } catch (e) { if (!browserGone(e) || shared) throw e; return once(mobile); } };
     const d = await view(false);
     const m = await view(true);
     return { desktop: d.metrics, mobile: m.metrics, screenshots: { desktop: d.shot, mobile: m.shot } };
-  } finally { await browser.close().catch(() => undefined); }
+  } finally { await shared?.close().catch(() => undefined); }
 }

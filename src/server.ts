@@ -51,7 +51,8 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 // endpoint the sites post to and the health check the host pings.
 // the owner editor (/owner) and its API (/api/owner) use the owner's own key per draft, not the Studio password
 // /p/<token>/: a client's preview link for one chosen concept (src/studio/concepts/share.ts)
-const OPEN = /^\/(sites|cards|reports|stock|demo-sites|owner|p|gphoto)\/|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
+// /drafts/<slug>/: the owner editor's own preview of its draft (the same build as /sites, never a pinned version)
+const OPEN = /^\/(sites|drafts|cards|reports|stock|demo-sites|owner|p|gphoto)\/|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
 // sites post their quote form here from any origin; reading leads (GET) still needs the password
 const isLeadPost = (req: Request) => /^\/api\/leads\/[^/]+$/.test(req.path) && (req.method === 'POST' || req.method === 'OPTIONS');
 const sha = (s: string) => createHash('sha256').update(s).digest();
