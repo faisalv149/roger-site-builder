@@ -166,10 +166,11 @@
         ev.preventDefault();
         // the page has a <base> at the site's address: anchors scroll here, the site's other pages open in place
         if (href.charAt(0) === '#') { var target = doc.getElementById(href.slice(1)); if (target) target.scrollIntoView({ block: 'start' }); return; }
-        var root = location.origin + '/sites/' + S.info.draft.slug + '/';
+        // the owner's own preview address: the draft as edited, never a public link pinned to a saved version
+        var root = location.origin + '/drafts/' + S.info.draft.slug + '/';
         if (a.href.indexOf(root) === 0) {
           var u = new URL(a.href);
-          S.page = u.pathname.slice(('/sites/' + S.info.draft.slug + '/').length);
+          S.page = u.pathname.slice(('/drafts/' + S.info.draft.slug + '/').length);
           S.rendered = null; y = 0;
           renderNow();
           return;

@@ -15,7 +15,7 @@ import { pageSeo, robotsTxt, sitemapXml, type SeoContext } from './seo.js';
 export interface SiteFile { file: string; content: string }
 
 /** The SitePlan for a composed model: deterministic from what the business actually has. */
-export function sitePlanFor(m: SiteModel, opts: { previous?: unknown; mode?: 'single' | 'multi' } = {}): SitePlan {
+export function sitePlanFor(m: SiteModel, opts: { previous?: unknown; mode?: 'single' | 'multi'; aboutWanted?: boolean } = {}): SitePlan {
   const prev = opts.previous ? validateSitePlan(opts.previous) : undefined;
   const d = m.design!;
   return buildSitePlan({
@@ -24,6 +24,7 @@ export function sitePlanFor(m: SiteModel, opts: { previous?: unknown; mode?: 'si
     about: { intro: d.intro, team: !!d.team, years: m.facts.years, trust: m.trust.length, reviews: m.proof.quotes.length },
     contact: { address: !!m.contact.address, hours: m.hours.rows.length > 0, phone: !!m.contact.phone },
     mode: opts.mode,
+    aboutWanted: opts.aboutWanted,
     previous: prev?.ok ? prev.plan : undefined,
   });
 }

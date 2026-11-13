@@ -5,6 +5,7 @@ import type { BusinessBrief, SiteInventory, SourceRef } from '../schema.js';
 import { seasonOf } from './seasonal.js';
 import { ownerReview, type BriefRef, type Concept, type OwnerReview, type PublicationGate } from './types.js';
 import { stateName } from '../address.js';
+import { completeExcerpt, stripUiDebris } from '../../util/text.js';
 
 /**
  * The owner review and the fact catalog. The catalog is what a preview may show: the brief's facts with the review
@@ -184,7 +185,7 @@ export function resolveCatalog(brief: BusinessBrief, inventory: SiteInventory, r
   // what the business sells: its services, or its menu (services get their pictures below, once the photos are known)
   const services: Catalog['services'] = brief.services.items.map((s) => {
     add({ id: s.id, kind: 'service', label: 'service', text: `${s.name}${s.description?.value ? ` ${s.description.value}` : ''}`, sources: s.evidence.map((e) => web(e.url, e.locator ?? e.kind)) });
-    const description = s.description?.value?.replace(/^\s*0?\d{1,2}[.)]?\s*(?=[A-Z])/, '');
+    const description = completeExcerpt(s.description?.value?.replace(/^\s*0?\d{1,2}[.)]?\s*(?=[A-Z])/, ''));
     return { id: s.id, name: s.name, ...(description ? { description } : {}) };
   });
   const pricesApproved = !!review.offerings?.pricesApproved;
@@ -193,12 +194,12 @@ export function resolveCatalog(brief: BusinessBrief, inventory: SiteInventory, r
     const priceOk = it.price && (it.price.status === 'verified' || pricesApproved);
     if (it.price && !priceOk) { heldPrices++; forbidden.prices.push({ itemId: it.id, text: it.price.text }); }
     add({ id: it.id, kind: 'item', label: 'menu item', text: [it.name, it.section, it.description, priceOk ? it.price!.text : '', ...it.tags].filter(Boolean).join(' '), sources: it.sources });
-    return { id: it.id, name: it.name, ...(it.section ? { section: it.section } : {}), ...(it.description ? { description: it.description } : {}), tags: it.tags.filter((t) => !/^\d+\s?oz$|sold separately/i.test(t)), ...(priceOk ? { price: it.price!.text } : {}) };
+    return { id: it.id, name: it.name, ...(it.section ? { section: it.section } : {}), ...(completeExcerpt(it.description) ? { description: completeExcerpt(it.description) } : {}), tags: it.tags.filter((t) => !/^\d+\s?oz$|sold separately/i.test(t)), ...(priceOk ? { price: it.price!.text } : {}) };
   });
   if (heldPrices) omitted.push({ what: `${heldPrices} menu price(s) tied to their item only by the poster's layout`, reason: 'a price matched by layout needs the owner to confirm it', questionId: brief.ownerQuestions.find((q) => q.id === 'q-offerings')?.id });
 
   const storyAnswer = A['q-story']?.text;
-  const story = storyAnswer ? { heading: 'Our story', text: storyAnswer } : brief.story.value ? { heading: brief.story.value.heading, text: brief.story.value.text } : null;
+  const story = storyAnswer ? { heading: 'Our story', text: storyAnswer } : brief.story.value ? { heading: stripUiDebris(brief.story.value.heading), text: stripUiDebris(brief.story.value.text) } : null;
   if (story) add({ id: 'story', kind: 'story', label: 'story', text: story.text, sources: storyAnswer ? [owner('q-story')] : brief.story.sources });
 
   // pictures: the website's own photographs (their use is confirmed at publishing); Google's photos are not used
@@ -306,7 +307,7 @@ export function publicationGate(brief: BusinessBrief, catalog: Catalog, review: 
  */
 function ownLinesOf(inventory: SiteInventory): string[] {
   const order = (u: string) => { try { const p = new URL(u).pathname; return p === '/' || /home/i.test(p) ? 0 : /about|story/i.test(p) ? 1 : 2; } catch { return 3; } };
-  const clean = (t: string) => t.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([a-z])&/g, '$1 &').replace(/\s+/g, ' ').trim();
+  const clean = (t: string) => stripUiDebris(t.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([a-z])&/g, '$1 &').replace(/\s+/g, ' ').trim());
   const out: string[] = [];
   for (const p of [...inventory.pages].filter((x) => x.headings?.length).sort((a, b) => order(a.url) - order(b.url))) {
     const hs = p.headings.filter((h) => h.level <= 3).map((h) => ({ level: h.level, text: clean(h.text) }));

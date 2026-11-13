@@ -13,6 +13,7 @@ import { getConceptJob, getConceptSet, resumeConceptIfStale, resumeConceptJob, s
 import { createShare, shareUrl } from './concepts/share.js';
 import { getSiteJob, resumeSiteIfStale, startSiteJob } from './concepts/site.js';
 import { IdentityError } from '../sources/website-business.js';
+import { getReferenceJob, ReferenceInputError, resumeReferenceIfStale, startReferenceJob } from './concepts/references.js';
 
 /**
  * The design studio's API (Phase 1: business brief).
@@ -99,10 +100,10 @@ studioRoutes.get('/reviews/:id', wrap(async (req, res) => {
   res.json(r);
 }));
 studioRoutes.post('/concepts', wrap(async (req, res) => {
-  const b = (req.body || {}) as { businessKey?: string; revision?: number; briefHash?: string; reviewId?: string };
+  const b = (req.body || {}) as { businessKey?: string; revision?: number; briefHash?: string; reviewId?: string; planner?: string };
   if (!b.businessKey) return res.status(400).json({ error: 'businessKey is required' });
   try {
-    const job = await startConceptJob({ businessKey: b.businessKey, revision: b.revision, briefHash: b.briefHash, reviewId: b.reviewId });
+    const job = await startConceptJob({ businessKey: b.businessKey, revision: b.revision, briefHash: b.briefHash, reviewId: b.reviewId, ...(b.planner === 'open' ? { planner: 'open' as const } : {}) });
     res.status(202).json({ id: job.id, setId: job.setId, url: `/api/studio/concept-jobs/${job.id}` });
   } catch (e) {
     if (e instanceof StaleBrief) return res.status(409).json({ error: e.message });
@@ -214,9 +215,32 @@ studioRoutes.post('/concept-sets/:id/share', wrap(async (req, res) => {
  */
 studioRoutes.post('/concept-sets/:id/site', wrap(async (req, res) => {
   try {
-    const job = await startSiteJob(String(req.params.id), String((req.body || {}).conceptId || ''));
+    // reuse: { businessKey, revision } names the business record whose built draft may be re-rendered (explicit, never guessed)
+    const reuse = (req.body || {}).reuse as { businessKey?: unknown; revision?: unknown } | undefined;
+    const job = await startSiteJob(String(req.params.id), String((req.body || {}).conceptId || ''), reuse ? { reuse: { businessKey: String(reuse.businessKey ?? ''), revision: Number(reuse.revision) } } : {});
     res.status(202).json({ id: job.id, url: `/api/studio/site-jobs/${job.id}` });
   } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+}));
+/**
+ *   POST /api/studio/references        { businessKey, revision?, referenceUrl?, keepBrand? } → 202 { id }: reference
+ *        research for a verified brief (staff may supply one reference URL; the brand is kept unless keepBrand is false)
+ *   GET  /api/studio/reference-jobs/:id → stages, the inspected references and the saved design strategy
+ */
+studioRoutes.post('/references', wrap(async (req, res) => {
+  const b = (req.body || {}) as { businessKey?: string; revision?: number; referenceUrl?: string; keepBrand?: boolean };
+  if (!b.businessKey) return res.status(400).json({ error: 'businessKey is required' });
+  try {
+    const job = await startReferenceJob({ businessKey: b.businessKey, revision: b.revision, referenceUrl: typeof b.referenceUrl === 'string' ? b.referenceUrl : undefined, keepBrand: b.keepBrand !== false });
+    res.status(202).json({ id: job.id, url: `/api/studio/reference-jobs/${job.id}` });
+  } catch (e) {
+    if (e instanceof ReferenceInputError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+}));
+studioRoutes.get('/reference-jobs/:id', wrap(async (req, res) => {
+  const found = await getReferenceJob(String(req.params.id));
+  if (!found) return res.status(404).json({ error: 'No such reference job' });
+  res.json(await resumeReferenceIfStale(found));
 }));
 studioRoutes.get('/site-jobs/:id', wrap(async (req, res) => {
   const found = await getSiteJob(String(req.params.id));

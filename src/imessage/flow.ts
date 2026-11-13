@@ -15,7 +15,7 @@ import { applyConcept, nextConcept } from '../studio/concepts/site.js';
 import { addComparisonToReport, canScoreNewSite, scoreMessage, scoreNewSite } from '../audit/compare.js';
 import { saveBuild } from '../store.js';
 import type { Job } from '../jobs.js';
-import { advanceIntake, conceptIntakeEnabled, newIntake, type IntakeRun } from './intake.js';
+import { advanceIntake, intakeBusy, intakeModeOf, newIntake, requestVersion, type IntakeMode, type IntakeRun } from './intake.js';
 
 /**
  * Reference conversation for the Roger iMessage flow. Your iMessage gateway posts each
@@ -48,7 +48,8 @@ interface Session {
   /** personalising the preview: which question is next and the answers so far (saved, so a restart resumes here) */
   personalise?: { step: Step; buildId: string; prefs: DesignPreferences; suggestions: string[]; phoneOk: boolean; emergencyVerified: boolean; category?: Category };
   /** this conversation's preview comes from the design engine (brief → ranked concepts → chosen site), behind a flag */
-  intakeMode?: 'concepts';
+  /** 'open' (test-only): brief → references → open DesignSpec concept → full site */
+  intakeMode?: IntakeMode;
   /** the running (or finished) concept intake: which stage, which job holds it, and each stage's timing */
   intake?: IntakeRun;
 }
@@ -112,7 +113,9 @@ interface Ctx { async: boolean; s: Session; pending?: InboundResult['pending'] }
 export async function handleInbound(from: string, text: string, opts: { async?: boolean; intake?: string } = {}): Promise<InboundResult> {
   const ctx: Ctx = { async: !!opts.async, s: await loadSession(from) };
   // the concept intake: on for everyone only with ROGER_INTAKE_CONCEPTS=1; otherwise per conversation, by an authenticated test intake
-  if (conceptIntakeEnabled(opts.intake)) ctx.s.intakeMode = 'concepts';
+  // 'open' only by an authenticated test intake; 'concepts' by that or by ROGER_INTAKE_CONCEPTS=1
+  const mode = intakeModeOf(opts.intake);
+  if (mode) ctx.s.intakeMode = mode;
   await record(from, [{ dir: 'in', at: new Date().toISOString(), text }], ctx.s);
   const replies = await respond(from, text, ctx);
   const c = await record(from, outgoing(replies), ctx.s);
@@ -130,7 +133,7 @@ const buildLimitMs = () => Number(process.env.BUILD_LIMIT_SECONDS || 900) * 1000
  * instance may be running it: a finished build has a saved record; until then it counts as running.
  */
 async function pending(s: Session): Promise<boolean> {
-  if (s.state === 'building' && s.intake) return s.intake.stage !== 'done' && s.intake.stage !== 'failed';
+  if (s.state === 'building' && s.intake) return intakeBusy(s.intake);
   if (s.state !== 'building' || !s.lastBuildId) return false;
   if (getJob(s.lastBuildId)) return true;
   if (!process.env.VERCEL) return false; // single server: no job here means it restarted mid-build
@@ -148,7 +151,7 @@ export async function isPending(from: string): Promise<boolean> {
  */
 export async function pollIntake(from: string): Promise<IntakeRun | undefined> {
   const s = await loadSession(from);
-  if (s.state !== 'building' || !s.intake || s.intake.stage === 'done' || s.intake.stage === 'failed') return s.intake;
+  if (s.state !== 'building' || !s.intake || !intakeBusy(s.intake)) return s.intake;
   const run = await advanceIntake(s.intake);
   // another poll may have delivered meanwhile: only the one that sees it still building delivers
   const latest = await loadSession(from);
@@ -162,7 +165,25 @@ export async function pollIntake(from: string): Promise<IntakeRun | undefined> {
 /** what the client gets when the intake ends: the top-ranked preview with its two choices, or an apology */
 function intakeReplies(s: Session): Reply[] {
   const run = s.intake!;
+  if (run.next) {
+    const v = run.next;
+    const made = v.stage === 'done' ? run.versions?.find((x) => x.id === v.versionId) : undefined;
+    if (made) {
+      s.state = 'done';
+      s.lastSiteUrl = made.siteUrl;
+      run.shownVersion = made.id;
+      return [{ text: `Here's another version of your site.`, url: made.siteUrl, quickReplies: DONE_CHOICES }];
+    }
+    if (v.stage === 'failed') {
+      console.error(`[imessage] version ${v.id} failed at ${v.failedStage}: ${v.error}`);
+      s.state = 'done';
+      const notDifferent = /different|distinct/i.test(`${v.failedStage} ${v.error}`);
+      return [{ text: notDifferent ? 'I couldn\'t make a version that looks different enough from the one you\'ve seen. Your current preview is still here.' : 'Sorry, I couldn\'t make another version just now. Your current preview is still here.', url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
+    }
+    return [];
+  }
   if (run.stage === 'done' && run.siteUrl) {
+    run.shownVersion = run.versions?.[0]?.id ?? run.shownVersion;
     s.state = 'done';
     s.lastSiteUrl = run.siteUrl;
     const checks = run.checks ?? [];
@@ -354,6 +375,7 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
   }
 
   if (s.state === 'done' && (s.lastBuildId || s.intake?.draftId) && s.lastSiteUrl) {
+    if ((ALTERNATIVE.test(msg) || RETRY.test(msg)) && s.intake?.mode === 'open') return anotherVersion(ctx);
     if (ALTERNATIVE.test(msg) || RETRY.test(msg)) {
       // a site made from a concept set: the next of its saved concepts in rank order, never a new one
       const rec = s.intake?.draftId ? undefined : await getBuild(s.lastBuildId!);
@@ -418,7 +440,7 @@ async function findBusiness(msg: string, s: Session): Promise<Reply[]> {
 /** "Yes, build it": start the build and send the preview when it is ready. */
 async function build(from: string, ctx: Ctx): Promise<Reply[]> {
   const s = ctx.s;
-  if (s.intakeMode === 'concepts') return buildConcepts(from, ctx);
+  if (s.intakeMode === 'concepts' || s.intakeMode === 'open') return buildConcepts(from, ctx);
   const job = startBuild({ placeId: s.chosen!.placeId, website: s.website, audit: false }, { source: 'imessage', from, audit: s.audit }); // the audit already ran
   s.lastBuildId = job.id;
   s.state = 'building';
@@ -434,12 +456,31 @@ async function build(from: string, ctx: Ctx): Promise<Reply[]> {
  */
 async function buildConcepts(from: string, ctx: Ctx): Promise<Reply[]> {
   const s = ctx.s;
-  s.intake = await advanceIntake(newIntake({ placeId: s.chosen!.placeId, website: s.website }));
+  s.intake = await advanceIntake(newIntake({ placeId: s.chosen!.placeId, website: s.website }, s.intakeMode));
   s.state = 'building';
   s.buildStartedAt = Date.now();
   s.lastBuildId = undefined;
   ctx.pending = { jobId: s.intake.id };
   const ack: Reply = { text: 'On it! I\'m building your preview now. I\'ll text you the link as soon as it\'s ready.' };
+  const done = intakeReplies(s);
+  return done.length ? [ack, ...done] : [ack];
+}
+
+/**
+ * "Request another version" on the open intake: one request makes one new version (a new DesignSpec, meaningfully
+ * different from those shown, built and given its own link). "On it" now; the link follows when it is ready.
+ */
+async function anotherVersion(ctx: Ctx): Promise<Reply[]> {
+  const s = ctx.s;
+  const run = s.intake!;
+  const r = await requestVersion(run);
+  if (r === 'busy') return [{ text: 'Still making your other version. I\'ll text you the link as soon as it\'s ready.' }];
+  if (r === 'unavailable') return [{ text: `Your preview is here: ${s.lastSiteUrl}`, url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
+  s.state = 'building';
+  s.buildStartedAt = Date.now();
+  ctx.pending = { jobId: run.next!.id };
+  s.intake = await advanceIntake(run);
+  const ack: Reply = { text: 'On it! I\'m making another version of your site. I\'ll text you the link as soon as it\'s ready.' };
   const done = intakeReplies(s);
   return done.length ? [ack, ...done] : [ack];
 }
@@ -475,6 +516,13 @@ async function editorLink(s: Session, rec: BuildRecord | undefined): Promise<str
  * photo rights, lead delivery). The client gets no editor and no layout controls: one preview, approve or ask again.
  */
 async function goLive(s: Session): Promise<Reply[]> {
+  const run = s.intake;
+  if (run?.mode === 'open') {
+    const v = run.versions?.find((x) => x.id === run.shownVersion) ?? run.versions?.[run.versions.length - 1];
+    run.approved = v
+      ? { versionId: v.id, n: v.n, designSpecId: v.designSpecId, siteUrl: v.siteUrl, at: new Date().toISOString() }
+      : { versionId: `${run.id}-v1`, n: 1, designSpecId: run.designSpecId ?? '', siteUrl: run.siteUrl ?? s.lastSiteUrl ?? '', at: new Date().toISOString() };
+  }
   const checks = s.intake?.checks ?? openChecks(s.lastBuildId ? await getBuild(s.lastBuildId) : undefined);
   s.followUp = { at: new Date().toISOString(), reason: 'publish' };
   if (checks.length) {

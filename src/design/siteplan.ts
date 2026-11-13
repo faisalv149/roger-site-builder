@@ -59,6 +59,8 @@ export interface SitePlanInput {
   contact: { address: boolean; hours: boolean; phone: boolean };
   mode?: 'single' | 'multi';
   previous?: SitePlan;
+  /** the chosen design has a verified story section: the story gets its own About page (when it has at least 80 characters) */
+  aboutWanted?: boolean;
 }
 
 /** an offering earns its own page with a real description (not just a name and a price) */
@@ -69,7 +71,7 @@ export function buildSitePlan(i: SitePlanInput): SitePlan {
   const offerings = i.offerings.filter((x) => !x.omitted);
   const itemPages = o.itemPages ? offerings.filter((x) => (x.description?.length ?? 0) >= MIN_OFFERING_TEXT).slice(0, 8) : [];
   // an About page must say more than the home page already does: people or facts, or a story long enough to need its own page
-  const aboutUseful = !!i.about.intro && i.about.intro.length >= 80 && (i.about.team || !!i.about.years || i.about.trust > 0 || (i.about.reviews >= 2 && i.about.intro.length >= 600));
+  const aboutUseful = !!i.about.intro && i.about.intro.length >= 80 && (!!i.aboutWanted || i.about.team || !!i.about.years || i.about.trust > 0 || (i.about.reviews >= 2 && i.about.intro.length >= 600));
   const contactUseful = i.contact.address || i.contact.hours;
   // enough distinct content for more than one page: a real offerings list plus somewhere to visit or more to say
   const autoMulti = offerings.length >= 4 && contactUseful && (itemPages.length >= 2 || aboutUseful || offerings.length >= 6);

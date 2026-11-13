@@ -24,6 +24,7 @@ import { findDraft, putDraft } from './drafts.js';
 import { publishReadiness } from './design/content.js';
 import { deleteOut, readOut } from './files.js';
 import { remote } from './remote.js';
+import { pinnedPath } from './site-pins.js';
 import { ownerRoutes, studioDraftRoutes } from './owner-api.js';
 import { studioRoutes } from './studio/routes.js';
 import { resumeInterruptedJobs } from './studio/jobs.js';
@@ -70,7 +71,8 @@ app.use('/stock', express.static(path.join(config.dirs.public, 'stock'), { maxAg
 // Google listing photos for the page being viewed (never stored), and the page's Google credits and reviews filled
 // per view (src/sources/google-live.ts)
 app.get('/gphoto/:placeId/:n', wrap(googlePhotoRoute));
-app.use('/sites', async (req, res, next) => {
+// a site page with Google content filled for this view (credits, reviews, listing photos)
+const fillLive = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (!/(\.html|\/)$/.test(req.path)) return next();
   const rel = decodeURIComponent(req.path) + (req.path.endsWith('/') ? 'index.html' : '');
   if (rel.includes('..')) return next();
@@ -78,18 +80,23 @@ app.use('/sites', async (req, res, next) => {
   const html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : (await readOut(`sites${rel}`).catch(() => undefined))?.toString('utf8');
   if (!html || (!html.includes('⟦g:') && !html.includes('data-gphoto'))) return next();
   res.set({ 'cache-control': 'private, no-store' }).type('html').send(await fillListingPhotos(await fillGoogleContent(html)));
-
-});
+};
+// the owner editor's own preview of a draft: its current build, never a pinned public version (/drafts/<slug>/)
+app.use('/drafts', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex', 'cache-control': 'no-store' }); next(); }, fillLive, express.static(config.dirs.sites));
+// a public preview link pinned to a saved version is served from that version's copy (src/site-pins.ts)
+app.use('/sites', (req, _res, next) => { pinnedPath(req.url).then((u) => { req.url = u; next(); }, next); });
+app.use('/sites', fillLive);
 app.use('/sites', express.static(config.dirs.sites));
 app.use('/reports', express.static(config.dirs.reports));
 app.use('/cards', express.static(config.dirs.cards));
 app.use('/demo-sites', express.static(path.join(config.dirs.fixtures, 'sites'))); // the deliberately outdated demo site
 app.get('/', (_req, res) => res.redirect('/app/')); // on Vercel public/ is served by its CDN, not by Express
 // the builder's own robots.txt: tools and APIs stay out; previews and reports may be fetched so crawlers see their noindex
-app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /app/\nDisallow: /api/\nDisallow: /owner/\nDisallow: /imessage/\nAllow: /sites/\nAllow: /reports/\n'));
+app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /app/\nDisallow: /api/\nDisallow: /owner/\nDisallow: /drafts/\nDisallow: /imessage/\nAllow: /sites/\nAllow: /reports/\n'));
 // generated files, also when they were built on another server instance (src/files.ts)
-app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
-  let rel = decodeURIComponent(req.path).slice(1);
+app.get(/^\/(sites|drafts|cards|reports)\/.*/, wrap(async (req, res) => {
+  // a draft's own preview is the same stored build as its site folder (only /sites is pinned)
+  let rel = decodeURIComponent(req.path).slice(1).replace(/^drafts\//, 'sites/');
   if (rel.split('/').includes('..')) return res.status(400).end();
   if (rel.endsWith('/')) rel += 'index.html';
   else if (!path.extname(rel)) return res.redirect(301, `${req.path}/`);

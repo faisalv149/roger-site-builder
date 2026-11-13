@@ -69,7 +69,7 @@ test('colour, font, layout and price edits re-render from stored data: no Google
   assert.match(r.tok.fonts!.url, /Plus\+Jakarta/);
   assert.equal(r.w.plan.arrangement, 'b');
   assert.match(r.w.html, /\$70/);
-  assert.match(r.w.html, /<base href="\/sites\/[a-z0-9-]+\/">/); // the editor frame resolves assets and links at the site's address
+  assert.match(r.w.html, /<base href="\/drafts\/[a-z0-9-]+\/">/); // the editor frame resolves assets and links at the draft's own preview address (never a pinned public link)
   assert.equal((await fresh()).revision, d.revision); // nothing saved
 });
 

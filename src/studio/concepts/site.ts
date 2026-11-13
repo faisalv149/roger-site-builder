@@ -18,6 +18,11 @@ import { keepAlive, STALE_MS, HEARTBEAT_MS } from '../keepalive.js';
 import { getBrief } from '../jobs.js';
 import { getConceptSet } from './jobs.js';
 import type { Concept } from './types.js';
+import { handoffSpec, type DesignResult, type DesignSpec } from './designspec.js';
+import { renderSpec, specConcept } from './spec-render.js';
+import { stripDebrisHtml, stripSeasonalHtml } from '../../util/text.js';
+import { ownContentCss } from './shell.js';
+import type { ConceptJob } from './jobs.js';
 
 /**
  * A chosen Phase 2 concept becomes the business's full site, through the existing builder: it researches the
@@ -35,7 +40,9 @@ export function conceptDesign(c: Concept): { layout: LayoutChoice; appearance: A
   const hero = c.sections.find((s) => s.kind === 'hero')?.variant;
   const gallery = c.sections.find((s) => s.kind === 'gallery')?.variant;
   const a = c.axes;
-  const direction: LayoutChoice['direction'] = a.colorStrategy === 'brand-dominant' ? 'bold-direct'
+  // an open design brings its own homepage, header, footer, colours and type: the builder's direction only lays out the
+  // inner pages' content, so it is a current multi-page family (Warm Local); clean-professional has no multi-page version
+  const direction: LayoutChoice['direction'] = c.designSpecId ? 'local-trusted' : a.colorStrategy === 'brand-dominant' ? 'bold-direct'
     : a.imageryRole === 'lead' && hero === 'full-bleed' ? 'modern-premium'
     : a.typeVoice === 'serif' || a.typeVoice === 'humanist' ? 'local-trusted' : 'clean-professional';
   const r = c.tokens.radius;
@@ -55,6 +62,9 @@ export function conceptDesign(c: Concept): { layout: LayoutChoice; appearance: A
 /** Apply a concept to a built draft: saved as the owner's choices (locked), re-rendered on every page. */
 export async function applyConcept(draftId: string, setId: string, concept: Concept): Promise<DraftRecord> {
   const { layout, appearance } = conceptDesign(concept);
+  const spec = await specOf(concept);
+  // an open design with a verified story section: the site keeps an About page for it
+  const about = !!spec && JSON.stringify(spec.sections).includes('"story":');
   return withDraftLock(draftId, async () => {
     const d = (await getDraft(draftId))!;
     // a choice this business's content or the chosen style can't carry (a photo-led hero without a strong photo, a
@@ -65,14 +75,14 @@ export async function applyConcept(draftId: string, setId: string, concept: Conc
     let last: unknown;
     for (const t of tries) {
       const clean = Object.fromEntries(Object.entries(t).filter(([, v]) => v !== undefined)) as LayoutChoice;
-      try { saved = await saveDraft((await getDraft(draftId))!, { revision: d.revision, layout: clean, appearance }); break; }
+      try { saved = await saveDraft((await getDraft(draftId))!, { revision: d.revision, layout: clean, appearance, ...(about ? { aboutPage: true } : {}) }); break; }
       catch (e) { last = e; }
     }
     void hero; void gallery;
     if (!saved) throw last;
-    saved.concept = { setId, conceptId: concept.id };
+    saved.concept = { setId, conceptId: concept.id, ...(about ? { about: true } : {}) };
+    await writeConceptHome(saved); // records what the handoff left out (saved.concept.omitted)
     await putDraft(saved);
-    await writeConceptHome(saved);
     return saved;
   });
 }
@@ -81,9 +91,13 @@ export interface SiteJob {
   id: string; setId: string; conceptId: string; status: 'queued' | 'running' | 'done' | 'failed';
   stages: { name: string; status: 'running' | 'done' | 'failed'; ms?: number; note?: string }[];
   createdAt: string; updatedAt: string; startedAt?: string; finishedAt?: string; resumes: number;
+  /** what the handoff left off the site, and why (undated seasonal promotions) */
+  omitted?: { what: string; reason: string }[];
   siteUrl?: string; ownerUrl?: string; draftId?: string; review?: { status: string; checks: { id: string; level: string; message: string }[] }; error?: string;
   /** switched among the set's saved concepts (re-render only), rather than built */
   switched?: boolean;
+  /** the business record whose built draft this job may re-render: given explicitly (a business key and brief revision), never guessed from a shared website */
+  reuse?: { businessKey: string; revision: number };
 }
 const save = (j: SiteJob) => studioDocs.put('studio-site-jobs', j.id, { ...j, updatedAt: new Date().toISOString() });
 export const getSiteJob = (id: string) => studioDocs.get<SiteJob>('studio-site-jobs', id);
@@ -93,12 +107,13 @@ async function ownerLink(draftId: string) {
 }
 
 /** Start (or switch) the site for a set's concept. A business with a draft from this set only switches design. */
-export async function startSiteJob(setId: string, conceptId: string): Promise<SiteJob> {
+export async function startSiteJob(setId: string, conceptId: string, opts: { reuse?: { businessKey: string; revision: number } } = {}): Promise<SiteJob> {
   const set = await getConceptSet(setId);
   if (!set) throw new Error('No such concept set');
   if (!set.concepts.some((c) => c.id === conceptId)) throw new Error(`conceptId must be one of this set's concepts (${set.concepts.map((c) => c.id).join(', ')})`);
   const now = new Date().toISOString();
-  const job: SiteJob = { id: `sj_${randomBytes(6).toString('hex')}`, setId, conceptId, status: 'queued', stages: [], createdAt: now, updatedAt: now, resumes: 0 };
+  if (opts.reuse && (!opts.reuse.businessKey || !Number.isInteger(opts.reuse.revision))) throw new Error('reuse needs a business key and a brief revision');
+  const job: SiteJob = { id: `sj_${randomBytes(6).toString('hex')}`, setId, conceptId, status: 'queued', stages: [], createdAt: now, updatedAt: now, resumes: 0, ...(opts.reuse ? { reuse: opts.reuse } : {}) };
   await save(job);
   void keepAlive(runSiteJob(job.id));
   return job;
@@ -130,7 +145,15 @@ async function run(id: string) {
     const placeId = brief.identity.listing?.placeId;
     const website = brief.identity.website.value ?? undefined;
     // a draft this set already built: switching concepts is a re-render, not a new build
-    const existing = (await studioDocs.list<SiteJob>('studio-site-jobs')).find((j) => j.id !== job.id && j.setId === job.setId && j.status === 'done' && j.draftId);
+    const done = (await studioDocs.list<SiteJob>('studio-site-jobs')).filter((j) => j.id !== job.id && j.status === 'done' && j.draftId).sort((a, b) => (a.setId === job.setId ? -1 : 0) - (b.setId === job.setId ? -1 : 0) || b.createdAt.localeCompare(a.createdAt));
+    // a draft is re-rendered (no crawl, no AI) only when it was built for exactly this business record: the set's own
+    // business key and brief revision, or the record the caller named explicitly (job.reuse). Two records that merely
+    // share a website are never mixed.
+    const target = job.reuse ?? { businessKey: set.brief.businessKey, revision: set.brief.revision };
+    let existing: SiteJob | undefined;
+    for (const j of done) { const s2 = j.setId === job.setId ? set : await getConceptSet(j.setId); if (s2 && draftMatches(s2.brief, target)) { existing = j; break; } }
+    if (job.reuse && !existing) throw new Error(`no built site for ${job.reuse.businessKey} revision ${job.reuse.revision} to re-render`);
+    if (existing) stage('Reuse the built site', 'done', { note: `draft ${existing.draftId} (built from set ${existing.setId}): re-rendered in the new design, no new research` });
     let draftId = existing?.draftId && (await getDraft(existing.draftId)) ? existing.draftId : undefined;
     if (!draftId) {
       const r = await buildSite({ placeId, website, audit: false, scoreNew: false }, (e) => { if (e.type === 'step') stage(e.step, e.status === 'start' ? 'running' : e.status === 'error' ? 'failed' : 'done', { ms: e.ms, note: e.note }); });
@@ -141,7 +164,8 @@ async function run(id: string) {
     const t = Date.now();
     stage(`Apply concept ${concept.id.toUpperCase()} "${concept.name}"`, 'running');
     const d = await applyConcept(draftId, set.id, concept);
-    stage(`Apply concept ${concept.id.toUpperCase()} "${concept.name}"`, 'done', { ms: Date.now() - t, note: `${d.plan.direction} · ${d.plan.hero.variant} hero · ${d.sitePlan?.pages.length ?? 1} page(s)` });
+    job.omitted = d.concept?.omitted;
+    stage(`Apply concept ${concept.id.toUpperCase()} "${concept.name}"`, 'done', { ms: Date.now() - t, note: `${concept.designSpecId ? `open design ${concept.designSpecId}` : `${d.plan.direction} · ${d.plan.hero.variant} hero`} · ${d.sitePlan?.pages.length ?? 1} page(s)${job.omitted?.length ? ` · ${job.omitted.length} undated seasonal item(s) left out` : ''}` });
     job.draftId = draftId;
     job.siteUrl = `${d.base.slug ? (await import('../../config.js')).config.publicBaseUrl : ''}/sites/${d.slug}/`;
     job.ownerUrl = await ownerLink(draftId);
@@ -200,8 +224,25 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
   if (!brief || !inventory || !review) throw new ConceptHomeError(`the brief or owner review behind concept ${concept.id.toUpperCase()} is missing, so its homepage can't be rendered`);
   if (!fs.existsSync(path.join(cdir, 'img'))) await restoreDir(path.relative(config.dirs.out, cdir).split(path.sep).join('/')).catch(() => undefined);
   const cat = resolveCatalog(brief, inventory, review);
-  const tokens = conceptTokens(concept, d.appearance);
-  let html = conceptHtml({ ...concept, tokens }, cat, set.id, { serviceLinks: serviceLinksOf(d, cat) });
+  const spec = await specOf(concept);
+  // an open design's tokens come from its saved spec (fonts, colours, corners), so the inner pages can't drift from it
+  const tokens = spec ? specConcept(spec, concept.designSpecId!, cat, brief).tokens : conceptTokens(concept, d.appearance);
+  const inner = (d.sitePlan?.pages ?? []).filter((p) => p.route && p.type !== 'home' && !p.offeringId);
+  const pageLabel = (p: (typeof inner)[number]) => (p.navLabel ?? p.route.replace(/\/$/, '')).replace(/[<>&"]/g, '');
+  if (concept.designSpecId && !spec) throw new ConceptHomeError(`the DesignSpec ${concept.designSpecId} behind concept ${concept.id.toUpperCase()} is missing, so its homepage can't be rendered`);
+  let html: string;
+  let ownCss: string | undefined;
+  const omitted: { what: string; reason: string }[] = [];
+  if (spec) {
+    // an open design: the same spec, the same renderer, the same photos (with what the set's image checks saw); only
+    // undated seasonal promotions come off, and the inner pages join its menu
+    const job = (await studioDocs.list<ConceptJob>('studio-concept-jobs')).find((j) => j.setId === set.id);
+    for (const p of cat.photos) { const v = job?.work.seen?.[p.id]; if (v) { p.seenKind = v.kind; if (v.seen) p.seen = v.seen; } }
+    const live = handoffSpec(spec, cat);
+    omitted.push(...live.omitted);
+    html = renderSpec(live.spec, cat, brief, { photoSrc: (id) => `img/${id}.jpg`, pages: inner.map((p) => ({ label: pageLabel(p), href: p.route })), designId: concept.designSpecId });
+    ownCss = html.match(/<style>([\s\S]*?)<\/style>/)?.[1];
+  } else html = conceptHtml({ ...concept, tokens }, cat, set.id, { serviceLinks: serviceLinksOf(d, cat) });
   void src;
   const legacy = fs.readFileSync(homeFile, 'utf8');
   // the concept's own pictures, copied into the site (Google listing photos stay live stand-ins, never copied)
@@ -222,12 +263,11 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
   html = html.replace(/<meta name="robots"[^>]*>/, '');
   if (title) html = html.replace(/<title>[\s\S]*?<\/title>/, title);
   html = html.replace('</head>', `${seo}\n</head>`);
-  // the inner pages, after the concept's own section links
-  const inner = (d.sitePlan?.pages ?? []).filter((p) => p.route && p.type !== 'home' && !p.offeringId);
+  // the inner pages, after the concept's own section links (an open design has them in its menu already)
   // a section link with the same name as an inner page ("Services") goes to that page instead of appearing twice
   const add: string[] = [];
-  for (const p of inner) {
-    const label = (p.navLabel ?? p.route.replace(/\/$/, '')).replace(/[<>&"]/g, '');
+  for (const p of spec ? [] : inner) {
+    const label = pageLabel(p);
     const same = new RegExp(`<li><a href="#[a-z0-9-]+">${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</a></li>`);
     if (same.test(html)) html = html.replace(same, `<li><a href="${p.route}">${label}</a></li>`);
     else add.push(`<li><a href="${p.route}">${label}</a></li>`);
@@ -235,10 +275,53 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
   if (add.length) html = html.replace(/(<nav id="site-menu" aria-label="Sections"><ul>[\s\S]*?)(<\/ul><\/nav>)/, `$1${add.join('')}$2`);
   fs.writeFileSync(homeFile, html);
   // inner pages in the concept's design: its header, menu and footer, its tokens (colour, type, corners, spacing)
-  applyConceptShell(siteDir, homeFile, html, tokens, shellOf(concept));
+  applyConceptShell(siteDir, homeFile, html, tokens, shellOf(concept), ownCss, spec ? { contentCss: ownContentCss(tokens, { tracking: spec.type.tracking, headingColor: tokens.colors.ink }) } : undefined);
+  for (const file of htmlFiles(siteDir)) {
+    const page = path.relative(siteDir, path.dirname(file)).split(path.sep).join('/') || 'home';
+    let pageHtml = fs.readFileSync(file, 'utf8');
+    // no crawler debris on any page ("map marker pin")
+    pageHtml = stripDebrisHtml(pageHtml).html;
+    // an inner page shows only pictures whose files exist; a tile or gallery left empty goes
+    if (file !== homeFile) pageHtml = dropMissingImages(pageHtml, path.dirname(file)).html;
+    // no undated seasonal promotion on any page: the builder's inner pages are checked too
+    const r = file === homeFile ? { html: pageHtml, removed: [] as string[] } : stripSeasonalHtml(pageHtml);
+    fs.writeFileSync(file, r.html);
+    for (const t of r.removed) omitted.push({ what: `${page} page: "${t}"`, reason: 'an undated seasonal promotion — it may be out of date, so it is left off the site until the owner gives a date' });
+  }
+  if (omitted.length) d.concept.omitted = omitted; else delete d.concept.omitted; // a site with nothing left out keeps its record as before
   await persistDir(siteDir);
   return true;
 }
+
+/** a built draft may be re-rendered for this business record only: the same business key and brief revision */
+export function draftMatches(built: { businessKey: string; revision: number }, target: { businessKey: string; revision: number }): boolean {
+  return built.businessKey === target.businessKey && built.revision === target.revision;
+}
+
+/**
+ * Pictures whose files are missing come off a built page: the picture with its tile (a figure or a gallery link), and a
+ * gallery section left with no picture. Remote pictures (http, data) and live stand-ins are not files and stay.
+ */
+export function dropMissingImages(html: string, pageDir: string): { html: string; dropped: string[] } {
+  const dropped: string[] = [];
+  const missing = (src: string) => { if (!src || /^(https?:|data:|\/\/)/.test(src)) return false; const clean = src.split(/[?#]/)[0]; const file = clean.startsWith('/') ? null : path.resolve(pageDir, decodeURIComponent(clean)); return !!file && !fs.existsSync(file); };
+  let out = html.replace(/<figure\b[^>]*>(?:(?!<\/?figure\b)[\s\S])*?<\/figure>/g, (fig) => {
+    const srcs = [...fig.matchAll(/<img\b[^>]*\ssrc="([^"]*)"/g)].map((m) => m[1]);
+    if (!srcs.length || !srcs.every(missing)) return fig;
+    dropped.push(...srcs);
+    return '';
+  });
+  out = out.replace(/<img\b[^>]*\ssrc="([^"]*)"[^>]*>/g, (img, src: string) => { if (!missing(src)) return img; dropped.push(src); return ''; });
+  // a gallery section with no picture left
+  out = out.replace(/<section\b[^>]*class="[^"]*gallery[^"]*"[^>]*>(?:(?!<\/?section\b)[\s\S])*?<\/section>/g, (sec) => (/<img\b/.test(sec) ? sec : ''));
+  return { html: out, dropped };
+}
+
+/** an open concept's saved DesignSpec (none for a direction's concept) */
+async function specOf(concept: Concept): Promise<DesignSpec | undefined> {
+  return concept.designSpecId ? (await studioDocs.get<DesignResult>('studio-design-specs', concept.designSpecId))?.spec ?? undefined : undefined;
+}
+const htmlFiles = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'assets' ? [] : htmlFiles(path.join(dir, e.name))) : e.name.endsWith('.html') ? [path.join(dir, e.name)] : []));
 
 /**
  * The concept's design tokens with the owner's supported design edits applied: accent colour, typeface, corners and

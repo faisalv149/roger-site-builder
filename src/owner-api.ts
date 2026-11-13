@@ -220,7 +220,7 @@ ownerRoutes.post('/:draftId/seo', wrap(async (req, res) => {
   const sp = r.sitePlan;
   res.json({
     supported: true, mode: sp.mode, modeSource: sp.modeSource,
-    pages: sp.pages.map((p) => ({ id: p.id, type: p.type, route: p.route, url: `${d.slug ? `${config.publicBaseUrl}/sites/${d.slug}/` : ''}${p.route}`, ...pageMeta(r.model, sp, p), override: sp.overrides[p.id] || {} })),
+    pages: sp.pages.map((p) => ({ id: p.id, type: p.type, route: p.route, url: `${d.slug ? `${config.publicBaseUrl}/drafts/${d.slug}/` : ''}${p.route}`, ...pageMeta(r.model, sp, p), override: sp.overrides[p.id] || {} })),
     issues: seoIssues(r.model, sp),
     note: 'Search engines decide what they show; this is an approximation of a typical result.',
     indexable: false,

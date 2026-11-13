@@ -194,6 +194,9 @@ const MEASURE = `(() => {
   };
 })()`;
 
+/** the measuring script, for other renderers whose pages the same checks validate */
+export const MEASURE_SCRIPT = MEASURE;
+
 export interface Rendered { conceptId: string; html: string; desktop: { full: string; hero: string; metrics: PageMetrics }; mobile: { full: string; hero: string; metrics: PageMetrics } }
 
 /** Write each concept's HTML and screenshot it at desktop and mobile size. */

@@ -61,7 +61,8 @@ export async function fillGoogleContent(html: string, deps: { photos?: typeof li
     const t = inner.match(/⟦g:t:([A-Za-z0-9_-]+):(\d+):(\d)⟧/);
     if (!t) return all;
     const r = review(t[1], Number(t[2]));
-    if (!r || Math.round(r.rating) !== Number(t[3])) return `<figure${attrs} hidden></figure>`;
+    // removed, not hidden: a page's own card styles can override the hidden attribute and show an empty card
+    if (!r || Math.round(r.rating) !== Number(t[3])) return '';
     // an avatar letter rendered from the marker: the author's initial
     const initial = escHtml((r.author.trim()[0] || '?').toUpperCase());
     const fixed = inner.replace(/(<span class="(?:rv-av|fw-avatar)"[^>]*>)⟦[^<]*(<\/span>)/, `$1${initial}$2`).replace(/· Google review/g, r.mapsUri ? `· review on <a href="${escHtml(r.mapsUri)}" target="_blank" rel="noopener" translate="no">Google Maps</a>` : '· review on <span translate="no">Google Maps</span>');

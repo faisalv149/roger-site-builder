@@ -6,6 +6,7 @@ import type { PageMetrics, Rendered } from './render.js';
 import { isListing } from './listing-photos.js';
 import { photoRole } from './directions.js';
 import type { Check, Concept } from './types.js';
+import { UI_DEBRIS, undatedSeasonal } from '../../util/text.js';
 
 /**
  * Checks on rendered concepts, from what Chrome actually drew:
@@ -144,9 +145,28 @@ export function accessibility(d: PageMetrics, mob: PageMetrics): Check {
   return { id: 'accessibility', level: out.length ? 'fail' : 'pass', message: out.length ? `${out.length} accessibility problem(s)` : `${n} text runs meet WCAG AA contrast (worst case over photos); every tap target is at least 44×44; alt text, one h1, heading order and no sideways scroll on mobile.`, ...(out.length ? { details: out.slice(0, 20) } : {}) };
 }
 
+/**
+ * Shared preview rules, read off the rendered page: an undated seasonal promotion may not lead the hero (it goes stale
+ * after the date), and no crawler debris ("map marker pin") may show as text.
+ */
+export function previewRules(r: Rendered, html: string): Check {
+  const errs: string[] = [];
+  const hero = html.match(/<section[^>]*data-kind="hero"[\s\S]*?<\/section>/)?.[0] ?? '';
+  const heroText = (tag: string) => [...hero.matchAll(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'g'))].map((m) => m[1].replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim());
+  for (const t of [...heroText('h1'), ...heroText('p')]) { const season = undatedSeasonal(t); if (season) errs.push(`the hero leads with an undated seasonal promotion ("${t.slice(0, 70)}": "${season}")`); }
+  for (const [label, m] of [['desktop', r.desktop.metrics], ['mobile', r.mobile.metrics]] as const) {
+    const debris = m.text.match(new RegExp(UI_DEBRIS.source, 'i'));
+    if (debris) errs.push(`${label}: crawler debris shows as text ("${debris[0]}")`);
+    // the rights check reads the desktop page; a photo that did not load on the phone leaves an empty frame there
+    for (const i of m.images.filter((x) => !x.ok)) errs.push(`${label}: picture ${i.asset ?? i.src.slice(0, 50)} did not load`);
+  }
+  const out = [...new Set(errs)];
+  return { id: 'preview-rules', level: out.length ? 'fail' : 'pass', message: out.length ? `${out.length} preview rule(s) broken` : 'The hero leads with something lasting, and no crawler debris shows as text.', ...(out.length ? { details: out } : {}) };
+}
+
 export function checkConcept(concept: Concept, r: Rendered, cat: Catalog, availablePhotos = cat.photos.length): Check[] {
   const html = fs.existsSync(r.html) ? fs.readFileSync(r.html, 'utf8') : '';
-  return [grounding(r.desktop.metrics, cat), grounding(r.mobile.metrics, cat), rights(r.desktop.metrics, cat, concept, html), links(r.desktop.metrics, cat), links(r.mobile.metrics, cat), imagery(r.desktop.metrics, cat), photosShown(r.desktop.metrics, cat, availablePhotos), accessibility(r.desktop.metrics, r.mobile.metrics)]
+  return [previewRules(r, html), grounding(r.desktop.metrics, cat), grounding(r.mobile.metrics, cat), rights(r.desktop.metrics, cat, concept, html), links(r.desktop.metrics, cat), links(r.mobile.metrics, cat), imagery(r.desktop.metrics, cat), photosShown(r.desktop.metrics, cat, availablePhotos), accessibility(r.desktop.metrics, r.mobile.metrics)]
     .reduce<Check[]>((acc, c) => { const prev = acc.find((x) => x.id === c.id); if (!prev) acc.push(c); else if (c.level === 'fail') { prev.level = 'fail'; prev.message = c.message; prev.details = [...new Set([...(prev.details ?? []), ...(c.details ?? [])])]; } return acc; }, []);
 }
 

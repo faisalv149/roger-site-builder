@@ -78,7 +78,7 @@ export interface DraftBase {
 
 export interface DraftRecord {
   /** the Phase 2 concept this draft's design comes from: "Try another design" switches among its set's concepts */
-  concept?: { setId: string; conceptId: string };
+  concept?: { setId: string; conceptId: string; /** the chosen design has a verified story section: the site keeps an About page */ about?: boolean; /** what the handoff left out of the site, and why (an undated seasonal promotion) */ omitted?: { what: string; reason: string }[] };
   v: number;
   id: string;
   slug: string;
@@ -317,15 +317,16 @@ export function readEdits(body: Record<string, unknown>, d: DraftRecord): { appe
  */
 export function forEditor(html: string, slug: string, route = ''): string {
   // asset paths are also made absolute: the browser can start fetching images before it has read the <base>
-  const abs = html.replace(/(["'(])(?:\.\.\/)*assets\//g, `$1/sites/${slug}/assets/`);
-  return abs.replace(/<head>/i, `<head><base href="/sites/${slug}/${route}">`);
+  // the owner's own preview address (/drafts/<slug>/): the current build, never a public link pinned to a saved version
+  const abs = html.replace(/(["'(])(?:\.\.\/)*assets\//g, `$1/drafts/${slug}/assets/`);
+  return abs.replace(/<head>/i, `<head><base href="/drafts/${slug}/${route}">`);
 }
 
 /** The pages for a model and the owner's choices, from what the content supports. */
 function sitePlanOf(d: DraftRecord, model: SiteModel, body: Record<string, unknown>): SitePlan | undefined {
   if (!isFamilyV2(model)) return undefined;
   const mode = body.siteMode === 'single' || body.siteMode === 'multi' ? body.siteMode : undefined;
-  const sp = sitePlanFor(model, { previous: d.sitePlan, mode });
+  const sp = sitePlanFor(model, { previous: d.sitePlan, mode, aboutWanted: body.aboutPage === true || !!d.concept?.about });
   const seo = body.seo as Record<string, unknown> | undefined;
   if (seo && typeof seo === 'object') {
     for (const [pageId, v] of Object.entries(seo)) {
@@ -407,7 +408,7 @@ export async function saveDraft(d: DraftRecord, body: Record<string, unknown>) {
 export async function refreshSavedSite(d: DraftRecord): Promise<void> {
   await ensureLocalSite(d.slug);
   const model = await composeModel(d.base, d.plan, { appearance: d.appearance, offerings: d.offerings, content: d.content });
-  const sp = isFamilyV2(model) ? sitePlanFor(model, { previous: d.sitePlan }) : undefined;
+  const sp = isFamilyV2(model) ? sitePlanFor(model, { previous: d.sitePlan, aboutWanted: !!d.concept?.about }) : undefined;
   await writeSite(d.base, model, { sitePlan: sp, previousSitePlan: d.sitePlan });
   if (d.concept) await (await import("./studio/concepts/site.js")).writeConceptHome({ ...d, sitePlan: sp });
   d.sitePlan = sp;
@@ -423,7 +424,7 @@ export function contentView(d: DraftRecord) {
   }));
   return {
     revision: c.revision, facts,
-    media: c.media.slice().sort((a, b) => a.order - b.order).map((m) => ({ ...m, url: `/sites/${d.slug}/${m.publicPath}` })),
+    media: c.media.slice().sort((a, b) => a.order - b.order).map((m) => ({ ...m, url: `/drafts/${d.slug}/${m.publicPath}` })),
     readiness: publishReadiness(c, d.offerings, { checks: d.base.source?.review?.checks, leadTested: !!d.base.leadTestedAt, leadNotified: configuredChannels(ownerEmailOf(d.content)).length > 0 }),
   };
 }
@@ -441,7 +442,7 @@ export function previewTokens(d: DraftRecord, body: Record<string, unknown>, pla
 export function ownerState(d: DraftRecord, plan: DesignPlan = d.plan) {
   const p = profileFor(d.category);
   return {
-    draft: { id: d.id, revision: d.revision, savedAt: d.savedAt, siteUrl: `${config.publicBaseUrl}/sites/${d.slug}/`, slug: d.slug },
+    draft: { id: d.id, revision: d.revision, savedAt: d.savedAt, siteUrl: `${config.publicBaseUrl}/drafts/${d.slug}/`, slug: d.slug },
     business: { name: d.businessName, category: d.category, categoryLabel: p.label, city: d.base.facts.city, phone: d.base.business.phone, hasPhone: !!d.base.business.phone, currency: d.base.currency },
     plan: summarisePlan(plan),
     appearance: d.appearance,

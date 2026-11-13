@@ -164,6 +164,8 @@ export interface Concept {
   notes?: string[];
   preview?: { html: string; desktop: string; mobile: string; desktopHero: string; mobileHero: string; desktopHeight: number; mobileHeight: number };
   checks: Check[];
+  /** composed by the open planner: the saved DesignSpec it renders (studio-design-specs) */
+  designSpecId?: string;
 }
 
 export interface UsageRecord {
