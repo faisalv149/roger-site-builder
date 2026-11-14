@@ -170,6 +170,38 @@ test('without a search source or Claude: the staff reference alone, and the fall
   assert.ok(s.interactions.includes('A fixed action bar at the bottom on mobile (call, directions)'));
 });
 
+test('an API refusal fails the strategy stage by name; the strategy is written again from the saved inspection, with no new search or browser', async () => {
+  const { ApiRequestError } = await import('../src/studio/concepts/ai.js');
+  await saveBrief('place-copper');
+  let inspected = 0;
+  const inspect = async () => { inspected++; return { desktop: view(), mobile: view(), screenshots: { desktop: 'd.png', mobile: 'm.png' } }; };
+  const refusing: AiTransport = { via: 'fake', model: 'claude-sonnet-5-5', async call() { throw new ApiRequestError('references:strategy', 400, 'output_config.format.schema: not supported', 'req_x'); } };
+  const started = await R.startReferenceJob({ businessKey: 'place-copper', referenceUrl: 'https://staffpick.example.com/' }, { transport: refusing, fetchPage: async () => page(), inspect });
+  const failed = await R.waitForReferenceJob(started.id);
+  assert.equal(failed.status, 'failed', 'no measured fallback stands in for a refused request');
+  assert.match(failed.error ?? '', /^strategy: the Claude API rejected the references:strategy request \(HTTP 400\)/);
+  assert.equal(failed.work.strategy, undefined);
+  assert.equal(inspected, 1);
+
+  // resumed from the failed stage: only Claude is asked; search, fetching and the browser are not used again
+  const offline = { search: async () => { throw new Error('searched again'); }, fetchPage: async () => { throw new Error('fetched again'); }, inspect: async () => { throw new Error('inspected again'); } };
+  await R.resumeReferenceJob(failed.id, {}, { transport: fakeTransport([strategy(['staffpick.example.com'])]), ...offline });
+  const fixed = await R.waitForReferenceJob(failed.id);
+  assert.equal(fixed.status, 'done', fixed.error ?? '');
+  assert.equal(fixed.work.strategy!.source, 'ai');
+  assert.equal(fixed.resumes, 1);
+
+  // a finished job whose strategy was the measured fallback: from 'strategy' writes it again from the same inspection
+  const plain = await R.waitForReferenceJob((await R.startReferenceJob({ businessKey: 'place-copper', referenceUrl: 'https://staffpick.example.com/' }, { transport: null, fetchPage: async () => page(), inspect })).id);
+  assert.equal(plain.work.strategy!.source, 'fallback');
+  await R.resumeReferenceJob(plain.id, { from: 'strategy' }, { transport: fakeTransport([strategy(['staffpick.example.com'])]), ...offline });
+  const again = await R.waitForReferenceJob(plain.id);
+  assert.equal(again.status, 'done', again.error ?? '');
+  assert.equal(again.work.strategy!.source, 'ai');
+  assert.equal(again.work.inspected!.length, plain.work.inspected!.length, 'the same inspected references');
+  await assert.rejects(R.resumeReferenceJob('rj_none_such', { from: 'strategy' }).then((j) => { if (!j) throw new R.ReferenceInputError('missing'); }), R.ReferenceInputError);
+});
+
 test('the real inspector measures a page at both sizes and keeps none of its words', { skip: !config.chromiumPath && 'no Chromium here' }, async () => {
   const SECRET = 'Grandmother Ottoline kneads every loaf at dawn';
   const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;font:17px/1.6 Georgia,serif}header{position:sticky;top:0;display:flex;gap:16px;padding:16px}h1{font:600 56px Arial,sans-serif;text-transform:uppercase}section{min-height:300px;padding:40px}.hero{min-height:80vh;background:url(data:image/gif;base64,R0lGODlhAQABAAAAACw=) center/cover}img{width:300px;height:200px;object-fit:cover;border-radius:12px}@media(max-width:600px){header a{display:none}}</style></head><body><header><a href="#">Menu</a><a href="#">Cakes</a><a href="#">Visit</a><button aria-label="Open menu">☰</button></header><main><section class="hero"><h1>Fresh bread</h1><a class="btn" href="#">Visit</a></section>${[1, 2, 3, 4].map(() => `<section><p>${SECRET} ${'and much more besides. '.repeat(20)}</p><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt=""></section>`).join('')}<details><summary>FAQ</summary>Yes</details></main></body></html>`;

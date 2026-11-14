@@ -150,6 +150,29 @@ export async function resumeReferenceIfStale(job: ReferenceJob): Promise<Referen
   void keepAlive(runReferenceJob(job.id));
   return job;
 }
+/**
+ * A failed job continues from its first unfinished stage. `from: 'strategy'` writes the strategy again from the
+ * references this job already inspected (no search, no browser): for a job whose strategy could not be written by
+ * Claude (e.g. the API refused the request). The old strategy is dropped first, so nothing stale is used meanwhile.
+ */
+export async function resumeReferenceJob(id: string, opts: { from?: 'strategy' } = {}, hooks: ReferenceHooks = {}): Promise<ReferenceJob | null> {
+  const job = await getReferenceJob(id);
+  if (!job) return null;
+  if (active.has(id)) return job;
+  if (opts.from === 'strategy') {
+    if (!(job.work.inspected ?? []).some((x) => x.ok)) throw new ReferenceInputError('This job has no inspected references to write a strategy from.');
+    if (job.stages.some((s) => s.name !== 'strategy' && s.status !== 'done')) throw new ReferenceInputError('This job has unfinished stages before the strategy: resume it without "from".');
+    const st = job.stages.find((s) => s.name === 'strategy')!;
+    st.status = 'pending'; st.error = undefined; st.notes = [];
+    job.work.strategy = undefined;
+  } else if (job.status !== 'failed') return job;
+  job.resumes++;
+  for (const s of job.stages) if (s.status !== 'done') { s.status = 'pending'; s.error = undefined; }
+  job.status = 'queued'; job.error = undefined;
+  await save(job);
+  void keepAlive(runReferenceJob(job.id, hooks));
+  return job;
+}
 export async function waitForReferenceJob(id: string, timeoutMs = 300_000): Promise<ReferenceJob> {
   const started = Date.now();
   for (;;) {
@@ -385,7 +408,7 @@ const STICKY_BAR = /\b(sticky|fixed|persistent)\b[^.;]{0,40}\b(bar|footer|bottom
 
 type StrategyBody = Omit<DesignStrategy, 'brand' | 'references' | 'actions' | 'source'>;
 const S = (max: number) => ({ type: 'string', maxLength: max });
-const STRATEGY_SCHEMA = {
+export const STRATEGY_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['summary', 'layoutPatterns', 'typography', 'imagery', 'navigation', 'interactions', 'avoid'],
   properties: {
     summary: S(320),

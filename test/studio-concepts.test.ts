@@ -313,7 +313,7 @@ test('the in-page measuring itself: a word broken across lines, text unreadable 
 /** the answer a planner would give: the fallback plans, with written copy */
 const answerOf = (plans: DirectionPlan[]) => ({ concepts: plans.map((p, i) => ({
   name: p.name, thesis: p.thesis, evidence: p.evidence, structure: p.axes.structure, density: p.axes.density, imageryRole: p.axes.imageryRole, typeVoice: p.axes.typeVoice, colorStrategy: p.axes.colorStrategy,
-  sections: p.sections, hero: { ...p.hero, headline: ['Plumbing repairs for Austin homes','Water heaters and drains, done tidy', 'Leaks found without tearing up walls'][i], subline: 'Drain cleaning, water heater repair and leak detection.' },
+  sections: p.sections, hero: { ...p.hero, headline: ['Plumbing repairs for Austin homes', 'Water heaters and drains, done tidy', 'Leaks found without tearing up walls', 'Drains cleared and water heaters fixed', 'Plumbing work for homes in Austin'][i], subline: 'Drain cleaning, water heater repair and leak detection.' },
   titles: [{ kind: 'offer', title: 'What we fix', intro: 'Drains, water heaters and hidden leaks.' }], primaryAction: p.primaryAction ?? '', secondaryAction: p.secondaryAction ?? '', featureIds: p.featureIds, galleryImageIds: p.galleryImageIds, storyImageId: p.storyImageId ?? '', storyText: '',
 })) });
 

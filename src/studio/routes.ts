@@ -13,7 +13,7 @@ import { getConceptJob, getConceptSet, resumeConceptIfStale, resumeConceptJob, s
 import { createShare, shareUrl } from './concepts/share.js';
 import { getSiteJob, resumeSiteIfStale, startSiteJob } from './concepts/site.js';
 import { IdentityError } from '../sources/website-business.js';
-import { getReferenceJob, ReferenceInputError, resumeReferenceIfStale, startReferenceJob } from './concepts/references.js';
+import { getReferenceJob, ReferenceInputError, resumeReferenceIfStale, resumeReferenceJob, startReferenceJob } from './concepts/references.js';
 
 /**
  * The design studio's API (Phase 1: business brief).
@@ -241,6 +241,22 @@ studioRoutes.get('/reference-jobs/:id', wrap(async (req, res) => {
   const found = await getReferenceJob(String(req.params.id));
   if (!found) return res.status(404).json({ error: 'No such reference job' });
   res.json(await resumeReferenceIfStale(found));
+}));
+/**
+ *   POST /api/studio/reference-jobs/:id/resume   { from?: 'strategy' } → 202: a failed job continues from its first
+ *        unfinished stage; from 'strategy' writes the strategy again from the references it already inspected
+ */
+studioRoutes.post('/reference-jobs/:id/resume', wrap(async (req, res) => {
+  const from = (req.body || {}).from;
+  if (from !== undefined && from !== 'strategy') return res.status(400).json({ error: 'from may only be "strategy"' });
+  try {
+    const j = await resumeReferenceJob(String(req.params.id), from ? { from } : {});
+    if (!j) return res.status(404).json({ error: 'No such reference job' });
+    res.status(202).json({ id: j.id, status: j.status, url: `/api/studio/reference-jobs/${j.id}` });
+  } catch (e) {
+    if (e instanceof ReferenceInputError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
 }));
 studioRoutes.get('/site-jobs/:id', wrap(async (req, res) => {
   const found = await getSiteJob(String(req.params.id));

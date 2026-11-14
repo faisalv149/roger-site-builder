@@ -8,6 +8,7 @@ import { claudeVia } from '../../content/claude.js';
 import { studioDocs } from '../../store.js';
 import { sha256, stableStringify } from '../snapshot.js';
 import type { UsageRecord } from './types.js';
+import { apiSchema, schemaErrors } from './schema-compat.js';
 
 /**
  * Claude for concept sets, with a hard cost cap. Every call:
@@ -36,6 +37,19 @@ export interface AiAnswer { data: unknown; usage: Omit<UsageRecord, 'setId' | 's
 export interface AiTransport { via: 'api' | 'cli' | 'fake'; model: string; call(req: AiRequest, limits: { maxOutputTokens: number; budgetUsd: number }): Promise<AiAnswer> }
 
 export class CostCapExceeded extends Error {}
+
+/**
+ * The Claude API refused the request itself (a 4xx other than rate limiting: an invalid schema or parameter, a bad key,
+ * a request too large). Asking again cannot help, so it is not retried and no stage falls back to another design on
+ * it: the stage fails with this message, which names the stage.
+ */
+export class ApiRequestError extends Error {
+  constructor(readonly stage: string, readonly status: number, detail: string, readonly requestId?: string | null) {
+    super(`the Claude API rejected the ${stage} request (HTTP ${status}): ${detail}${requestId ? ` [${requestId}]` : ''}`);
+  }
+}
+const REQUEST_ERRORS = new Set([400, 401, 403, 404, 413, 422]);
+const scrub = (s: string) => s.replace(/sk-ant-[\w-]+/g, 'sk-ant-…');
 
 export class CostLedger {
   calls: UsageRecord[] = [];
@@ -87,11 +101,13 @@ export function apiTransport(model = conceptModel()): AiTransport {
         model, max_tokens: limits.maxOutputTokens,
         system: req.system,
         messages: [{ role: 'user', content: req.prompt }],
-        output_config: { effort: effort(), format: { type: 'json_schema', schema: req.schema } },
+        // the API refuses some JSON-schema keywords: they are left out here and checked on the answer by aiJson
+        output_config: { effort: effort(), format: { type: 'json_schema', schema: apiSchema(req.schema) } },
       }).finalMessage();
       let msg: Awaited<ReturnType<typeof ask>> | undefined;
       for (let i = 0; ; i++) {
         try { msg = await ask(); break; } catch (e) {
+          if (e instanceof Anthropic.APIError && typeof e.status === 'number' && REQUEST_ERRORS.has(e.status)) throw new ApiRequestError(req.stage, e.status, scrub(e.message).slice(0, 300), e.requestID);
           if (!transientError(e) || i >= 2) throw e;
           await new Promise((r) => setTimeout(r, i === 0 ? 2000 : 6000));
         }
@@ -114,7 +130,7 @@ export function cliTransport(model = conceptModel()): AiTransport {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'roger-concepts-'));
       const env = { ...process.env };
       if (!env.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
-      const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(req.schema), '--system-prompt', req.system, '--model', model, '--effort', effort(),
+      const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(apiSchema(req.schema)), '--system-prompt', req.system, '--model', model, '--effort', effort(),
         '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--no-session-persistence', '--max-budget-usd', limits.budgetUsd.toFixed(4)];
       return new Promise((resolve, reject) => {
         const child = spawn(config.claudeCliPath, args, { cwd, env, windowsHide: true });
@@ -188,13 +204,16 @@ export async function aiJson<T>(req: AiRequest, o: { transport: AiTransport; led
         const usage = spent.answer ?? (spent.usage ? { via: o.transport.via, model: o.transport.model, ...spent.usage, costUsd: computedCost(o.transport.model, spent.usage), costBasis: 'computed' as const } : { via: o.transport.via, model: o.transport.model, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, costBasis: 'computed' as const });
         lastErrors = [(e as Error).message.replace(/sk-ant-[\w-]+/g, 'sk-ant-…').slice(0, 300)];
         await o.ledger.record({ ...base, ...usage, cacheHit: false, worstCaseUsd: worst, ms: Date.now() - started, ok: false, error: lastErrors[0] });
+        if (e instanceof ApiRequestError) throw e;
         feedback = `- the request failed: ${lastErrors[0]}`;
         rejected.push({ attempt, errors: lastErrors });
         continue;
       }
     }
     last = data as T;
-    lastErrors = o.validate(data as T);
+    // the answer against the full original schema first (the limits the API was not sent), then the stage's own checks
+    lastErrors = schemaErrors(req.schema, data);
+    if (!lastErrors.length) lastErrors = o.validate(data as T);
     if (!lastErrors.length) return { data: data as T, attempts: attempt, errors: [], rejected, last };
     rejected.push({ attempt, errors: lastErrors });
     feedback = lastErrors.slice(0, 20).map((x) => `- ${x}`).join('\n');

@@ -31,7 +31,13 @@ const brief = {
   brand: { colors: [{ role: 'primary', hex: '#000018' }, { role: 'accent', hex: '#005BEA' }], fonts: [{ family: 'Outfit' }, { family: 'Manrope' }, { family: 'JetBrains Mono' }], logo: { value: { url: 'https://northline.example.com/og.png', width: 1200, height: 630 }, status: 'needs_review' } },
 } as unknown as import('../src/studio/schema.js').BusinessBrief;
 
-const good = (): Spec => ({
+/** a spec as the API returns it: every field the schema requires is present, null or empty where unused */
+const answered = (s: Spec): Spec => ({
+  ...s, hero: { backgroundPhoto: null, ...s.hero },
+  sections: s.sections.map((x) => ({ media: { placement: 'none' as const, photoIds: [] }, ...x, items: x.items.map((it) => ({ photoId: null, ...it })) })),
+  referencesUsed: s.referencesUsed ?? [],
+});
+const good = (): Spec => answered({
   thesis: 'A quiet, engineered page: one strong sentence, then the work laid out like a ledger.',
   palette: { ground: 'white', surface: 'tint:#005BEA:6', ink: '#000018', inverse: '#000018', accent: '#005BEA', onAccent: 'white' },
   type: { heading: 'Outfit', body: 'Manrope', mono: 'JetBrains Mono', base: 17, scale: 1.333, headingWeight: 500, headingCase: 'none', tracking: -0.02, measure: 62 },

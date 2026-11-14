@@ -46,7 +46,13 @@ const sparse = {
 } as never;
 const brief = { identity: { status: 'verified' }, brand: { colors: [], fonts: [], logo: { value: null, status: 'unknown' } } } as never;
 const L = (o: object = {}) => ({ arrangement: 'stack' as const, headingStart: 1, headingSpan: 8, contentStart: 1, contentSpan: 12, itemColumns: 1, itemStyle: 'plain' as const, density: 'regular' as const, ...o });
-const sparseV1 = (): Spec => ({
+/** a spec as the API returns it: every field the schema requires is present, null or empty where unused */
+const answered = (s: Spec): Spec => ({
+  ...s, hero: { backgroundPhoto: null, ...s.hero },
+  sections: s.sections.map((x) => ({ media: { placement: 'none' as const, photoIds: [] }, ...x, items: x.items.map((it) => ({ photoId: null, ...it })) })),
+  referencesUsed: s.referencesUsed ?? [],
+});
+const sparseV1 = (): Spec => answered({
   thesis: 't', palette: { ground: 'white', surface: 'paper', ink: 'ink', inverse: 'ink', accent: 'ink', onAccent: 'white' },
   type: { heading: 'Inter', body: 'Inter', mono: null, base: 17, scale: 1.3, headingWeight: 700, headingCase: 'none', tracking: 0, measure: 62 },
   grid: { maxWidth: 1100, gutter: 24, margin: 32 }, shape: { radius: 8, rule: 'hairline' },

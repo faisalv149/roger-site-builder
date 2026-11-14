@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { aiJson, CostLedger, defaultTransport, type AiTransport } from './ai.js';
+import { aiJson, ApiRequestError, CostLedger, defaultTransport, type AiTransport } from './ai.js';
 import { rankDirections } from './directions.js';
 import type { Catalog } from './review.js';
 import { stateName } from '../address.js';
@@ -320,6 +320,9 @@ export async function generateDesignSpec(cat: Catalog, brief: BusinessBrief, str
     const applied = (r.data.referencesUsed ?? []).map((i) => strategy!.layoutPatterns[i]?.pattern).filter((x): x is string => !!x);
     return { ...base, source: 'ai', spec: r.data, fallback: null, attempts: r.attempts, rejected: r.rejected, calls: ledger.calls.slice(before), ms: Date.now() - t0, references: { referenceJobId: hooks.referenceJobId ?? null, provided: !!strategy, applied } };
   } catch (e) {
+    // the API refusing the request (an invalid schema, a bad key) is a fault to report at this stage, never a reason to
+    // quietly show an older kind of design
+    if (e instanceof ApiRequestError) throw e;
     return fallbackFor(`generation failed: ${(e as Error).message.slice(0, 200)}`, { calls: ledger.calls.slice(before) });
   }
 }
