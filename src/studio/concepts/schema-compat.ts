@@ -54,6 +54,64 @@ export function unsupportedKeywords(schema: unknown, at = '$'): string[] {
   return found;
 }
 
+/**
+ * A schema as a short contract for the prompt, when the answer is ordinary JSON rather than constrained output:
+ *   string ≤240 · int 1–12 · number 15–20 · "a"|"b" · [item] (≤5) · X | null · { "key": … }
+ * Every key of an object is required and no other key is allowed. `names` gives repeated parts a name, written once
+ * above the object (e.g. TextRef = …) and referred to by that name.
+ */
+export function contractOf(schema: unknown, names: Record<string, unknown> = {}): string {
+  const byJson = new Map(Object.entries(names).map(([n, s]) => [JSON.stringify(s), n]));
+  const range = (s: Schema) => (typeof s.minimum === 'number' && typeof s.maximum === 'number' ? ` ${s.minimum}–${s.maximum}` : typeof s.minimum === 'number' ? ` ≥${s.minimum}` : typeof s.maximum === 'number' ? ` ≤${s.maximum}` : '');
+  const render = (s: unknown, depth: number, top = false): string => {
+    if (!isObj(s)) return 'any';
+    const named = byJson.get(JSON.stringify(s));
+    if (named && !top) return named;
+    if (Array.isArray(s.anyOf)) return s.anyOf.map((b) => render(b, depth)).join(' | ');
+    if (Array.isArray(s.enum)) return s.enum.map((v) => JSON.stringify(v)).join('|');
+    switch (s.type) {
+      case 'string': return `string${typeof s.maxLength === 'number' ? ` ≤${s.maxLength}` : ''}`;
+      case 'integer': return `int${range(s)}`;
+      case 'number': return `number${range(s)}`;
+      case 'boolean': return 'boolean';
+      case 'null': return 'null';
+      case 'array': {
+        const n = typeof s.minItems === 'number' && typeof s.maxItems === 'number' ? ` (${s.minItems}–${s.maxItems})` : typeof s.maxItems === 'number' ? ` (≤${s.maxItems})` : typeof s.minItems === 'number' ? ` (≥${s.minItems})` : '';
+        return `[${render(s.items, depth)}]${n}`;
+      }
+      case 'object': {
+        const props = Object.entries(isObj(s.properties) ? s.properties : {});
+        const inner = props.map(([k, v]) => `${JSON.stringify(k)}: ${render(v, depth + 1)}`);
+        const flat = `{ ${inner.join(', ')} }`;
+        if (flat.length <= 110) return flat;
+        const pad = '  '.repeat(depth + 1);
+        return `{\n${inner.map((l) => `${pad}${l}`).join(',\n')}\n${'  '.repeat(depth)}}`;
+      }
+      default: return 'any';
+    }
+  };
+  return [...Object.entries(names).map(([n, s]) => `${n} = ${render(s, 0, true)}`), render(schema, 0, true)].join('\n');
+}
+
+/**
+ * The JSON object in an ordinary text answer: the whole text, else what a ```json fence holds, else the span from
+ * the first "{" to the last "}". Throws (with the reason) when there is no single JSON object to read.
+ */
+export function parseJsonAnswer(text: string): Record<string, unknown> {
+  const t = text.trim();
+  const fenced = t.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const tries = [t, fenced, t.includes('{') ? t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1) : undefined].filter((x): x is string => !!x);
+  let why = 'no JSON object in the answer';
+  for (const x of tries) {
+    try {
+      const v = JSON.parse(x) as unknown;
+      if (isObj(v)) return v;
+      why = `the answer is ${typeOf(v)}, not a JSON object`;
+    } catch (e) { why = (e as Error).message; }
+  }
+  throw new Error(why.slice(0, 200));
+}
+
 const typeOf = (x: unknown) => (x === null ? 'null' : Array.isArray(x) ? 'array' : typeof x);
 const fits = (t: string, x: unknown) => (t === 'integer' ? Number.isInteger(x) : t === 'number' ? typeof x === 'number' && Number.isFinite(x) : typeOf(x) === t);
 const show = (x: unknown) => { const s = JSON.stringify(x) ?? String(x); return s.length > 40 ? `${s.slice(0, 37)}…` : s; };

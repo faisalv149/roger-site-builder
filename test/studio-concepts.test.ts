@@ -317,6 +317,20 @@ const answerOf = (plans: DirectionPlan[]) => ({ concepts: plans.map((p, i) => ({
   titles: [{ kind: 'offer', title: 'What we fix', intro: 'Drains, water heaters and hidden leaks.' }], primaryAction: p.primaryAction ?? '', secondaryAction: p.secondaryAction ?? '', featureIds: p.featureIds, galleryImageIds: p.galleryImageIds, storyImageId: p.storyImageId ?? '', storyText: '',
 })) });
 
+test('the open planner never falls back to the fixed directions: no valid DesignSpec fails its stage, with the reason', async () => {
+  const { agreed } = await getBriefs();
+  const asked: string[] = [];
+  const t: AiTransport = { via: 'fake', model: 'claude-sonnet-5-5', async call(r) { asked.push(r.stage); return { data: r.stage === 'design:spec' ? { thesis: 'only a thesis' } : {}, usage: { via: 'fake', model: 'claude-sonnet-5-5', inputTokens: 6000, outputTokens: 3000, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.05, costBasis: 'computed' } }; } };
+  const job = await startConceptJob({ businessKey: agreed.businessKey, revision: agreed.revision, briefHash: agreed.briefHash, planner: 'open' }, { transport: t });
+  const done = await waitForConceptJob(job.id);
+  assert.equal(done.status, 'failed');
+  assert.match(done.error ?? '', /^directions: open planner: no valid DesignSpec after 2 attempt\(s\): no valid spec after 2 attempt\(s\): \$: "palette" is missing/);
+  assert.equal(asked.filter((s) => s === 'design:spec').length, 2, 'one attempt and one repair');
+  assert.ok(!asked.includes('directions'), 'the fixed directions were never asked for');
+  assert.ok(done.stages.filter((s) => ['compose', 'render', 'validate'].includes(s.name)).every((s) => s.status === 'pending'), 'nothing was composed or rendered from another design');
+  assert.equal(done.setId && (await getConceptSet(done.setId))?.concepts.length ? 'a set' : 'no set', 'no set');
+});
+
 test('a concept set end to end: ranked rendered concepts that pass every check, are distinct on screen, and say what the preview left out', { skip: !chrome && 'no Chrome here' }, async () => {
   const { agreed, inventory } = await getBriefs();
   const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { aiJson, ApiRequestError, CostLedger, defaultTransport, type AiTransport } from './ai.js';
+import { contractOf } from './schema-compat.js';
 import { rankDirections } from './directions.js';
 import type { Catalog } from './review.js';
 import { stateName } from '../address.js';
@@ -270,11 +271,18 @@ export const SPEC_SCHEMA = obj({
   referencesUsed: { type: 'array', maxItems: 8, items: { type: 'integer', minimum: 0 } },
 });
 
+/**
+ * The DesignSpec contract Claude is given. The spec is asked for as ordinary JSON, not constrained output: its schema
+ * compiles to a grammar larger than the API accepts ("The compiled grammar is too large"). The answer is parsed and
+ * then checked against the full SPEC_SCHEMA (schemaErrors, in aiJson) and every grounding, rights and design check.
+ */
+export const SPEC_CONTRACT = contractOf(SPEC_SCHEMA, { TextRef: TEXTREF, Role: ROLE });
+
 export function specRequest(cat: Catalog, brief: BusinessBrief, strategy?: DesignStrategy | null, previous: DesignSpec[] = []) {
   const brand = brandColors(brief);
   const fonts = brandFonts(brief);
   return {
-    stage: 'design:spec', schema: SPEC_SCHEMA, maxOutputTokens: 9000,
+    stage: 'design:spec', schema: SPEC_SCHEMA, output: 'json' as const, maxOutputTokens: 9000,
     system: 'You are a senior art director composing a small-business website from first principles. You design the layout yourself from the primitives offered; you do not pick a template. Answer only with the JSON asked for.',
     prompt: [
       `Business: ${cat.business.name}${cat.business.category ? ` (${cat.business.category})` : ''}. ${cat.business.summary ?? ''}`,
@@ -293,6 +301,9 @@ export function specRequest(cat: Catalog, brief: BusinessBrief, strategy?: Desig
       ...(previous.length ? [`Versions already shown to the client: ${previousForPrompt(previous)}. This is another version: compose it differently, not as a variation — a different hero composition (change at least two of: aside kind, photo background, text side, text width, hero height) and a different page structure (at least a third of the sections, and at least two, added, removed or set out differently — or one, when the business has only two sections worth showing besides how to reach it, and none beyond the hero when it has one; necessary sections such as the menu or the visit block may stay as they are). The pages must look different, not only be specified differently. Changing colours, fonts or section order alone does not count. Keep the same brand colours, fonts and verified content.`] : []),
       'A seasonal or dated promotion with no year (a holiday, a pre-order date) must not lead the hero; it may appear lower. ' +
       'Compose the site on a 12-column grid. Decide the hero composition (where the text sits, how wide, what sits beside it and why), the section order and each section\'s arrangement, the type scale and weight, the palette roles, the imagery roles, and how it changes on a 390px phone. Make choices that follow from this business\'s content and voice, and say why in "thesis", "hero.composition" and each section\'s "purpose". Use every service at least once. Column ranges must fit 1-12 and side-by-side parts must not overlap.',
+      '',
+      'Answer with one JSON object and nothing else (no prose, no code fence), following this contract exactly: every key is required, use null only where it is allowed, use [] for an empty list, and add no other keys. "string ≤N" is at most N characters; "int a–b" and "number a–b" are inclusive ranges; "(≤N)" is the most items a list may have.',
+      SPEC_CONTRACT,
     ].join('\n'),
   };
 }
@@ -300,14 +311,19 @@ export function specRequest(cat: Catalog, brief: BusinessBrief, strategy?: Desig
 export interface DesignHooks { /** the reference job the strategy came from (recorded) */ referenceJobId?: string | null; /** versions already shown: this one must differ meaningfully from each */ previous?: DesignSpec[]; transport?: AiTransport | null; fallback?: (cat: Catalog, brief: BusinessBrief) => string; capUsd?: number; /** a concept job's ledger: the planner spends from the job's cap */ ledger?: CostLedger }
 const capUsd = () => Number(process.env.STUDIO_DESIGN_CAP_USD ?? 1.5);
 
-/** One generated design: Claude composes, the validator checks, at most one repair pass, else the directions' fallback. */
+/**
+ * One generated design: Claude composes (ordinary JSON), the full schema and the validator check, at most one repair
+ * pass. With no valid spec the result says why (`fallback.reason`); the concept job reports that as its failure and
+ * never uses the fixed directions instead.
+ */
 export async function generateDesignSpec(cat: Catalog, brief: BusinessBrief, strategy: DesignStrategy | null, hooks: DesignHooks = {}): Promise<DesignResult> {
   const t0 = Date.now();
   const id = `ds_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
   const base = { id, createdAt: new Date().toISOString(), businessKey: brief.businessKey, revision: brief.revision, strategy: strategy ? 'used' as const : 'none saved' as const };
   const fallbackFor = (reason: string, rest: Partial<DesignResult>): DesignResult => ({
     ...base, source: 'fallback', spec: null, attempts: 0, rejected: [], calls: [], ms: Date.now() - t0, ...rest,
-    fallback: { direction: (hooks.fallback ?? ((c, b) => rankDirections(c, b, 1).plans[0]?.name ?? 'none'))(cat, brief), reason },
+    // the name is a record only (the open planner never uses the directions); it can never hide the reason
+    fallback: { direction: (() => { try { return (hooks.fallback ?? ((c, b) => rankDirections(c, b, 1).plans[0]?.name ?? 'none'))(cat, brief); } catch { return 'none'; } })(), reason },
   });
   if (!['verified', 'website-only'].includes(brief.identity.status)) throw new Error(`The brief's identity is ${brief.identity.status}: settle who the business is first.`);
   const transport = hooks.transport !== undefined ? hooks.transport : defaultTransport();

@@ -8,7 +8,7 @@ import { claudeVia } from '../../content/claude.js';
 import { studioDocs } from '../../store.js';
 import { sha256, stableStringify } from '../snapshot.js';
 import type { UsageRecord } from './types.js';
-import { apiSchema, schemaErrors } from './schema-compat.js';
+import { apiSchema, parseJsonAnswer, schemaErrors } from './schema-compat.js';
 
 /**
  * Claude for concept sets, with a hard cost cap. Every call:
@@ -32,7 +32,15 @@ export const conceptCapUsd = () => Number(process.env.STUDIO_CONCEPT_CAP_USD ?? 
 export const conceptRetries = () => Math.max(0, Math.min(2, Number(process.env.STUDIO_CONCEPT_RETRIES ?? 2)));
 const effort = () => (process.env.STUDIO_CONCEPT_EFFORT || 'medium') as 'low' | 'medium' | 'high';
 
-export interface AiRequest { stage: string; system: string; prompt: string; schema: Record<string, unknown>; maxOutputTokens?: number }
+export interface AiRequest {
+  stage: string; system: string; prompt: string; schema: Record<string, unknown>; maxOutputTokens?: number;
+  /**
+   * 'schema' (default): constrained output (output_config.format, the converted schema). 'json': ordinary JSON in the
+   * answer text, for a schema too large for the API's grammar (the prompt carries its contract). Either way the answer
+   * is checked against the full original schema by aiJson.
+   */
+  output?: 'schema' | 'json';
+}
 export interface AiAnswer { data: unknown; usage: Omit<UsageRecord, 'setId' | 'stage' | 'attempt' | 'cacheHit' | 'worstCaseUsd' | 'ms' | 'ok' | 'at' | 'error'> }
 export interface AiTransport { via: 'api' | 'cli' | 'fake'; model: string; call(req: AiRequest, limits: { maxOutputTokens: number; budgetUsd: number }): Promise<AiAnswer> }
 
@@ -49,6 +57,17 @@ export class ApiRequestError extends Error {
   }
 }
 const REQUEST_ERRORS = new Set([400, 401, 403, 404, 413, 422]);
+
+/** An ordinary-JSON answer that holds no readable JSON object: a failed attempt (it may use the repair), with what it cost. */
+export class MalformedAnswer extends Error {
+  constructor(why: string, readonly usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }, readonly answer?: AiAnswer['usage']) {
+    super(`the answer was not valid JSON (${why})`);
+  }
+}
+/** the answer's JSON object, or a MalformedAnswer carrying the spend */
+function readJson(text: string, usage: MalformedAnswer['usage'], answer?: AiAnswer['usage']): Record<string, unknown> {
+  try { return parseJsonAnswer(text); } catch (e) { throw new MalformedAnswer((e as Error).message, usage, answer); }
+}
 const scrub = (s: string) => s.replace(/sk-ant-[\w-]+/g, 'sk-ant-…');
 
 export class CostLedger {
@@ -101,8 +120,9 @@ export function apiTransport(model = conceptModel()): AiTransport {
         model, max_tokens: limits.maxOutputTokens,
         system: req.system,
         messages: [{ role: 'user', content: req.prompt }],
-        // the API refuses some JSON-schema keywords: they are left out here and checked on the answer by aiJson
-        output_config: { effort: effort(), format: { type: 'json_schema', schema: apiSchema(req.schema) } },
+        // the API refuses some JSON-schema keywords: they are left out here and checked on the answer by aiJson;
+        // an ordinary-JSON request sends no format at all (its contract is in the prompt)
+        output_config: req.output === 'json' ? { effort: effort() } : { effort: effort(), format: { type: 'json_schema', schema: apiSchema(req.schema) } },
       }).finalMessage();
       let msg: Awaited<ReturnType<typeof ask>> | undefined;
       for (let i = 0; ; i++) {
@@ -117,7 +137,7 @@ export function apiTransport(model = conceptModel()): AiTransport {
       if (msg.stop_reason === 'refusal') throw new Error('Claude declined the request (refusal)');
       if (msg.stop_reason === 'max_tokens') throw Object.assign(new Error('the answer was cut off at the output limit'), { usage });
       const text = msg.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
-      return { data: JSON.parse(text), usage: { via: 'api', model, ...usage, costUsd: computedCost(model, usage), costBasis: 'computed' } };
+      return { data: readJson(text, usage), usage: { via: 'api', model, ...usage, costUsd: computedCost(model, usage), costBasis: 'computed' } };
     },
   };
 }
@@ -130,7 +150,7 @@ export function cliTransport(model = conceptModel()): AiTransport {
       const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'roger-concepts-'));
       const env = { ...process.env };
       if (!env.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
-      const args = ['-p', '--output-format', 'json', '--json-schema', JSON.stringify(apiSchema(req.schema)), '--system-prompt', req.system, '--model', model, '--effort', effort(),
+      const args = ['-p', '--output-format', 'json', ...(req.output === 'json' ? [] : ['--json-schema', JSON.stringify(apiSchema(req.schema))]), '--system-prompt', req.system, '--model', model, '--effort', effort(),
         '--tools', '', '--strict-mcp-config', '--setting-sources', 'project', '--no-session-persistence', '--max-budget-usd', limits.budgetUsd.toFixed(4)];
       return new Promise((resolve, reject) => {
         const child = spawn(config.claudeCliPath, args, { cwd, env, windowsHide: true });
@@ -149,6 +169,9 @@ export function cliTransport(model = conceptModel()): AiTransport {
           const usage = { inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0, cacheReadTokens: u.cache_read_input_tokens ?? 0, cacheWriteTokens: u.cache_creation_input_tokens ?? 0 };
           const costUsd = typeof r.total_cost_usd === 'number' ? r.total_cost_usd : computedCost(model, usage, 'cacheWrite1h');
           const answer = { via: 'cli' as const, model, ...usage, costUsd, costBasis: typeof r.total_cost_usd === 'number' ? 'reported' as const : 'computed' as const };
+          if (req.output === 'json' && !r.is_error) {
+            try { return resolve({ data: readJson(String(r.result ?? ''), usage, answer), usage: answer }); } catch (e) { return reject(e); }
+          }
           if (r.is_error || r.structured_output == null) return reject(Object.assign(new Error(String(r.result || r.subtype || 'no structured output').slice(0, 300)), { answer }));
           resolve({ data: r.structured_output, usage: answer });
         });
@@ -205,7 +228,7 @@ export async function aiJson<T>(req: AiRequest, o: { transport: AiTransport; led
         lastErrors = [(e as Error).message.replace(/sk-ant-[\w-]+/g, 'sk-ant-…').slice(0, 300)];
         await o.ledger.record({ ...base, ...usage, cacheHit: false, worstCaseUsd: worst, ms: Date.now() - started, ok: false, error: lastErrors[0] });
         if (e instanceof ApiRequestError) throw e;
-        feedback = `- the request failed: ${lastErrors[0]}`;
+        feedback = e instanceof MalformedAnswer ? `- ${lastErrors[0]}: answer with one JSON object only, exactly as the contract describes, and nothing else` : `- the request failed: ${lastErrors[0]}`;
         rejected.push({ attempt, errors: lastErrors });
         continue;
       }

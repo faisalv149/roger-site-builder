@@ -201,7 +201,9 @@ async function run(id: string, hooks: ConceptHooks): Promise<ConceptJob> {
             // another version that cannot be made different enough within the bounded attempts is reported, not replaced by
             // the directions (which would spend more and still not be a different open design)
             if (job.input.avoidSpecIds?.length) throw new Error(versionFailure(r));
-            note(`open planner gave no valid spec (${r.fallback?.reason ?? 'unknown'}); the five directions are used instead`);
+            // the open planner never falls back to the fixed directions: no valid spec after the one repair is this
+            // stage's failure, reported with the reason (a malformed or invalid answer, or no Claude here)
+            throw new Error(`open planner: no valid DesignSpec after ${r.attempts} attempt(s): ${r.fallback?.reason ?? 'unknown'}`);
           }
           let plans: DirectionPlan[] | null = null;
           if (transport) {
