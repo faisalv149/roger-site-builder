@@ -76,6 +76,10 @@ export interface ConvoMessage {
   url?: string;
   image?: string;
   title?: string;
+  /** a card's second line (a listing's address, rating and photo credit) */
+  subtitle?: string;
+  /** a card the customer can choose: the reply its button sends (the simulator; a real gateway uses the quick replies) */
+  choice?: string;
   quickReplies?: string[];
 }
 

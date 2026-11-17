@@ -38,6 +38,9 @@ discovery.resolve = async (i: { text?: string; name?: string; address?: string }
   return { status: 'choose', candidates: found, reason: 'test', query: name } as never;
 };
 discovery.isPlace = async (t: string) => PLACES.has(t.trim().toLowerCase());
+// a listing's card: its share page, and (for listings with photos) the first photo's author
+const WITH_PHOTO = new Set(['pPharm63', 'pB1']);
+discovery.card = async (c: BusinessCandidate) => ({ url: `https://cards.example/${c.placeId}/`, image: `https://cards.example/${c.placeId}/card.jpg`, photo: WITH_PHOTO.has(c.placeId) ? { author: 'A. Photographer' } : undefined });
 const siteChecks: string[] = [];
 discovery.checkSite = async (_c, url, from) => {
   siteChecks.push(url);
@@ -59,7 +62,9 @@ Object.assign(intakeDeps, {
 let n = 0;
 const convo = () => `imsg-conv-${++n}`;
 const say = async (from: string, text: string) => (await handleInbound(from, text, { async: true, intake: 'custom' })).replies;
-const texts = (r: { text: string }[]) => r.map((x) => x.text).join('\n');
+/** the conversation as read: a message's text, or a card's title and its second line */
+const texts = (r: { text: string; url?: string; title?: string; subtitle?: string }[]) => r.map((x) => (x.url ? [x.title, x.subtitle].filter(Boolean).join('\n') : x.text)).join('\n');
+const cardsOf = (r: { url?: string; title?: string; subtitle?: string; image?: string; choice?: string }[]) => r.filter((x) => x.url);
 const VOICE = /our team|the team|we'll|we will|someone (from|will)|text you|I'll text/i;
 
 test('locations are read from the message, and an address is matched to the location given', async () => {
@@ -79,7 +84,7 @@ test('a name with no location: the listings with that name to choose from; a loc
   const from = convo();
   await say(from, 'Hi');
   const a = await say(from, 'Austin Pipe Works, Heating, Air & Electric');
-  assert.match(texts(a), /^I found 2 listings on Google for Austin Pipe Works, Heating, Air & Electric\. Which one is yours\?\n1\. Austin Pipe Works, Heating, Air & Electric\n530 Lakeview Dr, Hartland, WI 53029, USA\n2\. Austin Pipe Works, Heating, Air & Electric\nW190N10000 Example Ave/);
+  assert.match(texts(a), /^I found 2 listings on Google for Austin Pipe Works, Heating, Air & Electric\. Which one is yours\?\n1\. Austin Pipe Works, Heating, Air & Electric\n530 Lakeview Dr, Hartland, WI 53029\n2\. Austin Pipe Works, Heating, Air & Electric\nW190N10000 Example Ave/);
   assert.deepEqual(a.at(-1)?.quickReplies, ['1. 530 Lakeview Dr', '2. W190N10000 Example Ave', 'None of these']);
   assert.doesNotMatch(texts(a), /Do you have a website/);
   // the customer sends a town instead of choosing: Austin, TX, where no listing with that name is, so none is offered
@@ -90,9 +95,11 @@ test('a name with no location: the listings with that name to choose from; a loc
   // the customer answers with the town only: the name is kept; only the Hartland branch is offered, with its full
   // address (its website is checked only once the customer confirms it)
   const c = await say(from, 'Hartland, WI');
-  assert.match(texts(c), /Is this your business\?\nAustin Pipe Works, Heating, Air & Electric\n530 Lakeview Dr, Hartland, WI 53029, USA\n\nIf it isn't, reply "No" or send me the Google Maps link to your listing\./);
+  assert.match(texts(c), /Is this your business\?\nAustin Pipe Works, Heating, Air & Electric\n530 Lakeview Dr, Hartland, WI 53029\nTap "Yes, that's it" to start your preview\. If it isn't yours, reply "No" or send me the Google Maps link to your listing\./);
+  // the listing is a card: it opens the listing, and choosing it is "Yes, that's it"
+  assert.deepEqual(cardsOf(c).map((x) => [x.title, x.url, x.choice]), [['Austin Pipe Works, Heating, Air & Electric', 'https://cards.example/pHart/', "Yes, that's it"]]);
+  assert.deepEqual(c.at(-1)?.quickReplies, ["Yes, that's it", 'No, not this one']);
   assert.doesNotMatch(texts(c), /Germantown/);
-  assert.ok(c.every((r) => !('url' in r) || !r.url), 'no link card under the confirmation');
 });
 
 test('name and location in one message; no website is checked or asked about before the listing is confirmed', async () => {
@@ -100,7 +107,7 @@ test('name and location in one message; no website is checked or asked about bef
   await say(from, 'Hi');
   const checks = siteChecks.length;
   const r = await say(from, "Sweet Sixth Bakeshop, Austin TX");
-  assert.match(texts(r), /^Is this your business\?\nSweet Sixth Bakeshop\n1200 S 6th St, Austin, TX 78704, USA$/m);
+  assert.match(texts(r), /^Is this your business\?\nSweet Sixth Bakeshop\n1200 S 6th St, Austin, TX 78704$/m);
   assert.doesNotMatch(texts(r), /Do you have a website|Website:/);
   assert.equal(siteChecks.length, checks, 'the website is not checked before the yes');
 });
@@ -112,7 +119,7 @@ test('before the yes the customer may correct the website (noted, not checked) o
   const odd = convo();
   await say(odd, 'Hi');
   const checks = siteChecks.length;
-  assert.match(texts(await say(odd, 'Corner Cafe, Hartland WI')), /^Is this your business\?\nCorner Cafe\n12 Main St, Hartland, WI 53029, USA$/m);
+  assert.match(texts(await say(odd, 'Corner Cafe, Hartland WI')), /^Is this your business\?\nCorner Cafe\n12 Main St, Hartland, WI 53029$/m);
   // corrections before research: the customer's own link (noted), then "no website", then a different listing
   assert.match(texts(await say(odd, 'https://www.sweetsixth.example')), /^Thanks, I'll check sweetsixth\.example once you confirm your listing\.\nIs this your business\?/);
   assert.match(texts(await say(odd, 'no website')), /^No problem, I'll build from your Google listing\.\nIs this your business\?/);
@@ -238,7 +245,9 @@ test('a name, then its street address: one lookup for both; only the business at
     const n = asked.length, checks = siteChecks.length;
     const r = await say(from, ADDRESS);
     assert.deepEqual(asked.slice(n), [{ name: 'Crescent Pharmacy', address: ADDRESS }], 'one lookup: the name kept, the address added');
-    assert.match(texts(r), /^Is this your business\?\nCrescent Pharmacy\n63 S Imperial Block, Paragon City, Lahore, 54000, Pakistan$/m);
+    assert.match(texts(r), /^Is this your business\?\nCrescent Pharmacy\n63 S Imperial Block, Paragon City, Lahore, 54000, Pakistan · Photo: A\. Photographer, Google$/m);
+    // the card shows the listing's own Google photo, live (never stored), credited to its author
+    assert.match(cardsOf(r)[0].image ?? '', /\/gphoto\/cover\/pPharm63\?w=800$/);
     assert.doesNotMatch(texts(r), /645|472|Imperial-2|Imperial Mall|I found \d listings/);
     assert.equal(siteChecks.length, checks, 'no website check before the listing is confirmed');
     assert.deepEqual((await sessionOf(from))?.candidates.map((c) => c.placeId), [PHARMACY.placeId]);
@@ -377,9 +386,13 @@ test('a name alone: up to three listings with a similar name, closest first, nev
     const n = asked.length;
     const list = await say(from, 'Crescent Pharmacy');
     assert.deepEqual(asked.slice(n), [{ name: 'Crescent Pharmacy' }], 'one lookup for the name');
-    assert.equal(list.length, 5, 'the question, three listings, and how to choose');
+    assert.equal(list.length, 5, 'the question, three listing cards, and how to choose');
     assert.match(list[0].text, /^I found 3 listings on Google for Crescent Pharmacy\. Which one is yours\?$/);
-    assert.deepEqual(list.slice(1, 4).map((r) => r.text.split('\n')[0]), ['1. Crescent Pharmacy', '2. Crescent Pharmacy - Model Town', '3. Crescent Pharmacy - Johar Town'], 'the exact name first, then Google\'s order');
+    const cards = cardsOf(list);
+    assert.deepEqual(cards.map((r) => r.title), ['1. Crescent Pharmacy', '2. Crescent Pharmacy - Model Town', '3. Crescent Pharmacy - Johar Town'], 'the exact name first, then Google\'s order');
+    assert.deepEqual(cards.map((r) => r.choice), ['1. Crescent Pharmacy', '2. Crescent Pharmacy - Model…', '3. Crescent Pharmacy - Johar…'], 'each card chooses itself (the same reply as its button)');
+    assert.deepEqual(cards.map((r) => r.subtitle), ['12 Zanjani Rd, Main Market, Lahore, 54000, Pakistan', '1 C Block, Model Town, Lahore, 54700, Pakistan · Photo: A. Photographer, Google', '6 R3, Block N, Lahore, Pakistan']);
+    assert.deepEqual(cards.map((r) => r.image), ['https://cards.example/pB2/card.jpg', 'http://localhost:4000/gphoto/cover/pB1?w=800', 'https://cards.example/pB3/card.jpg'], 'a Google photo when the listing has one, otherwise the card image');
     assert.doesNotMatch(texts(list), /645|Imperial Mall|Opticians|Cantt/);
     assert.deepEqual(list.at(-1)?.quickReplies, ['1. Crescent Pharmacy', '2. Crescent Pharmacy - Model…', '3. Crescent Pharmacy - Johar…', 'None of these']);
     assert.deepEqual(starts, before, 'nothing starts before the customer chooses');

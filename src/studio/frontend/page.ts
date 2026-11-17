@@ -3,6 +3,7 @@ import type { Catalog, Photo } from '../concepts/review.js';
 import { placeholderSrc, parseListing, LISTING_CSS } from '../concepts/listing-photos.js';
 import { undatedSeasonal, withoutHoursCaveats } from '../../util/text.js';
 import { inferenceProblems } from './media-gate.js';
+import { PAGE_CLIP, unstripPhotos } from './layout-guard.js';
 
 export interface FrontendInput {
   business: Catalog['business'];
@@ -38,6 +39,7 @@ DATA BINDINGS (content plumbing, not layout choices):
 - A photo shows what is in it, nothing more. Google listing photos were taken by customers, not the business. Your own words never claim photos are the business's own, never call the people in a photo or the reviewers "members", and never mention membership, results, transformations, amenities (a kids' area, pool, sauna, café, lockers, showers, parking), classes, coaches or trainers unless the business's own verified text (its lines, offerings, story, summary) uses that word. Say "people training", "the floor", "reviewers" instead.
 - Only the listed site pages exist: never refer to any other page (no "each location's page", "our menu page" or "see the gallery page" unless that page is listed).
 - Masks and clip paths are for decoration only: never put mask, -webkit-mask or clip-path on an element that contains a photo, a name, an offering, text or an action, and never hide those with opacity, transforms or off-screen positioning. Make notches, cut edges and shapes with pseudo-elements or empty decorative elements. A round or arched photo is fine when its frame (border-radius) or the img itself is shaped and the subject stays visible.
+- Every photo and its credit is fully in view at 1440px and at 390px without sideways scrolling: never put photos in a horizontally scrolling strip or carousel (overflow-x auto/scroll, grid-auto-flow: column); let photo grids wrap into rows. Nothing may make the page wider than the window: keep a decoration that bleeds, rotates or extends past the edge inside a section that clips it (overflow-x: clip).
 - Your own words contain no digits at all: no "01"/"02" numbering, no "page 2", no ordinals such as "1st" or "3rd floor", no years. Number a list with CSS counters (::before { content: counter(...) }); every fact that has a number (address, floor, hours, phone, rating, prices) comes only through data-fact.
 - Native HTML details/summary can provide the mobile menu or expandable content. All styling belongs in css: no style attributes. No scripts, forms, inline event handlers, external embeds or third-party requests. No external stylesheets: fonts are loaded by Roger.
 Accessibility: semantic header/main/footer, exactly one h1, logical headings, keyboard-visible focus, readable contrast and type, reduced-motion support if animated. Links should work at 390px and desktop. Don't hide required facts to pass validation.
@@ -59,8 +61,11 @@ export interface PageLink { slug: string; title: string }
  *     trainers (media-gate.ts); photos pass the media gate before any page is written.
  *  3: Claude's copy may not refer to a page the site does not have ("each location's page", "our menu page" with no
  *     menu page).
+ *  4: layout guards (layout-guard.ts): the top-level parts of a page clip what pokes out sideways, so a decoration can't
+ *     make the page scroll sideways; a box that scrolls Google photos sideways is laid out to wrap, so every photo and
+ *     its credit is in view.
  */
-export const PIPELINE_REV = 3;
+export const PIPELINE_REV = 4;
 export interface CheckOptions { pages?: PageLink[]; required?: string[]; minPhotos?: number; requireAction?: boolean; page?: string; /** the version's pipeline revision (default: the current one) */ rev?: number }
 export interface CompileOptions extends CheckOptions {
   /** where a page link goes (the preview's address, or a published site's) */
@@ -229,6 +234,12 @@ export function compilePage(code: FrontendCode, input: FrontendInput, opts: Comp
   const errors = [...checkCode(code, input, opts), ...(opts.extraCss ? cssProblems(opts.extraCss) : []), ...(opts.edits ? editProblems(opts.edits) : [])];
   if (errors.length) throw new Error(errors.join('; '));
   const $ = load(code.html, {}, false);
+  // revision 4: photo strips (boxes that scroll Google photos sideways) wrap instead, in the homepage CSS and the site's
+  const rev4 = (opts.rev ?? PIPELINE_REV) >= 4;
+  const listingIds = new Set(input.photos.filter((p) => parseListing(p.url)).map((p) => p.id));
+  const holdsListingPhoto = (el: unknown) => $(el as never).find('img[data-photo]').toArray().some((img) => listingIds.has($(img).attr('data-photo') ?? ''));
+  const homeCss = rev4 ? unstripPhotos(code.css, $, holdsListingPhoto) : { css: code.css, strips: new Set<unknown>() };
+  const extraCss = rev4 && opts.extraCss ? unstripPhotos(opts.extraCss, $, holdsListingPhoto, { strips: homeCss.strips }).css : opts.extraCss;
   const href = opts.pageHref ?? ((slug: string) => (slug === 'home' ? './' : `./${slug}`));
   $('a[data-page]').each((_, el) => { $(el).attr('href', href($(el).attr('data-page')!)); });
   assignEditKeys($, opts.page ?? 'home', opts.edits);
@@ -263,5 +274,5 @@ export function compilePage(code: FrontendCode, input: FrontendInput, opts: Comp
   });
   const rev2 = (opts.rev ?? PIPELINE_REV) >= 2;
   const fontLink = code.fonts.length ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?${code.fonts.map((f) => `family=${encodeURIComponent(f)}:wght@400;500;600;700;800`).join('&amp;')}&amp;display=swap">` : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${esc(input.business.name)}${opts.title ? ` — ${esc(opts.title)}` : ''} — Design preview</title>${opts.version ? `<meta name="roger-version" content="${esc(opts.version)}">` : ''}${fontLink}<style>${rev2 ? `${PHOTO_CSS_REV2}\n` : ''}${code.css}${opts.extraCss ? `\n${opts.extraCss}` : ''}\n${rev2 ? '' : '.roger-photo{position:relative;display:block}.roger-photo>img{display:block;width:100%;height:100%;object-fit:cover}'}${LISTING_CSS}\n[data-fact="hours"]{white-space:pre-line}</style></head><body>${$.html()}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${esc(input.business.name)}${opts.title ? ` — ${esc(opts.title)}` : ''} — Design preview</title>${opts.version ? `<meta name="roger-version" content="${esc(opts.version)}">` : ''}${fontLink}<style>${rev2 ? `${PHOTO_CSS_REV2}\n` : ''}${rev4 ? `${PAGE_CLIP}\n` : ''}${homeCss.css}${extraCss ? `\n${extraCss}` : ''}\n${rev2 ? '' : '.roger-photo{position:relative;display:block}.roger-photo>img{display:block;width:100%;height:100%;object-fit:cover}'}${LISTING_CSS}\n[data-fact="hours"]{white-space:pre-line}</style></head><body>${$.html()}</body></html>`;
 }

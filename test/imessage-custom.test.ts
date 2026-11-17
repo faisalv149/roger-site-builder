@@ -79,3 +79,26 @@ test('a first version that fails tells the customer plainly and offers a retry; 
   assert.match(ci.customMessages(f)[0].text, /^Sorry, I couldn't finish researching your business this time\. Reply "try again" and I'll start again\.$/);
   assert.deepEqual(ci.customMessages(f), []);
 });
+
+test('a server restart during the homepage starts it again once; a second one is not started again automatically (each start is a paid homepage)', async () => {
+  const saved = { ...ci.intakeDeps };
+  let starts = 0;
+  const generating = (id: string) => ({ ...job(id), status: 'generating', stage: 'homepage', updatedAt: new Date().toISOString() }) as FrontendJob;
+  Object.assign(ci.intakeDeps, {
+    getFrontendJob: async (id: string) => generating(id),
+    frontendJobRunning: () => false, // this server is not running it: it restarted
+    markInterrupted: async (id: string) => ({ ...generating(id), code: undefined }), // no accepted homepage yet
+    startFrontendJob: async () => ({ id: `fe_restart${++starts}` }),
+  });
+  try {
+    const r = run(); r.versions.push({ n: 1, requestedAt: 'x', status: 'generating', jobId: 'fe_restart0' });
+    await ci.advanceCustom(r);
+    assert.equal(starts, 1, 'started again once');
+    assert.equal(r.versions[0].status, 'generating'); assert.equal(r.versions[0].jobId, 'fe_restart1');
+    assert.match(r.versions[0].note ?? '', /the server restarted during the homepage \(job fe_restart0\): started again/);
+    await ci.advanceCustom(r);
+    assert.equal(starts, 1, 'not a second time');
+    assert.equal(r.versions[0].status, 'failed');
+    assert.match(r.versions[0].error ?? '', /restarted during the homepage again \(job fe_restart1\): not started again automatically/);
+  } finally { Object.assign(ci.intakeDeps, saved); }
+});

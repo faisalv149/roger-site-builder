@@ -12,7 +12,7 @@ Object.assign(process.env, { MOCK: '1', CLAUDE_CLI: '0', ANTHROPIC_API_KEY: '', 
 const { undatedSeasonal } = await import('../src/util/text.js');
 const { checkCode, pageReferenceProblems, PIPELINE_REV } = await import('../src/studio/frontend/page.js');
 const { inferenceProblems } = await import('../src/studio/frontend/media-gate.js');
-const { presendProblems } = await import('../src/imessage/custom-intake.js');
+const { presendProblems, presendNotes, blockingProblems, versionChecks } = await import('../src/imessage/custom-intake.js');
 const { reviewPages } = await import('../src/studio/frontend/review.js');
 const { screenshotsAvailable, launchBrowser } = await import('../src/render/og.js');
 import type { FrontendCode, FrontendInput } from '../src/studio/frontend/page.js';
@@ -64,22 +64,26 @@ test('references to pages the site does not have are refused (revision 3); real 
   assert.match(pageReferenceProblems('Prices are on our menu page.', site).join(), /refers to a menu page/);
   assert.deepEqual(pageReferenceProblems('Prices are on our menu page.', [...site, { slug: 'menu', title: 'Menu' }]), []);
   for (const ok of ['See the Visit page for directions.', 'More on our About page.', 'Read the reviews on our Google page.', 'Everything on this page.']) assert.deepEqual(pageReferenceProblems(ok, site), [], ok);
-  assert.equal(PIPELINE_REV, 3);
+  assert.ok(PIPELINE_REV >= 3, "the page-reference rule applies from revision 3 on");
   const c = visitCode("<p>Each location's page lists the details.</p>");
   const opts = { pages, required: ['name'], minPhotos: 0, page: 'visit' };
   assert.match(checkCode(c, input(), opts).join(), /location page/);
   assert.deepEqual(checkCode(c, input(), { ...opts, rev: 2 }).filter((e) => /location page/.test(e)), [], 'a revision 2 version is unchanged');
 });
 
-test('before sending: a Visit page needs the verified address and hours, and no page may point to a missing page', () => {
+test('before sending: a missing address or hours is for staff to check, never a reason to withhold the preview; a page that points to a missing page is blocked', () => {
   const job = (facts: Record<string, string>, visit: string, home = '<main><h1>Home</h1></main>'): FrontendJob => ({ input: input(facts), pages: [{ slug: 'visit', title: 'Visit', purpose: '', required: [], minPhotos: 0, requireAction: true }], code: { idea: '', fonts: [], css: '', html: home }, site: { css: '', pages: [{ slug: 'visit', html: visit }] } } as unknown as FrontendJob);
   const full = '<main><h1>Visit</h1><p data-fact="address"></p><p data-fact="hours"></p></main>';
   assert.deepEqual(presendProblems(job({ name: 'X', address: 'A', hours: 'H' }, full)), []);
-  const elizabeth = presendProblems(job({ name: 'X', phone: 'P', rating: 'R' }, '<main><h1>Visit</h1><p data-fact="phone"></p></main>', "<main><h1>Home</h1><p>Each location's page has its menus.</p></main>"));
-  assert.ok(elizabeth.some((p) => /no verified address/.test(p)));
-  assert.ok(elizabeth.some((p) => /no verified hours/.test(p)));
-  assert.ok(elizabeth.some((p) => /On the home page: "Each location's page has its menus\." refers to a location page/.test(p)));
-  assert.ok(presendProblems(job({ name: 'X', address: 'A', hours: 'H' }, '<main><h1>Visit</h1><p data-fact="address"></p></main>')).some((p) => /does not show the verified hours/.test(p)));
+  assert.deepEqual(presendNotes(job({ name: 'X', address: 'A', hours: 'H' }, full)), []);
+  // a service-area business: its listing has no address and no hours; the Visit page rightly shows neither
+  const sab = job({ name: 'X', phone: 'P', rating: 'R' }, '<main><h1>Visit</h1><p data-fact="phone"></p></main>', "<main><h1>Home</h1><p>Each location's page has its menus.</p></main>");
+  assert.ok(!presendProblems(sab).some((p) => /address|hours/.test(p)), 'not blocking');
+  assert.deepEqual(presendNotes(sab), ['visit page: the Google listing has no address (a service-area business hides it), so the page shows none; add it when the owner confirms it', 'visit page: the Google listing has no hours, so the page shows none; add it when the owner confirms it']);
+  assert.ok(presendProblems(sab).some((p) => /On the home page: "Each location's page has its menus\." refers to a location page/.test(p)), 'a reference to a missing page still blocks');
+  assert.deepEqual(blockingProblems({ ...sab, status: 'needs-review', checks: { static: 'passed' }, review: { ran: true, pass: true, problems: [] } } as unknown as FrontendJob).filter((p) => /address|hours/.test(p)), []);
+  assert.ok(versionChecks({ ...sab, status: 'needs-review', checks: { static: 'passed' }, review: { ran: true, pass: true, problems: [] }, input: { ...sab.input, notes: [] } } as unknown as FrontendJob).staff.some((n) => /no address/.test(n)), 'shown to staff');
+  assert.deepEqual(presendNotes(job({ name: 'X', address: 'A', hours: 'H' }, '<main><h1>Visit</h1><p data-fact="address"></p></main>')), ['visit page: the verified hours is not shown on it']);
 });
 
 const doc = (body: string, css: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><style>body{margin:0;font:16px/1.5 sans-serif;background:#fff;color:#111}main{max-width:900px;margin:auto;padding:20px}${css}</style></head><body><main><h1>Test</h1>${body}</main></body></html>`;

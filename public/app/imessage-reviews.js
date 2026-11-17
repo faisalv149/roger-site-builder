@@ -35,7 +35,7 @@ function convo(c) {
     <p class="meta">Conversation <code>${esc(c.from)}</code> · listing <code>${esc(r.placeId)}</code>${r.website ? ` · website ${esc(r.website)}` : ' · no website'} · updated ${esc(new Date(c.updatedAt).toLocaleString())}</p>
     <p class="meta">Research: ${res ? `${res.reused ? 'saved brief reused' : 'new research'} (${esc(res.reason)}) · ${secs(res.ms)} · ${usd(res.costUsd)}` : 'not started'}${r.businessKey ? ` · brief <code>${esc(r.businessKey)}</code> r${esc(r.revision)}` : ''}${r.stage === 'failed' ? ` · <span class="err">failed: ${esc(r.error)}</span>` : ''}${r.approved ? ` · <strong>customer approved version ${r.approved.n}</strong> (${esc(new Date(r.approved.at).toLocaleString())}; not published)` : ''}</p>
     ${c.versions.map((v) => version(c, v)).join('')}
-    <details><summary>Customer conversation (${c.messages.length} messages)</summary><div class="chat">${c.messages.map((m) => `<div class="${m.dir === 'in' ? 'in' : 'out'}">${esc(m.text)}${m.url && !String(m.text).includes(m.url) ? `\n${esc(m.url)}` : ''}</div>`).join('')}</div></details>
+    <details><summary>Customer conversation (${c.messages.length} messages)</summary><div class="chat">${c.messages.map((m) => `<div class="${m.dir === 'in' ? 'in' : 'out'}">${esc(m.text)}${m.title ? `${m.text ? '\n' : ''}[card] ${esc(m.title)}${m.subtitle ? ` · ${esc(m.subtitle)}` : ''}` : ''}${m.url && !String(m.text).includes(m.url) ? `\n${esc(m.url)}` : ''}</div>`).join('')}</div></details>
   </article>`;
 }
 

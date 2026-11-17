@@ -86,7 +86,7 @@ async function record(from: string, add: Conversation['messages'], s: Session): 
   return c;
 }
 
-export interface Reply { text: string; url?: string; image?: string; title?: string; quickReplies?: string[] }
+export interface Reply { text: string; url?: string; image?: string; title?: string; subtitle?: string; choice?: string; quickReplies?: string[] }
 const fromCard = (c: IMessageCard): Reply => ({ text: c.text, url: c.url, image: c.image, title: c.title, quickReplies: c.quickReplies });
 const outgoing = (replies: Reply[]): Conversation['messages'] => { const at = new Date().toISOString(); return replies.map((r) => ({ dir: 'out' as const, at, ...r })); };
 

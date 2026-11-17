@@ -28,6 +28,8 @@ export interface FrontendJob {
   checks: { static: 'pending' | 'passed'; browser: 'pending' | 'passed' | 'failed'; copy: 'owner-review-required'; publication: 'disabled' };
   /** the pipeline revision this version was made under (rules and rendering); absent = 1, the original */
   rev?: number;
+  /** a version never sent, rendered again under a later revision's layout guards (its code and copy unchanged) */
+  rerendered?: { from: number; to: number; at: string };
   /** photos kept off this version by the media gate or by staff, each with its rule and reason; never shown again */
   withheldPhotos?: PhotoDecision[];
   /** the rendered-page review (every page at desktop and phone widths) */
@@ -126,9 +128,12 @@ export async function reviewVersion(job: FrontendJob, opts: { offline?: boolean;
  * Run a finished version's rendered review again and record it (staff, after a failure that may have been transient,
  * such as an image host dropping requests). The version's content and links never change; only its check record does.
  */
-export async function recheckVersion(id: string): Promise<FrontendJob> {
+export async function recheckVersion(id: string, opts: { /** the version was never sent: render it under the current layout guards */ upgrade?: boolean } = {}): Promise<FrontendJob> {
   const job = await getFrontendJob(id);
   if (!job || job.status !== 'needs-review') throw new Error('Only a finished version can be checked again.');
+  // revision 3 to 4 changes only how the page is laid out (layout-guard.ts), not its code, copy rules or photos: a
+  // version that was never sent is checked as the current compiler renders it. Older revisions keep their own rules.
+  if (opts.upgrade && revOf(job) === 3 && PIPELINE_REV === 4) { job.rerendered = { from: 3, to: 4, at: new Date().toISOString() }; job.rev = 4; }
   // the worker runs it (a browser review of every page can outlast a web request): marked as in its checks until done
   if (handOff()) { job.stage = 'checks'; job.recheckRequestedAt = new Date().toISOString(); await save(job); return job; }
   await reviewVersion(job);

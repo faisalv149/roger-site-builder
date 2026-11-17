@@ -17,7 +17,9 @@
  * (send a link, or "no website"). The normal client flow (flow.ts) is unchanged.
  */
 import { addressAgrees, addressNamed, NAME_MATCH, parseBusinessInput, resolveBusiness } from '../studio/resolve-business.js';
-import { searchCandidates } from '../sources/places.js';
+import { liveListingPhotos, searchCandidates } from '../sources/places.js';
+import { config } from '../config.js';
+import { confirmBusinessCard } from './cards.js';
 import { scanWebsite } from '../sources/website.js';
 import { matchCandidate, nameSimilarity, sourceView } from '../sources/identity.js';
 import { registrableHost } from '../sources/site-content.js';
@@ -41,6 +43,11 @@ export const discovery = {
   /** is this text a place (a town, state, ZIP or country) rather than a business? */
   isPlace: async (text: string) => { const r = await searchCandidates(text, { limit: 3 }); return !r.candidates.length && r.rejected.length > 0; },
   /** does this website belong to this listing? its own name, phone or address must match the listing (not the link) */
+  /** the listing's card: its share page (opens the listing in Google Maps) and, when it has one, its first photo's author */
+  card: async (c: BusinessCandidate) => {
+    const [card, photos] = await Promise.all([confirmBusinessCard(c).catch(() => undefined), liveListingPhotos(c.placeId).catch(() => [])]);
+    return { url: card?.url ?? c.mapsUrl, image: card?.image, photo: photos.length ? { author: photos[0].authors?.[0]?.name } : undefined };
+  },
   checkSite: async (c: BusinessCandidate, url: string, from: SiteCheck['from']): Promise<SiteCheck> => {
     try {
       const scan = await scanWebsite(url, { extraPages: 0, render: 'never', crawl: false });
@@ -142,14 +149,35 @@ export function settle(s: CustomSession) {
   if (sent?.url) s.lastSiteUrl = sent.url;
 }
 
-/** the listing to confirm: its name and full address (the website is checked only once the customer says yes) */
-const confirmText = (c: BusinessCandidate): CustomReply =>
-  ({ text: `Is this your business?\n${c.name}\n${c.address ?? ''}\n\nIf it isn't, reply "No" or send me the Google Maps link to your listing.`, quickReplies: ['Yes, that\'s it', 'No, not this one'] });
+/**
+ * A listing as a card: its photo (the listing's first Google photo, shown live from Google and never stored, with its
+ * author credited; otherwise Roger's own card image), its name, address and rating. Tapping it opens the listing in
+ * Google Maps, so the customer can see it is theirs. With no link for it, the listing is a plain message instead.
+ */
+async function listingCard(c: BusinessCandidate, n?: number, choice?: string): Promise<CustomReply> {
+  const title = `${n ? `${n}. ` : ''}${c.name}`;
+  const card = await discovery.card(c).catch(() => undefined);
+  const rating = c.rating ? `★ ${c.rating.toFixed(1)}${c.reviewCount ? ` (${c.reviewCount} reviews)` : ''}` : '';
+  if (!card?.url) return { text: [title, c.address, rating].filter(Boolean).join('\n') };
+  const credit = card.photo ? `Photo: ${card.photo.author ? `${card.photo.author}, ` : ''}Google` : '';
+  return {
+    text: '', url: card.url, title, ...(choice ? { choice } : {}),
+    image: card.photo ? `${config.publicBaseUrl}/gphoto/cover/${encodeURIComponent(c.placeId)}?w=800` : card.image,
+    subtitle: [(c.address ?? '').replace(/, USA$/, ''), rating, credit].filter(Boolean).join(' · '),
+  };
+}
 
-function offer(s: CustomSession, intro?: string): CustomReply[] {
+const CONFIRM_CHOICES = ['Yes, that\'s it', 'No, not this one'];
+/** the listing to confirm, as a card (the website is checked only once the customer says yes) */
+const confirmCard = async (c: BusinessCandidate): Promise<CustomReply[]> => [
+  { text: 'Is this your business?' }, await listingCard(c, undefined, CONFIRM_CHOICES[0]),
+  { text: 'Tap "Yes, that\'s it" to start your preview. If it isn\'t yours, reply "No" or send me the Google Maps link to your listing.', quickReplies: CONFIRM_CHOICES },
+];
+
+async function offer(s: CustomSession, intro?: string): Promise<CustomReply[]> {
   s.state = 'confirm';
-  const r = confirmText(s.candidates[s.idx]);
-  return intro ? [{ text: intro }, r] : [r];
+  const r = await confirmCard(s.candidates[s.idx]);
+  return intro ? [{ text: intro }, ...r] : r;
 }
 
 /** a name similar enough to put a listing on the list the customer chooses from (they confirm it by choosing) */
@@ -180,11 +208,11 @@ async function pickList(s: CustomSession): Promise<CustomReply[] | undefined> {
   if (!list.length) return undefined;
   s.candidates = list; s.idx = 0; s.state = 'choose';
   const labels = pickLabels(list);
-  const cards: CustomReply[] = list.map((c, i) => ({ text: `${list.length > 1 ? `${i + 1}. ` : ''}${c.name}\n${c.address ?? ''}` }));
+  const cards = await Promise.all(list.map((c, i) => listingCard(c, list.length > 1 ? i + 1 : undefined, labels[i])));
   return [{ text: list.length > 1 ? `I found ${list.length} listings on Google for ${s.query}. Which one is yours?` : 'I found this listing on Google. Is it yours?' }, ...cards,
     list.length > 1
       ? { text: 'Tap yours to start your preview. If none of these is yours, tap "None of these" or send me the address or the Google Maps link.', quickReplies: [...labels, 'None of these'] }
-      : { text: 'Tap "Yes" to start your preview. If it isn\'t yours, tap "No" or send me the address or the Google Maps link.', quickReplies: [...labels, 'No, not this one'] }];
+      : { text: 'Tap "Yes, that\'s mine" to start your preview. If it isn\'t yours, tap "No, not this one" or send me the address or the Google Maps link.', quickReplies: [...labels, 'No, not this one'] }];
 }
 
 /** after the customer confirmed the listing: the website (theirs, or the listing's) is checked against it */
@@ -276,8 +304,8 @@ export async function respondCustom(msg: string, s: CustomSession): Promise<Cust
     // a Google Maps link: the customer's own listing, looked up instead
     if (url && MAPS_RE.test(url)) { s.state = 'need-business'; return respondCustom(msg, s); }
     // the website before research starts: noted now, checked against the listing once it is confirmed
-    if (url) { s.siteUrl = url; s.noSite = false; return [{ text: `Thanks, I'll check ${host(url)} once you confirm your listing.` }, confirmText(c)]; }
-    if (NO_SITE.test(msg)) { s.noSite = true; s.siteUrl = undefined; return [{ text: 'No problem, I\'ll build from your Google listing.' }, confirmText(c)]; }
+    if (url) { s.siteUrl = url; s.noSite = false; return [{ text: `Thanks, I'll check ${host(url)} once you confirm your listing.` }, ...await confirmCard(c)]; }
+    if (NO_SITE.test(msg)) { s.noSite = true; s.siteUrl = undefined; return [{ text: 'No problem, I\'ll build from your Google listing.' }, ...await confirmCard(c)]; }
     if (NO.test(msg)) {
       s.idx++;
       if (s.idx < s.candidates.length) return offer(s, 'How about this one?');

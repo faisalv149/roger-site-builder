@@ -62,8 +62,27 @@ export const MEASURE = async () => {
     if (over) out.push({ photo, problem: `credit is covered by ${label(over)}` });
   }
   scrollTo(0, 0);
+  // text that runs past the window's side (the page clips sideways overflow from revision 4, so the scroll check alone
+  // would no longer see it). Not: text inside a box the visitor can scroll, hidden or screen-reader-only text, decoration
+  // hidden from assistive technology.
+  // (the text itself is measured: a block's own box stays inside the window when its text runs out of it)
+  const cut: string[] = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  for (let n = walker.nextNode(); n && cut.length < 3; n = walker.nextNode()) {
+    const text = (n.textContent ?? '').trim(), el = n.parentElement;
+    if (!text || !el || el.closest('[aria-hidden="true"],script,style,noscript')) continue;
+    range.selectNodeContents(n);
+    const r = range.getBoundingClientRect();
+    if (r.width < 3 || r.height < 3 || (r.right <= innerWidth + 2 && r.left >= -2)) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.clip !== 'auto' || cs.clipPath !== 'none' || r.right < 0 || r.left > innerWidth) continue;
+    let scrolls = false;
+    for (let a: Element | null = el; a && a !== document.body; a = a.parentElement) if (/(auto|scroll)/.test(getComputedStyle(a).overflowX)) { scrolls = true; break; }
+    if (!scrolls) cut.push(`"${text.slice(0, 40)}" (${label(el)})`);
+  }
   return {
-    credits: imgs.length, creditProblems: out,
+    credits: imgs.length, creditProblems: out, cut,
     overflow: document.documentElement.scrollWidth > innerWidth + 1,
     broken: Array.from(document.images).filter((im) => im.complete && im.naturalWidth === 0).length,
     version: document.querySelector('meta[name="roger-version"]')?.getAttribute('content') ?? null,
@@ -245,6 +264,7 @@ export async function reviewPages(pages: { slug: string; html: string }[], opts:
             ...audit.problems,
             ...m.creditProblems.map((c) => `photo ${c.photo}: ${c.problem}`),
             ...(m.overflow ? ['the page scrolls sideways (horizontal overflow)'] : []),
+            ...(m.cut.length ? [`text runs past the side of the window: ${m.cut.join('; ')}`] : []),
             ...(m.broken ? [`${m.broken} image(s) did not load`] : []),
             ...(opts.version && m.version !== opts.version ? [`the page is not stamped with this version (${m.version ?? 'none'})`] : []),
             ...(pageErrors ? [`${pageErrors} script error(s) on the page`] : []),

@@ -34,7 +34,7 @@ import { studioRoutes } from './studio/routes.js';
 import { resumeInterruptedJobs } from './studio/jobs.js';
 import { shareRoutes } from './studio/concepts/share.js';
 import { fillListingPhotos } from './studio/concepts/listing-photos.js';
-import { fillGoogleContent, googlePhotoRoute } from './sources/google-live.js';
+import { fillGoogleContent, googleCoverRoute, googlePhotoRoute } from './sources/google-live.js';
 import { claudeEnabled, claudeKeyStatus, claudeToolMode, claudeVia } from './content/claude.js';
 
 const app = express();
@@ -51,7 +51,7 @@ app.use(express.urlencoded({ extended: false }));
 // ── the beta (ROGER_BETA=1): only the custom flow is served. The old Studio (theme builder, concepts, owner review,
 // the normal simulator) and every API behind it are off; /app/ is the beta's staff app (reviews and invites). The normal
 // client path is unchanged everywhere the beta switch is off.
-const BETA_PATHS = /^\/$|^\/app\/?$|^\/app\/(index\.html|imessage-reviews\.(html|js|css)|frontend\.(html|js|css))$|^\/imessage\/(index\.html|imessage\.(js|css))?$|^\/v\/|^\/api\/health$|^\/api\/staff\/me$|^\/api\/imessage\/inbound$|^\/api\/conversations\/[^/]+$|^\/api\/studio\/(imessage-reviews|beta-invites)(\/|$)|^\/api\/studio\/(jobs|resolve|businesses|frontend-jobs)$|^\/api\/studio\/jobs\/[A-Za-z0-9_-]+$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}(\/resume)?$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}\/preview(\/[a-z0-9-]+)?$|^\/gphoto\/|^\/robots\.txt$|^\/favicon/;
+const BETA_PATHS = /^\/$|^\/app\/?$|^\/app\/(index\.html|imessage-reviews\.(html|js|css)|frontend\.(html|js|css))$|^\/imessage\/(index\.html|imessage\.(js|css))?$|^\/v\/|^\/api\/health$|^\/api\/staff\/me$|^\/api\/imessage\/inbound$|^\/api\/conversations\/[^/]+$|^\/api\/studio\/(imessage-reviews|beta-invites)(\/|$)|^\/api\/studio\/(jobs|resolve|businesses|frontend-jobs)$|^\/api\/studio\/jobs\/[A-Za-z0-9_-]+$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}(\/resume)?$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}\/preview(\/[a-z0-9-]+)?$|^\/gphoto\/|^\/cards\/|^\/robots\.txt$|^\/favicon/;
 if (config.beta.enabled) app.use((req, res, next) => {
   if (!BETA_PATHS.test(req.path)) return res.status(404).type('text/plain').send('Not part of the Roger beta.');
   if (req.path === '/' || req.path === '/app' || req.path === '/app/' || req.path === '/app/index.html') return res.redirect(302, '/app/frontend.html');
@@ -113,6 +113,7 @@ app.use('/owner', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex', 'r
 app.use('/stock', express.static(path.join(config.dirs.public, 'stock'), { maxAge: '7d' }));
 // Google listing photos for the page being viewed (never stored), and the page's Google credits and reviews filled
 // per view (src/sources/google-live.ts)
+app.get('/gphoto/cover/:placeId', wrap(googleCoverRoute));
 app.get('/gphoto/:placeId/:n', wrap(googlePhotoRoute));
 // a site page with Google content filled for this view (credits, reviews, listing photos)
 const fillLive = async (req: express.Request, res: express.Response, next: express.NextFunction) => {

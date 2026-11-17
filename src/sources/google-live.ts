@@ -185,3 +185,20 @@ export async function googlePhotoRoute(req: Request, res: Response, deps: { phot
   if (!uri) return res.status(404).end();
   res.redirect(302, uri);
 }
+
+/**
+ * GET /gphoto/cover/:placeId?w=800 → a redirect to the listing's first Google photo as Google serves it now (the
+ * listing card in the conversation, where the customer picks their business). Nothing is stored; the card that shows
+ * it credits the photo's author. 404 when the listing has no photo (the card then shows its own image).
+ */
+export async function googleCoverRoute(req: Request, res: Response, deps: { photos?: typeof liveListingPhotos; uri?: typeof livePhotoUri } = {}) {
+  const placeId = String(req.params.placeId);
+  const width = Math.min(1200, Math.max(200, Number(req.query.w) || 800));
+  res.set({ 'cache-control': 'private, no-store', 'x-robots-tag': 'noindex' });
+  if (!/^[A-Za-z0-9_-]{6,200}$/.test(placeId)) return res.status(404).end();
+  const first = (await (deps.photos ?? liveListingPhotos)(placeId).catch(() => []))[0];
+  if (!first) return res.status(404).end();
+  if (first.name.startsWith('file:')) return res.type(path.extname(first.name) || 'jpg').send(fs.readFileSync(path.resolve(config.dirs.fixtures, '..', first.name.slice(5))));
+  const uri = await (deps.uri ?? livePhotoUri)(first.name, width).catch(() => undefined);
+  return uri ? res.redirect(302, uri) : res.status(404).end();
+}

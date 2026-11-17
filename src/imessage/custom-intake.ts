@@ -168,6 +168,8 @@ async function generate(run: CustomRun, v: CustomVersion) {
         catch (e) { v.status = 'failed'; v.error = `interrupted, and the inner pages could not resume: ${(e as Error).message}`; v.finishedAt = now(); }
         return;
       }
+      // once: a second interruption is not started again automatically (each start is a new paid homepage)
+      if (/the server restarted during the homepage/.test(v.note ?? '')) { v.status = 'failed'; v.error = `the server restarted during the homepage again (job ${job.id}): not started again automatically`; v.finishedAt = now(); return; }
       v.note = `${v.note ? `${v.note}; ` : ''}the server restarted during the homepage (job ${job.id}): started again`;
       v.jobId = undefined;
       return generate(run, v);
@@ -194,19 +196,13 @@ export function blockingProblems(job: FrontendJob): string[] {
 }
 
 /**
- * What a customer must never be sent, checked on every version whatever rules it was made under: a Visit page without
- * the business's verified address and hours, and words that send the reader to a page this site does not have.
+ * What a customer must never be sent, checked on every version whatever rules it was made under: words that send the
+ * reader to a page this site does not have. (A fact the listing doesn't have is not a reason to withhold a preview:
+ * see presendNotes.)
  */
 export function presendProblems(job: FrontendJob): string[] {
   const out: string[] = [];
   const pages = job.pages ?? [];
-  if (pages.some((p) => p.slug === 'visit')) {
-    const visit = job.site?.pages.find((p) => p.slug === 'visit')?.html ?? '';
-    for (const k of ['address', 'hours'] as const) {
-      if (!job.input.facts[k]) out.push(`the Visit page has no verified ${k}: the research found none for this listing, so it cannot show one`);
-      else if (!new RegExp(`data-fact="${k}"`).test(visit)) out.push(`the Visit page does not show the verified ${k}`);
-    }
-  }
   const all = [{ slug: 'home', html: job.code?.html ?? '' }, ...(job.site?.pages ?? [])];
   for (const p of all) {
     const $ = load(p.html, {}, false);
@@ -217,11 +213,28 @@ export function presendProblems(job: FrontendJob): string[] {
   return out;
 }
 
+/**
+ * What staff check before sending, never a reason the preview can't be made: the Visit page's address and hours. A
+ * listing can have neither (a service-area business hides its address; many list no hours), and the page then rightly
+ * shows neither (never an unverified one); a fact the research did verify should be on the Visit page.
+ */
+export function presendNotes(job: FrontendJob): string[] {
+  const out: string[] = [];
+  if (!(job.pages ?? []).some((p) => p.slug === 'visit')) return out;
+  const visit = job.site?.pages.find((p) => p.slug === 'visit')?.html ?? '';
+  for (const k of ['address', 'hours'] as const) {
+    if (!job.input.facts[k]) out.push(`visit page: the Google listing has no ${k}${k === 'address' ? ' (a service-area business hides it)' : ''}, so the page shows none; add it when the owner confirms it`);
+    else if (!new RegExp(`data-fact="${k}"`).test(visit)) out.push(`visit page: the verified ${k} is not shown on it`);
+  }
+  return out;
+}
+
 /** a version's checks for the staff screen: what blocks it, and what staff must look at before approving */
 export function versionChecks(job: FrontendJob) {
   return {
     blocking: blockingProblems(job),
     staff: [
+      ...presendNotes(job),
       ...(job.withheldPhotos ?? []).map((w) => `${w.action === 'review' ? 'photo needs staff review' : 'photo withheld'}: ${w.id} (${w.seen ?? 'no description'}): ${w.reason}`),
       ...(job.review?.notes ?? []).map((n) => `accessibility: ${n}`),
       ...job.input.notes.map((n) => `research note: ${n}`),
@@ -231,7 +244,7 @@ export function versionChecks(job: FrontendJob) {
 }
 
 // ───────────────────────── the customer's messages ─────────────────────────
-export interface CustomReply { text: string; url?: string; title?: string; quickReplies?: string[] }
+export interface CustomReply { text: string; url?: string; image?: string; title?: string; subtitle?: string; choice?: string; quickReplies?: string[] }
 export const DONE_CHOICES = ['Approve and publish', 'Request another version'];
 
 /** a short answer from the saved run while it works (nothing is started by asking) */
@@ -319,7 +332,8 @@ export async function staffRecheck(run: CustomRun, n: number): Promise<{ ok: boo
   if (!v?.jobId || v.status !== 'failed') return { ok: false, reason: v ? `version ${n} is ${v.status}` : `no version ${n}` };
   const before = await getFrontendJob(v.jobId);
   if (before?.status !== 'needs-review') return { ok: false, reason: 'its generation failed, so there is nothing to check again' };
-  const job = await recheckVersion(v.jobId);
+  // a failed version was never sent: it is checked under the current layout guards (no new generation)
+  const job = await recheckVersion(v.jobId, { upgrade: true });
   // queued for the worker: the version waits for its checks like a new one (the intake picks up the result)
   if (job.stage === 'checks') { v.status = 'generating'; v.error = undefined; v.note = `checks re-run requested ${now()}`; return { ok: true }; }
   const blocking = blockingProblems(job);

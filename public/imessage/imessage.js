@@ -55,8 +55,13 @@ function addRow(side, html) {
 
 const addText = (side, text) => addRow(side, `<div class="bubble">${side === 'in' ? linkify(text) : esc(text)}</div>`);
 
-function addLink(r) {
-  const row = addRow('in', `<a class="bubble link" href="${esc(r.url)}" target="_blank" rel="noopener">${r.image ? `<img src="${esc(r.image)}" alt="">` : ''}<span class="meta"><b>${esc(r.title || host(r.url))}</b><span class="host">${esc(host(r.url))}</span></span></a>`);
+function addLink(r, live = true) {
+  const inner = `${r.image ? `<img src="${esc(r.image)}" alt="">` : ''}<span class="meta"><b>${esc(r.title || host(r.url))}</b>${r.subtitle ? `<span class="sub">${esc(r.subtitle)}</span>` : ''}<span class="host">${esc(host(r.url))}</span></span>`;
+  // a listing the customer can choose: the card opens the listing, and its button chooses it
+  const row = addRow('in', r.choice
+    ? `<div class="bubble link card"><a href="${esc(r.url)}" target="_blank" rel="noopener">${inner}</a><button type="button" class="choose"${live ? '' : ' disabled'}>This is my business</button></div>`
+    : `<a class="bubble link" href="${esc(r.url)}" target="_blank" rel="noopener">${inner}</a>`);
+  row.querySelector('.choose')?.addEventListener('click', () => send(r.choice));
   const img = row.querySelector('img');
   if (img) { img.addEventListener('load', scrollDown); img.addEventListener('error', () => img.remove()); }
 }
@@ -122,6 +127,7 @@ async function send(raw) {
   busy = true;
   updateSend();
   setSuggest([]);
+  document.querySelectorAll('.choose').forEach((b) => { b.disabled = true; });
   keepFrom(from);
   const row = addText('out', text);
   setReceipt(row, 'Delivered');
@@ -202,10 +208,12 @@ if (stored) fetch(`/api/conversations/${encodeURIComponent(from)}`, CONVO_OPTS).
   const started = new Date(c.startedAt);
   $('#today').textContent = `${started.toDateString() === new Date().toDateString() ? 'Today' : started.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} ${started.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
   let lastOut = null;
-  for (const m of c.messages) {
+  // only the cards in Roger's latest reply can still be chosen
+  const latest = c.messages.map((m) => m.dir).lastIndexOf('in');
+  for (const [i, m] of c.messages.entries()) {
     if (m.dir === 'in') { lastOut = addText('out', m.text || ''); continue; }
     if (m.text) addText('in', m.text);
-    if (m.url) addLink(m);
+    if (m.url) addLink(m, i > latest);
   }
   if (lastOut) setReceipt(lastOut, c.messages[c.messages.length - 1].dir === 'out' ? '<b>Read</b>' : 'Delivered');
   seen = c.messages.length;
