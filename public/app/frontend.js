@@ -1,135 +1,380 @@
-/* Research -> confirmed identity -> verified brief -> custom code. Polling never starts a paid task. */
+/*
+ * Roger Studio · New site: Find business → Review sources and audit → Generate and preview.
+ * Nothing is selected for staff: a business is used only after its card's "Select this business" is pressed, and
+ * research and generation each start only from their own button. Polling never starts a paid task.
+ */
 (() => {
   const $ = (id) => document.getElementById(id);
-  const activeKey = 'roger-custom-demo-active', historyKey = 'roger-custom-demo-history';
-  let busy = false, choosing = null;
-  async function request(url, options) {
-    const response = await fetch('/api/studio/' + url, options);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return String(u || ''); } };
+  const MAPS = /^(https?:\/\/)?((www\.)?google\.[a-z.]+\/maps|maps\.google\.[a-z.]+|maps\.app\.goo\.gl|goo\.gl\/maps|g\.page)/i;
+  const KEY = 'roger-newsite-v2';
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const mins = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
+
+  /** what staff chose and started (kept across a reload) */
+  const S = { candidates: [], selected: null, researchJobId: null, saved: null, brief: null, designJobId: null };
+  const persist = () => { try { localStorage.setItem(KEY, JSON.stringify({ selected: S.selected, researchJobId: S.researchJobId, brief: S.brief, designJobId: S.designJobId })); } catch { /* private mode */ } };
+  const restore = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { return null; } };
+
+  async function api(url, opts = {}) {
+    const res = await fetch(url, opts);
+    let data = {};
+    try { data = await res.json(); } catch { /* not JSON */ }
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
     return data;
   }
-  const post = (url, body) => request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key) || '') || fallback; } catch { return fallback; } };
-  const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
-  const clear = () => { try { localStorage.removeItem(activeKey); } catch {} };
-  const active = (phase, id, name, instruction = '') => write(activeKey, { phase, id, name, instruction });
-  const wait = () => new Promise((resolve) => setTimeout(resolve, 2000));
-  function setStatus(text) { $('progress').hidden = false; $('status').textContent = text; }
-  function failure(error) { setStatus(error.message || String(error)); busy = false; $('start').disabled = false; }
-  function showHistory() {
-    const jobs = read(historyKey, []);
-    $('history').hidden = !jobs.length;
-    $('history-list').replaceChildren(...jobs.map((job) => {
-      const li = document.createElement('li'), a = document.createElement('a');
-      a.href = job.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = job.name + ' · ' + job.id;
-      li.append(a); return li;
-    }));
+  const post = (url, body, signal) => api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}), signal });
+  function say(id, text, kind = '') { const el = $(id); el.textContent = text || ''; el.className = `status-line${kind ? ` ${kind}` : ''}`; }
+
+  /* ── the step indicator and which stages are open ── */
+  function steps() {
+    const set = (id, state) => { $(id).dataset.state = state; };
+    set('step-find', S.selected ? 'done' : 'current');
+    set('step-sources', !S.selected ? 'locked' : S.brief ? 'done' : 'current');
+    set('step-generate', S.brief ? 'current' : 'locked');
+    const lock = (sec, locked) => { if (locked) $(sec).setAttribute('data-locked', ''); else $(sec).removeAttribute('data-locked'); };
+    lock('s-sources', !S.selected); $('sources-body').hidden = !S.selected;
+    lock('s-generate', !S.brief); $('generate-body').hidden = !S.brief;
+    $('sources-hint').textContent = S.selected ? 'Check the website, audit the current site, and research the business. Generation uses only verified facts.' : 'Select a business in step 1 first.';
+    $('generate-hint').textContent = S.brief ? `Uses brief r${S.brief.revision} for ${S.selected?.name ?? 'the selected business'}.` : 'Finish step 2 (a researched or saved brief for the selected business) first.';
   }
-  function saveHistory(job, name) {
-    const jobs = read(historyKey, []).filter((item) => item.id !== job.id);
-    jobs.unshift({ id: job.id, name, url: job.previewUrl }); write(historyKey, jobs.slice(0, 12)); showHistory();
+
+  /* ───────────── 1. Find business ───────────── */
+  let findCtl = null;
+  const websiteOf = (c) => c.website || c.googleWebsite || '';
+  function cardHtml(c, i) {
+    const web = websiteOf(c);
+    const rating = c.rating ? `${Number(c.rating).toFixed(1)}★${c.reviewCount ? ` · ${c.reviewCount} reviews` : ''}` : 'No rating';
+    return `<article class="biz" data-i="${i}" aria-current="false">
+      <h3>${esc(c.name)}</h3>
+      <p class="addr">${esc(c.address || 'No address on the listing')}</p>
+      <dl><dt>Category</dt><dd>${esc(c.primaryTypeLabel || c.primaryType || 'Not given')}</dd>
+      <dt>Website</dt><dd>${web ? `<a href="${esc(web)}" target="_blank" rel="noopener">${esc(host(web))}</a>` : 'None on the listing'}</dd>
+      <dt>Rating</dt><dd>${esc(rating)}</dd>
+      <dt>Place ID</dt><dd><code>${esc(c.placeId)}</code></dd></dl>
+      <div class="acts"><button type="button" class="btn sm" data-select="${i}">Select this business</button>${c.mapsUrl ? `<a class="btn ghost sm" href="${esc(c.mapsUrl)}" target="_blank" rel="noopener">Open in Google Maps</a>` : ''}</div>
+    </article>`;
   }
-  async function pollResearch(id, name, instruction) {
-    for (let count = 0; count < 450; count++) {
-      const job = await request('jobs/' + encodeURIComponent(id));
-      const stage = (job.stages || []).find((s) => s.status === 'running')?.name;
-      setStatus('Researching ' + name + ' · ' + (stage || job.status));
-      $('metrics').textContent = (job.stages || []).filter((s) => s.status === 'done').length + ' research stages complete';
-      if (job.status === 'failed') throw new Error('Business research failed: ' + (job.error || 'unknown reason'));
-      if (job.status === 'done') {
-        if (!job.businessKey || !job.revision) throw new Error('Research finished without a usable business brief.');
-        return startDesign(job.businessKey, job.revision, name, instruction);
+  function summary(r, n) {
+    if (r.status === 'confirmed' && r.via === 'place-id') return 'The link names this listing. Check it, then select it.';
+    if (r.status === 'need-name') return `That looks like an address, not a business name. ${n} business${n === 1 ? '' : 'es'} found there: select the right one, or search by its name.`;
+    if (r.status === 'confirmed') return 'One listing matches. Check the name and full address, then select it.';
+    return `${n} listings found. None is chosen for you: select the right one.`;
+  }
+  $('find-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('f-name').value.trim(), where = $('f-where').value.trim(), maps = $('f-maps').value.trim();
+    if (!name && !where && !maps) return say('find-status', 'Enter a business name (and a city, ZIP or street), or paste a Google Maps link.', 'error');
+    if (maps && !MAPS.test(maps)) return say('find-status', 'That is not a Google Maps link. Copy it from the listing\'s Share button, or leave the field empty.', 'error');
+    findCtl?.abort(); findCtl = new AbortController();
+    S.candidates = []; $('results').replaceChildren();
+    $('find-btn').disabled = true; $('find-cancel').hidden = false;
+    say('find-status', 'Searching Google…', 'loading');
+    try {
+      const body = maps ? { text: maps } : { ...(name ? { name } : {}), ...(where ? { address: where } : {}) };
+      const r = await post('/api/studio/resolve', body, findCtl.signal);
+      const list = r.status === 'confirmed' ? [r.candidate] : (r.candidates || []);
+      S.candidates = list;
+      if (!list.length) {
+        say('find-status', '');
+        $('results').innerHTML = `<div class="empty"><b>No Google business found.</b> ${esc(r.reason || '')} Try the name exactly as it appears on Google, add the city or ZIP, or paste the listing's Google Maps link.</div>`;
+        return;
       }
-      await wait();
-    }
-    throw new Error('Research is still running. Reload to check this same saved job.');
+      say('find-status', summary(r, list.length));
+      $('results').innerHTML = list.map(cardHtml).join('');
+      $('results').hidden = false;
+    } catch (err) {
+      if (err.name === 'AbortError') say('find-status', 'Search cancelled. No business was selected.', 'cancelled');
+      else say('find-status', `The search failed: ${err.message}`, 'error');
+    } finally { $('find-btn').disabled = false; $('find-cancel').hidden = true; findCtl = null; }
+  });
+  $('find-cancel').addEventListener('click', () => findCtl?.abort());
+  $('results').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-select]');
+    if (b) select(S.candidates[Number(b.dataset.select)]);
+  });
+
+  function resetAfterFind() {
+    stopResearch = true; stopDesign = true;
+    S.researchJobId = null; S.brief = null; S.designJobId = null; S.saved = null;
+    ['audit-out', 'brief-out'].forEach((id) => $(id).replaceChildren());
+    ['audit-status', 'research-status', 'generate-status', 'action-status'].forEach((id) => say(id, ''));
+    $('research-stages').hidden = true; $('saved-brief').hidden = true; $('result').hidden = true; $('generate-meter').hidden = true; $('generate-error').hidden = true;
+    $('research-btn').textContent = 'Research this business'; $('research-btn').disabled = false;
+    $('generate-btn').textContent = 'Generate new website'; $('generate-btn').disabled = false;
   }
-  async function startDesign(businessKey, revision, name, instruction) {
-    setStatus('Checking photos and preparing a business-specific design…');
-    const job = await post('frontend-jobs', { businessKey, revision, instruction });
-    // a repeated submission returns the job already under way (or just finished): no second paid generation
-    if (job.reused) $('metrics').textContent = job.note || 'This business is already being designed; showing that job.';
-    active('design', job.id, name, instruction); await pollDesign(job.id, name);
+  function select(c) {
+    if (!c) return;
+    resetAfterFind();
+    S.selected = c; persist();
+    renderSelected();
+    initSources();
+    steps();
   }
-  async function pollDesign(id, name) {
-    for (let count = 0; count < 600; count++) {
-      const job = await request('frontend-jobs/' + encodeURIComponent(id));
-      const checking = job.status === 'needs-review' && job.stage === 'checks';
-      setStatus(checking ? 'Checking every page at desktop and phone width…' : { queued: 'Queued for the worker', generating: job.stage === 'pages' ? 'Writing the inner pages…' : 'Writing custom HTML and CSS…', 'needs-review': 'Draft ready for review', failed: 'Design generation failed' }[job.status] || job.status);
-      $('metrics').textContent = `Job ${id} · ${job.attempts} attempt(s) · $${Number(job.costUsd).toFixed(3)} recorded AI cost`;
-      // the actual error, prominently, whenever the job failed (a failed job can also have an idea: it stays separate)
-      $('idea').textContent = job.idea || '';
-      $('error').hidden = job.status !== 'failed';
-      $('error-text').textContent = job.status === 'failed' ? (job.error || 'The job failed without a recorded reason.') : '';
-      $('resume').hidden = !(job.status === 'failed' && job.stage === 'pages');
-      $('resume').onclick = async () => { $('resume').disabled = true; try { await post('frontend-jobs/' + encodeURIComponent(id) + '/resume', {}); $('error').hidden = true; busy = true; $('start').disabled = true; active('design', id, name); await pollDesign(id, name); } catch (e) { $('error-text').textContent = e.message; } finally { $('resume').disabled = false; } };
-      $('notes').replaceChildren(...(job.notes || []).map((note) => { const li = document.createElement('li'); li.textContent = note; return li; }));
-      if (job.status === 'needs-review' && !checking) {
-        $('open').href = job.previewUrl; $('open').hidden = false;
-        // every page of this version, each at its own link
-        const list = document.getElementById('pages') || Object.assign(document.createElement('ul'), { id: 'pages' });
-        list.replaceChildren(...(job.pages || []).map((p) => { const li = document.createElement('li'), a = document.createElement('a'); a.href = p.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = `${p.title} page`; a.addEventListener('click', (e) => { e.preventDefault(); $('frame').src = p.url; }); li.append(a); return li; }));
-        if (!list.isConnected) $('progress').append(list);
-        $('frame').src = job.previewUrl; $('preview').hidden = false; saveHistory(job, name);
-      }
-      if ((job.status === 'needs-review' && !checking) || job.status === 'failed') { clear(); busy = false; $('start').disabled = false; return; }
-      await wait();
-    }
-    throw new Error('Design is still running. Reload to check this saved job; do not start a duplicate.');
-  }
-  function chooseBusiness(result) {
-    return new Promise((resolve, reject) => {
-      choosing = { resolve, reject };
-      $('choice').hidden = false; $('choice-reason').textContent = result.reason || 'Confirm this is the correct business before research starts.';
-      const candidates = result.status === 'confirmed' ? [result.candidate] : result.candidates || [];
-      $('candidates').replaceChildren(...candidates.map((c) => {
-        const button = document.createElement('button'); button.type = 'button';
-        button.textContent = [c.name, c.address].filter(Boolean).join(' · ');
-        button.addEventListener('click', () => { $('choice').hidden = true; choosing = null; resolve(c); });
-        return button;
-      }));
-      if (!candidates.length) { $('choice').hidden = true; choosing = null; reject(new Error(result.reason || 'No matching business found.')); }
+  function renderSelected() {
+    const c = S.selected;
+    if (!c) { $('selected').hidden = true; return; }
+    $('selected').innerHTML = `<div><span class="tag ok">Selected</span> <b>${esc(c.name)}</b><div class="addr">${esc(c.address || '')}</div><code class="pid">Place ID ${esc(c.placeId)}</code></div><button type="button" class="btn ghost sm" id="change-biz">Change business</button>`;
+    $('selected').hidden = false;
+    $('results').hidden = true;
+    $('change-biz').addEventListener('click', () => {
+      resetAfterFind(); S.selected = null; persist();
+      $('selected').hidden = true; $('results').hidden = !S.candidates.length; steps();
+      if (S.candidates.length) say('find-status', 'Select the right business.'); else $('f-name').focus();
     });
   }
-  $('cancel-choice').addEventListener('click', () => { $('choice').hidden = true; choosing?.reject(new Error('Business selection cancelled.')); choosing = null; });
-  $('generate').addEventListener('submit', async (event) => {
-    event.preventDefault(); if (busy) return; busy = true; $('start').disabled = true;
-    $('progress').hidden = false; $('preview').hidden = true; $('open').hidden = true; $('choice').hidden = true;
-    $('idea').textContent = ''; $('notes').replaceChildren(); $('metrics').textContent = '';
-    // an earlier job's failure (and its retry button) belongs to that job, not to this new one
-    $('error').hidden = true; $('error-text').textContent = ''; $('resume').hidden = true; $('resume').onclick = null;
-    const website = $('website').value.trim(), name = $('name').value.trim(), address = $('address').value.trim(), saved = $('source').value;
-    const instruction = $('instruction').value;
-    try {
-      if (saved && !website && !name) {
-        const [businessKey, revision] = JSON.parse(saved); await startDesign(businessKey, revision, $('source').selectedOptions[0].textContent, instruction); return;
-      }
-      let google;
-      if (!website) {
-        if (!name) throw new Error('Enter a website, or a business name and ZIP/address.');
-        setStatus('Finding the right Google business…');
-        const found = await post('resolve', { name, address });
-        google = (await chooseBusiness(found)).placeId;
-      }
-      const label = name || website;
-      setStatus('Starting business research…');
-      const job = await post('jobs', website ? { website } : { google });
-      active('research', job.id, label, instruction); await pollResearch(job.id, label, instruction);
-    } catch (error) { failure(error); }
-  });
-  $('desktop').addEventListener('click', () => $('frame').setAttribute('width', '1440'));
-  $('mobile').addEventListener('click', () => $('frame').setAttribute('width', '390'));
-  showHistory();
-  request('businesses').then(({ businesses }) => {
-    $('source').append(...businesses.map((b) => {
-      const o = document.createElement('option'); o.value = JSON.stringify([b.businessKey, b.revision]); o.textContent = `${b.name} · brief r${b.revision}`; return o;
-    }));
-  }).catch(() => undefined);
-  const previous = read(activeKey, null);
-  if (previous?.id && /^((fe|sj)_[a-z0-9]+)$/.test(previous.id)) {
-    busy = true; $('start').disabled = true;
-    const resume = previous.phase === 'design' ? pollDesign(previous.id, previous.name) : pollResearch(previous.id, previous.name, previous.instruction || '');
-    resume.catch(failure);
+
+  /* ───────────── 2. Review sources and audit ───────────── */
+  function initSources() {
+    const c = S.selected, web = websiteOf(c);
+    $('site-url').value = web;
+    $('site-none').checked = !web;
+    $('site-origin').textContent = web ? `From the Google listing: ${host(web)}. Correct it here if it is wrong.` : 'The Google listing has no website. Add one if the business has a site, or leave "No website" ticked.';
+    siteControls();
+    loadSaved(c).catch(() => undefined);
   }
+  function siteControls() {
+    const none = $('site-none').checked;
+    $('site-url').disabled = none;
+    const url = $('site-url').value.trim();
+    $('audit-btn').disabled = none || !/^https?:\/\/\S+\.\S+/.test(url);
+    $('site-open').hidden = none || !/^https?:\/\//.test(url);
+    if (!$('site-open').hidden) $('site-open').href = url;
+  }
+  $('site-url').addEventListener('input', siteControls);
+  $('site-none').addEventListener('change', siteControls);
+
+  /** the saved brief of exactly this listing (place-<Place ID>), offered as a compact staff option */
+  async function loadSaved(c) {
+    const { businesses } = await api('/api/studio/businesses');
+    const hit = (businesses || []).find((b) => b.businessKey === `place-${c.placeId}`);
+    if (!hit || S.selected?.placeId !== c.placeId) return;
+    const r = await api(`/api/studio/briefs/${encodeURIComponent(hit.businessKey)}?revision=${hit.revision}`).catch(() => null);
+    S.saved = { businessKey: hit.businessKey, revision: hit.revision, capturedAt: r?.brief?.capturedAt };
+    $('saved-brief').innerHTML = `<label class="check"><input type="checkbox" id="use-saved"> Reuse the saved brief r${hit.revision} for this listing${S.saved.capturedAt ? ` (researched ${esc(new Date(S.saved.capturedAt).toLocaleString())})` : ''}</label><p class="hint">Skips new research. Offered only because it is the brief of Place ID <code>${esc(c.placeId)}</code>.</p>`;
+    $('saved-brief').hidden = false;
+    $('use-saved').addEventListener('change', () => { $('research-btn').textContent = $('use-saved').checked ? 'Use the saved brief' : 'Research this business'; });
+  }
+
+  // the current website's audit (Roger's website check and Google PageSpeed): about the site the business has now
+  let auditCtl = null;
+  $('audit-btn').addEventListener('click', async () => {
+    const website = $('site-url').value.trim();
+    auditCtl?.abort(); auditCtl = new AbortController();
+    $('audit-btn').disabled = true; $('audit-cancel').hidden = false; $('audit-out').replaceChildren();
+    say('audit-status', `Auditing ${host(website)}: opening it at phone width and asking Google PageSpeed. This can take a minute…`, 'loading');
+    try {
+      const r = await post('/api/audit', { website, placeId: S.selected.placeId }, auditCtl.signal);
+      say('audit-status', '');
+      renderAudit(r.audit, r.reportUrl);
+    } catch (err) {
+      if (err.name === 'AbortError') say('audit-status', 'Audit cancelled.', 'cancelled');
+      else say('audit-status', `The audit failed: ${err.message}`, 'error');
+    } finally { $('audit-cancel').hidden = true; auditCtl = null; siteControls(); }
+  });
+  $('audit-cancel').addEventListener('click', () => auditCtl?.abort());
+  function renderAudit(a, reportUrl) {
+    if (!a) return;
+    const sev = { critical: 'bad', high: 'bad', medium: 'warn', low: '' };
+    const issues = (a.issues || []).slice(0, 8).map((i) => `<li><span class="tag ${sev[i.severity] ?? ''}">${esc(i.severity)}</span> <b>${esc(i.title)}</b>${i.detail ? `: ${esc(i.detail)}` : ''}</li>`).join('');
+    $('audit-out').innerHTML = `
+      <div class="score"><span class="grade" data-g="${esc(a.grade)}">${esc(a.grade)}</span><div><b>Current website: ${esc(a.score)}/100</b><div class="hint">${esc(a.summary?.headline || '')}</div>${a.reachable === false ? '<div class="hint">The site could not be reached.</div>' : ''}</div></div>
+      ${issues ? `<h4>What the current site gets wrong</h4><ul class="issues">${issues}</ul>` : '<p class="hint">No issues found.</p>'}
+      <p class="hint">${(a.passed || []).length} checks passed${(a.unknowns || []).length ? ` · not determined: ${a.unknowns.map((u) => esc(u.title)).join('; ')}` : ''}.</p>
+      <div class="acts">${reportUrl ? `<a class="btn ghost sm" href="${esc(reportUrl)}" target="_blank" rel="noopener">Full audit report</a>` : ''}</div>
+      <p class="hint">Desktop and phone screenshots of the current website are not available in Roger yet: use "Open current website" to look at it.</p>`;
+  }
+
+  // research: the brief generation uses (verified facts only)
+  let stopResearch = false;
+  $('research-btn').addEventListener('click', async () => {
+    if (S.researchJobId && !S.brief) return watchResearch(S.researchJobId); // resume watching
+    if ($('use-saved')?.checked && S.saved) { S.brief = { businessKey: S.saved.businessKey, revision: S.saved.revision }; persist(); return showBrief(); }
+    const website = $('site-none').checked ? '' : $('site-url').value.trim();
+    await startResearch(website);
+  });
+  async function startResearch(website) {
+    $('research-btn').disabled = true; $('brief-out').replaceChildren();
+    say('research-status', 'Starting research…', 'loading');
+    try {
+      const job = await post('/api/studio/jobs', website ? { website } : { google: S.selected.placeId });
+      S.researchJobId = job.id; persist();
+      await watchResearch(job.id);
+    } catch (err) { say('research-status', `Research could not start: ${err.message}`, 'error'); $('research-btn').disabled = false; }
+  }
+  async function watchResearch(id) {
+    stopResearch = false;
+    $('research-btn').disabled = true; $('research-stop').hidden = false;
+    const placeId = S.selected?.placeId;
+    try {
+      for (;;) {
+        if (stopResearch) { say('research-status', 'Stopped watching. The research keeps running on the server; press "Resume watching" to follow it again.', 'cancelled'); $('research-btn').textContent = 'Resume watching'; return; }
+        const job = await api(`/api/studio/jobs/${encodeURIComponent(id)}`);
+        if (S.selected?.placeId !== placeId) return; // the business was changed meanwhile
+        const stages = job.stages || [];
+        $('research-stages').hidden = false;
+        $('research-stages').innerHTML = stages.map((s) => `<li data-s="${esc(s.status)}">${esc(s.name.replace(/_/g, ' '))}${s.progress ? ` ${s.progress.done}/${s.progress.total}` : ''}</li>`).join('');
+        const running = stages.find((s) => s.status === 'running')?.name.replace(/_/g, ' ');
+        const elapsed = mins((job.status === 'done' || job.status === 'failed' ? Date.parse(job.updatedAt) : Date.now()) - Date.parse(job.createdAt));
+        if (job.status === 'failed') { say('research-status', `Research failed after ${elapsed}: ${job.error || 'unknown reason'}`, 'error'); $('research-btn').textContent = 'Research again'; S.researchJobId = null; persist(); return; }
+        if (job.status === 'done') {
+          // research from a website can land on another Google listing: it is used only for the business staff selected
+          if (job.businessKey !== `place-${placeId}`) {
+            S.researchJobId = null; persist();
+            say('research-status', '');
+            $('brief-out').innerHTML = `<div class="alert warn"><b>The website led to a different business record</b> (<code>${esc(job.businessKey || 'none')}</code>), not the selected listing <code>place-${esc(placeId)}</code>. It is not used.<div class="acts"><button type="button" class="btn sm" id="research-listing">Research from the Google listing only</button></div></div>`;
+            $('research-listing').addEventListener('click', () => startResearch(''));
+            $('research-btn').textContent = 'Research again';
+            return;
+          }
+          say('research-status', `Research finished in ${elapsed}. AI cost for research is not recorded per job.`, 'ok');
+          S.brief = { businessKey: job.businessKey, revision: job.revision }; persist();
+          return showBrief();
+        }
+        say('research-status', `Researching · ${running || job.status} · ${elapsed}`, 'loading');
+        await wait(2000);
+      }
+    } catch (err) { say('research-status', `Could not read the research job: ${err.message}`, 'error'); $('research-btn').textContent = 'Resume watching'; }
+    finally { $('research-btn').disabled = false; $('research-stop').hidden = true; }
+  }
+  $('research-stop').addEventListener('click', () => { stopResearch = true; });
+
+  const shown = (f) => (f && f.value !== null && f.value !== undefined && f.value !== '' ? f.value : null);
+  function factRow(label, value, status) {
+    const ok = value !== null && value !== undefined && String(value).trim() !== '';
+    return `<tr><th scope="row">${esc(label)}</th><td>${ok ? esc(value) : '<span class="hint">Not found</span>'} ${ok ? `<span class="tag ${status === 'verified' ? 'ok' : 'warn'}">${esc(status || 'unverified')}</span>` : '<span class="tag">missing</span>'}</td></tr>`;
+  }
+  async function showBrief() {
+    steps();
+    $('brief-out').innerHTML = '<div class="status-line loading">Loading the brief…</div>';
+    try {
+      const { brief: b } = await api(`/api/studio/briefs/${encodeURIComponent(S.brief.businessKey)}?revision=${S.brief.revision}`);
+      const loc = b.locations?.items?.[0]?.address?.formatted;
+      const hours = b.hours?.listing?.value ?? b.hours?.website?.value;
+      const rating = b.reviews?.value ? `${b.reviews.value.rating}★ from ${b.reviews.value.count} Google reviews` : null;
+      const site = b.assets?.website ?? { usable: 0, total: 0 }, google = b.assets?.google ?? { count: 0 };
+      $('brief-out').innerHTML = `
+        <p class="hint">Brief r${esc(b.revision)} · researched ${esc(new Date(b.capturedAt).toLocaleString())} · identity ${esc(b.identity?.status)} · from ${esc(b.route)}</p>
+        <div class="facts">
+          <div><h4>Verified facts</h4><table>
+            ${factRow('Name', shown(b.identity?.name), b.identity?.name?.status)}
+            ${factRow('Category', shown(b.identity?.category), b.identity?.category?.status)}
+            ${factRow('Address', loc, b.locations?.items?.length ? 'verified' : null)}
+            ${factRow('Hours', Array.isArray(hours) ? hours.join('; ') : hours, (b.hours?.listing ?? b.hours?.website)?.status)}
+            ${factRow('Phone', shown(b.contact?.phone), b.contact?.phone?.status)}
+            ${factRow('Rating', rating, b.reviews?.status ?? (rating ? 'verified' : null))}
+            ${factRow('Website', shown(b.identity?.website), b.identity?.website?.status)}
+            ${factRow('Story', shown(b.story) ? String(shown(b.story)).slice(0, 220) : null, b.story?.status)}
+          </table></div>
+          <div><h4>Photos</h4><ul class="list"><li>Google listing: ${esc(google.count ?? 0)} photo(s), shown live from Google with each photographer credited (never stored)</li><li>Website: ${esc(site.usable ?? 0)} usable of ${esc(site.total ?? 0)}</li></ul>
+            <h4 style="margin-top:12px">Missing information</h4>${(b.unknowns || []).length ? `<ul class="list">${b.unknowns.map((u) => `<li><b>${esc(u.field)}</b>: ${esc(u.why)}</li>`).join('')}</ul>` : '<p class="hint">Nothing missing.</p>'}
+          </div>
+        </div>`;
+    } catch (err) { $('brief-out').innerHTML = `<div class="alert bad">The brief could not be loaded: ${esc(err.message)}</div>`; }
+  }
+
+  /* ───────────── 3. Generate and preview ───────────── */
+  let stopDesign = false, current = null, width = 1440;
+  $('generate-btn').addEventListener('click', () => (S.designJobId && $('generate-btn').textContent === 'Resume watching' ? watchDesign(S.designJobId) : startDesign(false)));
+  $('again-btn').addEventListener('click', () => startDesign(true));
+  async function startDesign(again) {
+    if (!S.brief) return;
+    $('generate-btn').disabled = true; $('again-btn').disabled = true; $('result').hidden = true; $('generate-error').hidden = true;
+    say('generate-status', 'Starting generation…', 'loading');
+    try {
+      const job = await post('/api/studio/frontend-jobs', { businessKey: S.brief.businessKey, revision: S.brief.revision, instruction: $('instruction').value, ...(again ? { again: true } : {}) });
+      if (job.reused) say('action-status', job.note || 'This business and direction is already being generated: showing that job.');
+      S.designJobId = job.id; persist();
+      await watchDesign(job.id);
+    } catch (err) { say('generate-status', `Generation could not start: ${err.message}`, 'error'); }
+    finally { $('generate-btn').disabled = false; $('again-btn').disabled = false; }
+  }
+  const STAGE = { queued: 'Queued', homepage: 'Writing the homepage', pages: 'Writing the inner pages', checks: 'Checking every page at desktop and phone width' };
+  async function watchDesign(id) {
+    stopDesign = false;
+    $('generate-btn').disabled = true; $('generate-stop').hidden = false; $('generate-error').hidden = true; $('fail-idea').hidden = true;
+    try {
+      for (;;) {
+        if (stopDesign) { say('generate-status', 'Stopped watching. Generation keeps running on the server; press "Resume watching" to follow it again.', 'cancelled'); $('generate-btn').textContent = 'Resume watching'; return; }
+        const job = await api(`/api/studio/frontend-jobs/${encodeURIComponent(id)}`);
+        const checking = job.status === 'needs-review' && job.stage === 'checks';
+        const finished = (job.status === 'needs-review' && !checking) || job.status === 'failed';
+        const elapsed = mins((finished ? Date.parse(job.updatedAt) : Date.now()) - Date.parse(job.createdAt));
+        $('generate-meter').hidden = false;
+        $('generate-meter').innerHTML = [['Status', checking ? 'Checking' : job.status], ['Stage', STAGE[checking ? 'checks' : job.stage] || job.stage || '—'], ['Time', elapsed], ['AI cost', `$${Number(job.costUsd || 0).toFixed(3)}`], ['Attempts', job.attempts ?? 0], ['Job', job.id]]
+          .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
+        if (job.status === 'failed') {
+          say('generate-status', `Generation failed after ${elapsed}.`, 'error');
+          // the design idea it was working to stays visible, apart from the error
+          $('fail-idea').textContent = job.idea || ''; $('fail-idea').hidden = !job.idea;
+          $('generate-error').hidden = false;
+          $('generate-error').innerHTML = `<b>Why it failed</b><p>${esc(job.error || 'No reason was recorded.')}</p>${job.stage === 'pages' ? '<div class="acts"><button type="button" class="btn sm" id="resume-pages">Retry the inner pages (reuses the accepted homepage)</button></div>' : ''}`;
+          $('resume-pages')?.addEventListener('click', async () => { try { await post(`/api/studio/frontend-jobs/${encodeURIComponent(id)}/resume`); await watchDesign(id); } catch (err) { say('generate-status', `Could not retry: ${err.message}`, 'error'); } });
+          $('generate-btn').textContent = 'Generate new website';
+          return;
+        }
+        if (finished) { say('generate-status', `Finished in ${elapsed}.`, 'ok'); $('generate-btn').textContent = 'Generate new website'; return renderResult(job); }
+        say('generate-status', `${STAGE[checking ? 'checks' : job.stage] || 'Generating'}…`, 'loading');
+        await wait(2500);
+      }
+    } catch (err) { say('generate-status', `Could not read the generation job: ${err.message}`, 'error'); $('generate-btn').textContent = 'Resume watching'; }
+    finally { $('generate-btn').disabled = false; $('generate-stop').hidden = true; }
+  }
+  $('generate-stop').addEventListener('click', () => { stopDesign = true; });
+
+  function renderResult(job) {
+    current = job;
+    $('result').hidden = false;
+    $('idea').textContent = job.idea || '';
+    const pages = job.pages || [];
+    $('page-tabs').innerHTML = pages.map((p, i) => `<button type="button" role="tab" data-url="${esc(p.url)}" aria-selected="${i === 0}">${esc(p.title)}</button>`).join('');
+    showPage(pages[0]?.url);
+    renderQa(job.review, job.delivery);
+  }
+  $('page-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[role=tab]');
+    if (!b) return;
+    $('page-tabs').querySelectorAll('[role=tab]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
+    showPage(b.dataset.url);
+  });
+  function showPage(url) { if (!url) return; $('frame').src = url; $('page-open').href = url; fit(); }
+  function setWidth(w) { width = w; $('w-desktop').setAttribute('aria-pressed', String(w === 1440)); $('w-mobile').setAttribute('aria-pressed', String(w === 390)); fit(); }
+  $('w-desktop').addEventListener('click', () => setWidth(1440));
+  $('w-mobile').addEventListener('click', () => setWidth(390));
+  /** the page at its real width: 1440 (scrolling inside the preview box when the screen is narrower) or 390 */
+  function fit() {
+    const vp = $('viewport'), f = $('frame');
+    vp.classList.toggle('phone', width === 390);
+    f.width = String(width); f.height = width === 390 ? '780' : '900';
+  }
+  window.addEventListener('resize', () => { if (!$('result').hidden) fit(); });
+
+  function renderQa(review, delivery, opts = {}) {
+    const badge = $('qa-badge');
+    if (!review || !review.ran) { badge.className = 'tag warn'; badge.textContent = 'Checks did not run'; $('qa').innerHTML = `<p class="hint">${esc(review?.problems?.join('; ') || 'The rendered checks have not run for this version.')}</p>`; return; }
+    badge.className = `tag ${review.pass ? 'ok' : 'bad'}`; badge.textContent = review.pass ? 'Checks passed' : 'Checks failed';
+    const rows = (review.pages || []).map((p) => `<tr><td>${esc(p.page)}</td><td>${esc(p.width)}px</td><td><span class="tag ${p.pass ? 'ok' : 'bad'}">${p.pass ? 'pass' : 'fail'}</span></td><td>${esc(p.credits?.visible ?? 0)}/${esc(p.credits?.required ?? 0)}</td><td>${p.problems?.length ? `<ul class="list">${p.problems.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '—'}</td></tr>`).join('');
+    const staff = (delivery?.reasons || []).filter((r) => /^staff review:/.test(r)).map((r) => r.replace(/^staff review:\s*/, ''));
+    $('qa').innerHTML = `${opts.label ? `<p class="hint">${esc(opts.label)}</p>` : ''}<div class="qa-scroll"><table class="qa-table"><thead><tr><th>Page</th><th>Width</th><th>Result</th><th>Photo credits shown</th><th>Problems</th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${staff.length ? `<h4 style="margin:12px 0 0">Check before sending</h4><ul class="list">${staff.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}`;
+  }
+  $('recheck-btn').addEventListener('click', async () => {
+    if (!current) return;
+    $('recheck-btn').disabled = true;
+    say('action-status', 'Running the checks again on every page (no new generation)…', 'loading');
+    try { const r = await post(`/api/studio/frontend-jobs/${encodeURIComponent(current.id)}/review`); renderQa(r.review, r.delivery, { label: `Re-run at ${new Date().toLocaleTimeString()} (reported here; the version's saved record is unchanged).` }); say('action-status', 'Checks re-run.', 'ok'); }
+    catch (err) { say('action-status', `The checks could not run: ${err.message}`, 'error'); }
+    finally { $('recheck-btn').disabled = false; }
+  });
+
+  /* ── restore what staff had open ── */
+  const saved = restore();
+  if (saved?.selected) {
+    S.selected = saved.selected; S.researchJobId = saved.researchJobId; S.brief = saved.brief; S.designJobId = saved.designJobId;
+    renderSelected(); initSources(); steps();
+    if (S.brief) showBrief();
+    else if (S.researchJobId) watchResearch(S.researchJobId);
+    if (S.brief && S.designJobId) watchDesign(S.designJobId);
+  } else steps();
 })();

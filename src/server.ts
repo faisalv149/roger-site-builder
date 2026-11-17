@@ -51,7 +51,7 @@ app.use(express.urlencoded({ extended: false }));
 // ── the beta (ROGER_BETA=1): only the custom flow is served. The old Studio (theme builder, concepts, owner review,
 // the normal simulator) and every API behind it are off; /app/ is the beta's staff app (reviews and invites). The normal
 // client path is unchanged everywhere the beta switch is off.
-const BETA_PATHS = /^\/$|^\/app\/?$|^\/app\/(index\.html|imessage-reviews\.(html|js|css)|frontend\.(html|js|css))$|^\/imessage\/(index\.html|imessage\.(js|css))?$|^\/v\/|^\/api\/health$|^\/api\/staff\/me$|^\/api\/imessage\/inbound$|^\/api\/conversations\/[^/]+$|^\/api\/studio\/(imessage-reviews|beta-invites)(\/|$)|^\/api\/studio\/(jobs|resolve|businesses|frontend-jobs)$|^\/api\/studio\/jobs\/[A-Za-z0-9_-]+$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}(\/resume)?$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}\/preview(\/[a-z0-9-]+)?$|^\/gphoto\/|^\/cards\/|^\/robots\.txt$|^\/favicon/;
+const BETA_PATHS = /^\/$|^\/app\/?$|^\/app\/(index\.html|imessage-reviews\.(html|js|css)|frontend\.(html|js|css))$|^\/imessage\/(index\.html|imessage\.(js|css))?$|^\/v\/|^\/api\/health$|^\/api\/staff\/me$|^\/api\/imessage\/inbound$|^\/api\/conversations\/[^/]+$|^\/api\/studio\/(imessage-reviews|beta-invites)(\/|$)|^\/api\/studio\/(jobs|resolve|businesses|frontend-jobs)$|^\/api\/studio\/jobs\/[A-Za-z0-9_-]+$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}(\/resume|\/review)?$|^\/api\/studio\/briefs\/[A-Za-z0-9_.-]+$|^\/api\/audit$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}\/preview(\/[a-z0-9-]+)?$|^\/gphoto\/|^\/cards\/|^\/robots\.txt$|^\/favicon/;
 if (config.beta.enabled) app.use((req, res, next) => {
   if (!BETA_PATHS.test(req.path)) return res.status(404).type('text/plain').send('Not part of the Roger beta.');
   if (req.path === '/' || req.path === '/app' || req.path === '/app/' || req.path === '/app/index.html') return res.redirect(302, '/app/frontend.html');
@@ -93,8 +93,12 @@ app.use((req, res, next) => {
   const [scheme, b64] = (req.headers.authorization || '').split(' ');
   const given = scheme === 'Basic' && b64 ? Buffer.from(b64, 'base64').toString('utf8') : '';
   if (given && timingSafeEqual(sha(given), sha(`${config.studioUser}:${config.studioPassword}`))) return next();
-  // a page asks for the password; an API call made by a page gets a plain refusal (no browser password box for testers)
-  if (!opensPage(req)) return res.status(401).json({ error: 'Staff authentication is required.' });
+  // a page asks for the password. The simulator's own calls (an invited tester's messages and conversation) get a plain
+  // refusal: no browser password box for testers. Every other API call is a staff page's: it gets the challenge too,
+  // so the browser sends the staff login it already holds (a login made at /app/… is not sent to /api/… on its own).
+  const testerCall = req.path === '/api/imessage/inbound' || /^\/api\/conversations\/[^/]+$/.test(req.path);
+  if (!opensPage(req) && testerCall) return res.status(401).json({ error: 'Staff authentication is required.' });
+  if (!opensPage(req)) return res.set('WWW-Authenticate', 'Basic realm="Roger Studio", charset="UTF-8"').status(401).json({ error: 'Staff authentication is required.' });
   res.set('WWW-Authenticate', 'Basic realm="Roger Studio", charset="UTF-8"').status(401).send('Password required');
 });
 

@@ -314,30 +314,34 @@ test('the admin screen shows a failed job\'s actual error prominently, with its 
   const browser = await launchBrowser();
   try {
     const context = await browser.newContext();
-    await context.addInitScript(() => { localStorage.setItem('roger-custom-demo-active', JSON.stringify({ phase: 'design', id: 'fe_failed1', name: 'Sugar' })); });
+    // the New site page reopening a generation it started for a selected business and brief
+    await context.addInitScript(() => { localStorage.setItem('roger-newsite-v2', JSON.stringify({ selected: { placeId: 'ChIJsugar0000000000001', name: 'Sugar', address: '1 Test St' }, brief: { businessKey: 'place-ChIJsugar0000000000001', revision: 1 }, designJobId: 'fe_failed1' })); });
     const page = await context.newPage();
     let state: 'failed' | 'done' = 'failed', resumed = 0;
+    const at = new Date().toISOString();
     const job = () => (state === 'failed'
-      ? { id: 'fe_failed1', status: 'failed', stage: 'pages', attempts: 3, costUsd: 0.869, idea: 'Stepping under the awning of a vintage shop.', error: 'Custom inner pages failed after 2 attempts: visit page: unsupported claim "best"', notes: ['img_1: the website photo has no description'] }
-      : { id: 'fe_failed1', status: 'needs-review', attempts: 4, costUsd: 1.1, idea: 'Stepping under the awning of a vintage shop.', previewUrl: '/api/studio/frontend-jobs/fe_failed1/preview', pages: [{ slug: 'home', title: 'Home', url: '/api/studio/frontend-jobs/fe_failed1/preview' }] });
+      ? { id: 'fe_failed1', status: 'failed', stage: 'pages', attempts: 3, costUsd: 0.869, createdAt: at, updatedAt: at, idea: 'Stepping under the awning of a vintage shop.', error: 'Custom inner pages failed after 2 attempts: visit page: unsupported claim "best"', notes: ['img_1: the website photo has no description'] }
+      : { id: 'fe_failed1', status: 'needs-review', attempts: 4, costUsd: 1.1, createdAt: at, updatedAt: at, idea: 'Stepping under the awning of a vintage shop.', previewUrl: '/api/studio/frontend-jobs/fe_failed1/preview', pages: [{ slug: 'home', title: 'Home', url: '/api/studio/frontend-jobs/fe_failed1/preview' }], review: { ran: true, pass: true, pages: [], problems: [] } });
     await page.route('**/*', async (route) => {
       const url = new URL(route.request().url());
       const file = { '/app/frontend.html': 'text/html', '/app/frontend.js': 'text/javascript', '/app/frontend.css': 'text/css' }[url.pathname];
       if (file) return route.fulfill({ contentType: file, body: fs.readFileSync(path.join('public', url.pathname)) });
       if (url.pathname === '/api/studio/businesses') return route.fulfill({ json: { businesses: [] } });
+      if (url.pathname.startsWith('/api/studio/briefs/')) return route.fulfill({ status: 404, json: { error: 'No brief' } });
       if (url.pathname === '/api/studio/frontend-jobs/fe_failed1/resume') { resumed++; state = 'done'; return route.fulfill({ status: 202, json: { id: 'fe_failed1', status: 'generating' } }); }
       if (url.pathname === '/api/studio/frontend-jobs/fe_failed1') return route.fulfill({ json: job() });
       return route.fulfill({ status: 200, contentType: 'text/html', body: '<p>preview</p>' });
     });
     await page.goto('http://roger.test/app/frontend.html');
-    await page.waitForSelector('#error:not([hidden])');
-    assert.equal(await page.textContent('#error-text'), 'Custom inner pages failed after 2 attempts: visit page: unsupported claim "best"');
-    assert.equal(await page.textContent('#idea'), 'Stepping under the awning of a vintage shop.', 'the idea stays visible, separately');
-    assert.equal(await page.getAttribute('#error', 'role'), 'alert');
-    assert.equal(await page.isVisible('#resume'), true, 'failed at the inner pages: the retry is offered');
-    await page.click('#resume');
-    await page.waitForSelector('#error', { state: 'hidden' });
+    await page.waitForSelector('#generate-error:not([hidden])');
+    assert.match(await page.textContent('#generate-error') ?? '', /Why it failed\s*Custom inner pages failed after 2 attempts: visit page: unsupported claim "best"/);
+    assert.equal(await page.textContent('#fail-idea'), 'Stepping under the awning of a vintage shop.', 'the idea stays visible, separately');
+    assert.equal(await page.getAttribute('#generate-error', 'role'), 'alert');
+    assert.equal(await page.isVisible('#resume-pages'), true, 'failed at the inner pages: the retry is offered');
+    await page.click('#resume-pages');
+    await page.waitForSelector('#generate-error', { state: 'hidden' });
+    await page.waitForSelector('#result:not([hidden])');
     assert.equal(resumed, 1);
-    assert.equal(await page.textContent('#status'), 'Draft ready for review');
+    assert.match(await page.textContent('#generate-status') ?? '', /^Finished in /);
   } finally { await browser.close(); }
 });

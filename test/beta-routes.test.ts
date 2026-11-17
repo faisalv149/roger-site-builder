@@ -85,8 +85,10 @@ test('staff authentication on the review page and every review, send, reject, ch
   for (const p of ['/app/imessage-reviews.html', '/app/imessage-reviews.js', '/api/studio/imessage-reviews', '/api/studio/beta-invites']) assert.equal((await get(p)).status, 401, p);
   assert.equal((await get('/app/')).headers.get('location'), '/app/frontend.html', '/app/ is the beta staff app (New site)');
   for (const p of ['/app/frontend.html', '/api/studio/businesses', '/api/studio/frontend-jobs/fe_0000000000000000']) assert.equal((await get(p)).status, 401, `${p} needs staff`);
-  assert.match(await (await get('/api/studio/imessage-reviews')).text(), /Staff authentication is required/, 'an API refusal is plain (no browser password box)');
-  assert.equal((await get('/api/studio/imessage-reviews')).headers.get('www-authenticate'), null);
+  assert.match(await (await get('/api/studio/imessage-reviews')).text(), /Staff authentication is required/);
+  // a staff page's API call carries the challenge, so the browser sends the staff login it already holds (a login made
+  // on /app/… is not sent to /api/… unprompted)
+  assert.match((await get('/api/studio/imessage-reviews')).headers.get('www-authenticate') ?? '', /^Basic realm="Roger Studio"/);
   for (const d of ['send', 'reject', 'recheck', 'resume']) assert.equal((await post(`/api/studio/imessage-reviews/someone/1/${d}`, {})).status, 401, d);
   assert.equal((await post('/api/studio/beta-invites', { label: 'x' })).status, 401);
   assert.equal((await get('/app/imessage-reviews.html', STAFF)).status, 200);
@@ -158,9 +160,17 @@ test('one link to the customer however often staff click send or the server and 
   assert.equal((await get(`/v/${id}`)).status, 200);
 });
 
-test('opening a staff page asks for the password (staff preview links too); a page script calling the API is refused plainly', async () => {
+test('a staff page and its API calls ask for the staff login; the simulator calls for an invited tester are refused plainly (no password box)', async () => {
   const nav = await raw(`${BASE}/api/studio/frontend-jobs/fe_0000000000000000/preview`, { 'sec-fetch-mode': 'navigate', accept: 'text/html' });
   assert.equal(nav.status, 401); assert.match(String(nav.headers['www-authenticate'] ?? ''), /^Basic/);
-  const call = await get('/api/studio/imessage-reviews', { 'sec-fetch-mode': 'cors', accept: '*/*' });
-  assert.equal(call.status, 401); assert.equal(call.headers.get('www-authenticate'), null);
+  // the New site page's own calls (search, audit, research, generation): challenged, so the browser answers with its login
+  for (const [p, init] of [['/api/studio/resolve', { method: 'POST' }], ['/api/audit', { method: 'POST' }], ['/api/studio/imessage-reviews', {}]] as const) {
+    const call = await fetch(`${BASE}${p}`, { ...init, headers: { 'sec-fetch-mode': 'cors', accept: '*/*', 'content-type': 'application/json' }, ...(init.method ? { body: '{}' } : {}) });
+    assert.equal(call.status, 401, p); assert.match(call.headers.get('www-authenticate') ?? '', /^Basic/, p);
+  }
+  // the simulator's calls without a valid invite: a plain refusal, never a browser password box for a tester
+  const msg = await fetch(`${BASE}/api/imessage/inbound`, { method: 'POST', headers: { 'sec-fetch-mode': 'cors', 'content-type': 'application/json' }, body: JSON.stringify({ from: 'x', text: 'Hi', intake: 'custom' }) });
+  assert.equal(msg.status, 401); assert.equal(msg.headers.get('www-authenticate'), null);
+  const convo = await fetch(`${BASE}/api/conversations/imsg-x`, { headers: { 'sec-fetch-mode': 'cors' } });
+  assert.equal(convo.status, 401); assert.equal(convo.headers.get('www-authenticate'), null);
 });
