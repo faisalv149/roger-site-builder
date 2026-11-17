@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { forStorageText } from './google-names.js';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { config } from './config.js';
@@ -113,9 +114,38 @@ export interface PublishRecord {
 }
 
 /** the design studio's jobs, their work in progress, source snapshots, page bodies, briefs and inventories (src/studio) */
-export type StudioCollection = 'studio-jobs' | 'studio-work' | 'studio-snapshots' | 'studio-bodies' | 'studio-briefs' | 'studio-inventories' | 'studio-index' | 'studio-ai'
-  | 'studio-reviews' | 'studio-concept-jobs' | 'studio-concept-sets' | 'studio-ai-usage' | 'studio-shares' | 'studio-site-jobs' | 'studio-reference-jobs' | 'studio-design-specs' | 'site-pins';
+export type StudioCollection = 'studio-frontend-jobs' | 'studio-photo-omissions' | 'studio-jobs' | 'studio-work' | 'studio-snapshots' | 'studio-bodies' | 'studio-briefs' | 'studio-inventories' | 'studio-index' | 'studio-ai'
+  | 'studio-reviews' | 'studio-concept-jobs' | 'studio-concept-sets' | 'studio-ai-usage' | 'studio-shares' | 'studio-site-jobs' | 'studio-reference-jobs' | 'studio-design-specs' | 'site-pins' | 'studio-manifests'
+  /** the custom-site versions staff sent to a customer (only those are served at /v/) */
+  | 'customer-links'
+  /** invite-only beta testers: token hashes, their conversations, and the jobs charged to them */
+  | 'beta-invites'
+  /** claims: one record per run of a job, created once, so two workers never run the same thing */
+  | 'job-claims'
+  /** short-lived locks shared by every process (a conversation changed by one process at a time) */
+  | 'locks';
 type Collection = 'builds' | 'conversations' | 'publishes' | 'leads' | 'drafts' | 'orders' | StudioCollection;
+/** every collection (the compiler checks none is missing): what an audit of stored documents reads */
+const COLLECTION_SET = { 'locks': 1, 'job-claims': 1, 'beta-invites': 1, 'customer-links': 1, 'studio-frontend-jobs': 1, builds: 1, conversations: 1, publishes: 1, leads: 1, drafts: 1, orders: 1, 'studio-photo-omissions': 1, 'studio-jobs': 1, 'studio-work': 1, 'studio-snapshots': 1, 'studio-bodies': 1, 'studio-briefs': 1, 'studio-inventories': 1, 'studio-index': 1, 'studio-ai': 1, 'studio-reviews': 1, 'studio-concept-jobs': 1, 'studio-concept-sets': 1, 'studio-ai-usage': 1, 'studio-shares': 1, 'studio-site-jobs': 1, 'studio-reference-jobs': 1, 'studio-design-specs': 1, 'site-pins': 1, 'studio-manifests': 1 } satisfies Record<Collection, 1>;
+export const ALL_COLLECTIONS = Object.keys(COLLECTION_SET) as Collection[];
+
+let tmpSeq = 0;
+/** errors Windows gives while another process (an antivirus or indexer scan, a sync tool) briefly holds the target open */
+const BUSY = new Set(['EPERM', 'EACCES', 'EBUSY']);
+/**
+ * Move the temp file over the document. On Windows, the rename fails while anything else has the target open, which
+ * lasts milliseconds: it is retried with short waits (about 1.5 s in all), as graceful-fs does. Any other error, or a
+ * target still held after that, is thrown, and the temp file is removed.
+ */
+export async function replaceFile(tmp: string, file: string, waitsMs: number[] = [10, 20, 40, 80, 150, 250, 400, 600]): Promise<void> {
+  for (let i = 0; ; i++) {
+    try { fs.renameSync(tmp, file); return; } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code ?? '';
+      if (!BUSY.has(code) || i >= waitsMs.length) { fs.rmSync(tmp, { force: true }); throw e; }
+      await new Promise((r) => setTimeout(r, waitsMs[i]));
+    }
+  }
+}
 
 // One tiny document store, two backends: JSON files (local) or Redis keys "<collection>:<id>" (Vercel).
 const docs = {
@@ -125,11 +155,24 @@ const docs = {
     try { return JSON.parse(fs.readFileSync(this.file(col, id), 'utf8')) as T; } catch { return undefined; }
   },
   async put(col: Collection, id: string, data: unknown): Promise<void> {
-    if (remote) { await remote.putDoc(col, id, JSON.stringify(data)); return; }
+    // the last guard on every write (local file or remote store): no Google photo name is ever kept (src/google-names.ts)
+    const json = forStorageText(JSON.stringify(data, null, 2), col);
+    if (remote) { await remote.putDoc(col, id, json); return; }
     const file = this.file(col, id);
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(`${file}.tmp`, JSON.stringify(data, null, 2)); // temp file first: a crash never leaves half a JSON file
-    fs.renameSync(`${file}.tmp`, file);
+    // temp file first: a crash never leaves half a JSON file. Each write has its own temp name, so two saves of one
+    // document never share one
+    const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`;
+    fs.writeFileSync(tmp, json);
+    await replaceFile(tmp, file);
+  },
+  /** create only if absent: true when this call created it (atomic on Supabase and on the local disk) */
+  async create(col: Collection, id: string, data: unknown): Promise<boolean> {
+    const json = forStorageText(JSON.stringify(data, null, 2), col);
+    if (remote) return remote.createDoc(col, id, json);
+    const file = this.file(col, id);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    try { fs.writeFileSync(file, json, { flag: 'wx' }); return true; } catch (e) { if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false; throw e; }
   },
   async del(col: Collection, id: string): Promise<void> {
     if (remote) { await remote.delDoc(col, id); return; }
@@ -144,6 +187,14 @@ const docs = {
     }).filter(Boolean) as T[];
   },
 };
+/** read-only: every stored document of a collection, as stored (an audit; never written back) */
+export async function readCollection(col: Collection): Promise<unknown[]> {
+  if (remote) return (await remote.listDocs(col)).map((v) => JSON.parse(v));
+  const dir = path.join(config.dirs.data, col);
+  if (!fs.existsSync(dir)) return [];
+  // An unreadable record makes a dry-run incomplete; never silently count it as clean.
+  return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+}
 const safeId = (id: string) => /^[a-z0-9-]{1,64}$/i.test(id);
 
 /** Raw document access for the draft and demo-order modules (src/drafts.ts, src/orders.ts), which validate on read. */
@@ -154,11 +205,29 @@ export const draftDocs = {
   list: <T>(col: 'drafts' | 'orders') => docs.list<T>(col),
 };
 
+/**
+ * Run fn while holding a lock every process sees (the web functions and the worker on Vercel; one process locally): an
+ * atomic create in the datastore. A lock older than its ttl (a process that died holding it) is taken over.
+ */
+export async function withSharedLock<T>(name: string, fn: () => Promise<T>, opts: { ttlMs?: number; waitMs?: number } = {}): Promise<T> {
+  const id = name.replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 150), ttl = opts.ttlMs ?? 120_000, until = Date.now() + (opts.waitMs ?? 60_000);
+  for (;;) {
+    if (await docs.create('locks', id, { at: Date.now(), until: Date.now() + ttl })) break;
+    const held = await docs.get<{ until: number }>('locks', id);
+    if (held && held.until < Date.now()) { await docs.del('locks', id); continue; } // its holder died: taken over
+    if (Date.now() > until) throw new Error(`busy: ${name} is locked by another process`);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  try { return await fn(); } finally { await docs.del('locks', id).catch(() => undefined); }
+}
+
 /** Raw document access for the design studio (src/studio); ids are file-name safe. */
 const studioId = (id: string) => /^[A-Za-z0-9_.-]{1,160}$/.test(id);
 export const studioDocs = {
   get: <T>(col: StudioCollection, id: string) => (studioId(id) ? docs.get<T>(col, id) : Promise.resolve(undefined)),
   put: (col: StudioCollection, id: string, data: unknown) => { if (!studioId(id)) throw new Error(`Bad studio document id: ${id}`); return docs.put(col, id, data); },
+  /** create only if absent (a claim): true when this call created it */
+  create: (col: StudioCollection, id: string, data: unknown) => { if (!studioId(id)) throw new Error(`Bad studio document id: ${id}`); return docs.create(col, id, data); },
   del: (col: StudioCollection, id: string) => docs.del(col, id),
   list: <T>(col: StudioCollection) => docs.list<T>(col),
 };
@@ -231,6 +300,10 @@ export async function saveConversation(c: Conversation) {
   await docs.put('conversations', convoId(c.from), c);
 }
 
+/** every conversation in full, with its saved flow state (server-side only: the staff review screen) */
+export async function listConversationRecords(): Promise<Conversation[]> {
+  return docs.list<Conversation>('conversations');
+}
 export async function listConversations() {
   const all = await docs.list<Conversation>('conversations');
   all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

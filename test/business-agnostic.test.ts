@@ -235,10 +235,11 @@ test('Phase 2, Google-only restaurant: listing photos judged for relevance, show
   }
   assert.ok(set.gate.blockers.some((b) => b.kind === 'google-photos'), 'the gate lets Google photos through');
   assert.equal(set.gate.publishable, false);
-  // a photo Google no longer returns stays a stand-in, credited as unavailable
+  // a photo whose identity cannot be verified (here: none recorded, and Google has no photo at that place) is left out,
+  // with its credit, and why is said
   const gone = await fillListingPhotos('<img src="data:image/svg+xml,x" data-gphoto="test-gonly-restaurant#9"><span class="gcredit" data-gcredit="test-gonly-restaurant#9"></span>');
-  assert.match(gone, /data:image\/svg\+xml,x/);
-  assert.match(gone, /Photo unavailable/);
+  assert.ok(!/data-gphoto|gcredit/.test(gone));
+  assert.match(gone, /<!-- photo test-gonly-restaurant#9 (left out|omitted): /);
 });
 
 test('Phase 2 with no usable photo at all: the concepts say so (review), never a clean "finished" concept', { timeout: 300_000 }, async () => {

@@ -83,10 +83,24 @@ export function stripUiDebris(s: string): string {
  */
 const SEASONAL = /\b(thanksgiving|christmas|xmas|holiday(?:s)?|halloween|valentine(?:'s|s)?|easter|mother'?s day|father'?s day|new year'?s?|hanukkah|black friday|cyber monday|fourth of july|july 4th|labor day|memorial day|st\.? patrick'?s|back[- ]to[- ]school|pre-?orders?|limited[- ]time|this (?:week|weekend|month)|all month|seasonal|while supplies last)\b/i;
 const DAY_NO_YEAR = /\b(?:\d{1,2}\/\d{1,2}(?!\/\d)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.? \d{1,2}(?:st|nd|rd|th)?(?!,? ?\d{4}))\b/i;
-export function undatedSeasonal(s: string | undefined | null): string | undefined {
+/**
+ * A neutral hours caveat: hours MAY vary on holidays in general. No holiday is named, no date or hours are given, and
+ * nothing says the hours did change ("Hours may vary on holidays", "Hours can change around holidays, so call ahead",
+ * "Holiday hours may differ"). "Closed on Christmas Day", "Holiday hours: 9-5" and "Our hours have changed for the
+ * holidays" are not caveats: they state a schedule, so they stay blocked.
+ */
+const HOURS_CAVEAT = /\b(?:(?:opening|our|the|store|shop|cafe|café|club|gym)\s+)?hours\s+(?:may|can|might|could|sometimes)\s+(?:vary|change|differ|be\s+different)\s+(?:on|around|over|during|for)\s+(?:public\s+|bank\s+|the\s+)?holidays\b|\b(?:on|around|over|during)\s+(?:public\s+|bank\s+)?holidays,?\s+(?:opening\s+)?hours\s+(?:may|can|might|could)\s+(?:vary|change|differ)\b|\bholiday\s+hours\s+(?:may|can|might|could)\s+(?:vary|differ|be\s+different)\b/gi;
+/**
+ * opts.hoursCaveat: the text sits beside the business's verified hours, so a neutral caveat about holidays is not a
+ * promotion and is allowed. Every other seasonal word in the same text is still found.
+ */
+/** the text with its neutral hours caveats taken out (what is left is still checked) */
+export const withoutHoursCaveats = (s: string) => s.replace(HOURS_CAVEAT, ' ');
+export function undatedSeasonal(s: string | undefined | null, opts: { hoursCaveat?: boolean } = {}): string | undefined {
   if (!s) return undefined;
   if (/\b20\d{2}\b/.test(s)) return undefined;
-  const m = s.match(SEASONAL) ?? s.match(DAY_NO_YEAR);
+  const t = opts.hoursCaveat ? s.replace(HOURS_CAVEAT, ' ') : s;
+  const m = t.match(SEASONAL) ?? t.match(DAY_NO_YEAR);
   return m ? m[0] : undefined;
 }
 

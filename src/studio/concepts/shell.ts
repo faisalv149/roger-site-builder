@@ -1,3 +1,4 @@
+import { writeStoredFile } from '../../google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MENU_JS, baseCss, shellCss } from './library.js';
@@ -105,7 +106,7 @@ export function applyConceptShell(siteDir: string, homeFile: string, homeHtml: s
       shelled++;
     }
     html = html.replace('</head>', `${style}</head>`).replace('</body>', `<script id="concept-menu">${MENU_JS}</script></body>`);
-    fs.writeFileSync(f, html);
+    writeStoredFile(f, html);
   }
   return { pages, shelled };
 }

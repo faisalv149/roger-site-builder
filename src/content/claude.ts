@@ -73,6 +73,16 @@ function getClient() {
   return client;
 }
 
+/**
+ * Every Claude call the builder makes, as it finishes: what kind, which tool, how it went and what it cost when that is
+ * known (the CLI reports its own cost estimate; the API reports tokens, priced elsewhere). Listeners only observe.
+ */
+export interface ClaudeCallRecord { at: string; kind: 'json' | 'vision'; tool: string; via: 'api' | 'cli'; model: string; ms: number; ok: boolean; inputTokens?: number; outputTokens?: number; costUsd?: number; error?: string }
+const callListeners = new Set<(c: ClaudeCallRecord) => void>();
+export function onClaudeCall(fn: (c: ClaudeCallRecord) => void): () => void { callListeners.add(fn); return () => { callListeners.delete(fn); }; }
+function recordCall(c: Omit<ClaudeCallRecord, 'at' | 'model'>) { const rec = { at: new Date().toISOString(), model: config.anthropicModel, ...c }; for (const l of callListeners) { try { l(rec); } catch { /* an observer never breaks a call */ } } }
+const usageOf = (res: { usage?: { input_tokens?: number; output_tokens?: number } }) => ({ inputTokens: res.usage?.input_tokens, outputTokens: res.usage?.output_tokens });
+
 export type ClaudeOutcome<T> = { ok: true; data: T; ms: number; via: 'api' | 'cli' } | { ok: false; ms: number; via: 'api' | 'cli' | null; error: string };
 
 /**
@@ -92,18 +102,21 @@ export async function claudeJsonDetailed<T>(opts: {
   const started = Date.now();
   try {
     if (via === 'cli') {
-      const data = (await cliJson(`${opts.system}
+      const r = await cliJson(`${opts.system}
 
-Answer with: ${opts.toolDescription}`, opts.prompt, opts.schema)) as T;
-      return { ok: true, data, ms: Date.now() - started, via };
+Answer with: ${opts.toolDescription}`, opts.prompt, opts.schema);
+      recordCall({ kind: 'json', tool: opts.toolName, via, ms: Date.now() - started, ok: true, costUsd: r.costUsd });
+      return { ok: true, data: r.output as T, ms: Date.now() - started, via };
     }
     const res = await toolRequest({ system: opts.system, toolName: opts.toolName, toolDescription: opts.toolDescription, schema: opts.schema, maxTokens: opts.maxTokens ?? 2000, content: opts.prompt });
     const block = res.content.find((c) => c.type === 'tool_use');
+    recordCall({ kind: 'json', tool: opts.toolName, via, ms: Date.now() - started, ok: !!block && block.type === 'tool_use', ...usageOf(res) });
     if (!block || block.type !== 'tool_use') return { ok: false, ms: Date.now() - started, via, error: `Claude answered without the ${opts.toolName} tool call (stop reason: ${res.stop_reason})` };
     return { ok: true, data: block.input as T, ms: Date.now() - started, via };
   } catch (e) {
     const error = (e as Error).message.replace(/sk-ant-[w-]+/g, 'sk-ant-…').slice(0, 240);
     console.warn(`[claude ${via}] ${opts.toolName} failed: ${error}`);
+    recordCall({ kind: 'json', tool: opts.toolName, via, ms: Date.now() - started, ok: false, error, costUsd: (e as { costUsd?: number }).costUsd });
     return { ok: false, ms: Date.now() - started, via, error };
   }
 }
@@ -133,10 +146,12 @@ export async function claudeVisionJson<T>(opts: {
   if (via === 'cli') {
     // the local Claude Code CLI takes images through its stream-json input (same prompt and schema as the API)
     try {
-      const data = await cliVisionJson(opts.system, opts.prompt, opts.images, opts.schema, Math.max(opts.timeoutMs ?? 20_000, 120_000));
-      return { data: data as T, ms: Date.now() - started };
+      const r = await cliVisionJson(opts.system, opts.prompt, opts.images, opts.schema, Math.max(opts.timeoutMs ?? 20_000, 120_000));
+      recordCall({ kind: 'vision', tool: opts.toolName, via, ms: Date.now() - started, ok: true, costUsd: r.costUsd });
+      return { data: r.output as T, ms: Date.now() - started };
     } catch (e) {
       console.warn(`[claude cli] ${opts.toolName} failed: ${(e as Error).message}`);
+      recordCall({ kind: 'vision', tool: opts.toolName, via, ms: Date.now() - started, ok: false, error: (e as Error).message.slice(0, 240), costUsd: (e as { costUsd?: number }).costUsd });
       return null;
     }
   }
@@ -150,16 +165,18 @@ export async function claudeVisionJson<T>(opts: {
     ];
     const res = await toolRequest({ system: opts.system, toolName: opts.toolName, toolDescription: opts.toolDescription, schema: opts.schema, maxTokens: 1000, content, requestOpts: { timeout: opts.timeoutMs ?? 20_000, maxRetries: 0 } });
     const block = res.content.find((c) => c.type === 'tool_use');
+    recordCall({ kind: 'vision', tool: opts.toolName, via, ms: Date.now() - started, ok: !!block && block.type === 'tool_use', ...usageOf(res) });
     if (!block || block.type !== 'tool_use') return null;
     return { data: block.input as T, ms: Date.now() - started };
   } catch (e) {
     console.warn(`[claude api] ${opts.toolName} failed: ${(e as Error).message}`);
+    recordCall({ kind: 'vision', tool: opts.toolName, via, ms: Date.now() - started, ok: false, error: (e as Error).message.slice(0, 240) });
     return null;
   }
 }
 
 /** `claude -p` with pictures: one stream-json user message (each image numbered), the same isolation as cliJson. */
-function cliVisionJson(system: string, prompt: string, images: Buffer[], schema: Record<string, unknown>, timeoutMs: number): Promise<unknown> {
+function cliVisionJson(system: string, prompt: string, images: Buffer[], schema: Record<string, unknown>, timeoutMs: number): Promise<{ output: unknown; costUsd?: number }> {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'roger-claude-'));
   const env = { ...process.env };
   if (!env.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
@@ -180,10 +197,11 @@ function cliVisionJson(system: string, prompt: string, images: Buffer[], schema:
     child.on('close', (code) => {
       clearTimeout(timer);
       fs.rmSync(cwd, { recursive: true, force: true });
-      const result = out.split('\n').map((l) => { try { return JSON.parse(l) as { type?: string; is_error?: boolean; result?: string; subtype?: string; structured_output?: unknown }; } catch { return undefined; } }).find((l) => l?.type === 'result');
+      const result = out.split('\n').map((l) => { try { return JSON.parse(l) as { type?: string; is_error?: boolean; result?: string; subtype?: string; structured_output?: unknown; total_cost_usd?: number }; } catch { return undefined; } }).find((l) => l?.type === 'result');
       if (!result) return reject(new Error(`exit ${code}: ${(err || out).trim().slice(0, 300) || 'no output'}`));
-      if (result.is_error || result.structured_output == null) return reject(new Error(String(result.result || result.subtype || 'no structured output').slice(0, 300)));
-      resolve(result.structured_output);
+      const costUsd = typeof result.total_cost_usd === 'number' ? result.total_cost_usd : undefined;
+      if (result.is_error || result.structured_output == null) return reject(Object.assign(new Error(String(result.result || result.subtype || 'no structured output').slice(0, 300)), { costUsd }));
+      resolve({ output: result.structured_output, costUsd });
     });
     child.stdin.end(`${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`);
   });
@@ -193,7 +211,7 @@ function cliVisionJson(system: string, prompt: string, images: Buffer[], schema:
  * One `claude -p` run with schema-validated output. Prompts carry scraped website text and reviews, so the
  * CLI gets no tools, no MCP servers and no user settings (hooks), and runs in an empty temp folder.
  */
-function cliJson(system: string, prompt: string, schema: Record<string, unknown>, timeoutMs = 120_000): Promise<unknown> {
+function cliJson(system: string, prompt: string, schema: Record<string, unknown>, timeoutMs = 120_000): Promise<{ output: unknown; costUsd?: number }> {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'roger-claude-'));
   const env = { ...process.env };
   if (!env.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY; // dotenv sets it to "" when the .env line is blank
@@ -210,10 +228,11 @@ function cliJson(system: string, prompt: string, schema: Record<string, unknown>
     child.on('close', (code) => {
       clearTimeout(timer);
       fs.rmSync(cwd, { recursive: true, force: true });
-      let r: { is_error?: boolean; subtype?: string; result?: string; structured_output?: unknown };
+      let r: { is_error?: boolean; subtype?: string; result?: string; structured_output?: unknown; total_cost_usd?: number };
       try { r = JSON.parse(out); } catch { return reject(new Error(`exit ${code}: ${(err || out).trim().slice(0, 300) || 'no output'}`)); }
-      if (r.is_error || r.structured_output == null) return reject(new Error(String(r.result || r.subtype || 'no structured output').slice(0, 300)));
-      resolve(r.structured_output);
+      const costUsd = typeof r.total_cost_usd === 'number' ? r.total_cost_usd : undefined;
+      if (r.is_error || r.structured_output == null) return reject(Object.assign(new Error(String(r.result || r.subtype || 'no structured output').slice(0, 300)), { costUsd }));
+      resolve({ output: r.structured_output, costUsd });
     });
     child.stdin.end(prompt);
   });

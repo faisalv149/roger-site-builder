@@ -15,9 +15,12 @@ const { renderSpec, renderDesignFiles } = await import('../src/studio/concepts/s
 type Spec = import('../src/studio/concepts/designspec.js').DesignSpec;
 type AiTransport = import('../src/studio/concepts/ai.js').AiTransport;
 
-const { cat, brief, good } = await import('./helpers/northline-spec.js');
-function fakeTransport(answers: unknown[]): AiTransport & { prompts: string[] } {
-  const t = { via: 'fake' as const, model: 'claude-sonnet-5-5', prompts: [] as string[], async call(req: { prompt: string }) { t.prompts.push(req.prompt); return { data: answers[Math.min(t.prompts.length - 1, answers.length - 1)], usage: { via: 'fake' as const, model: 'claude-sonnet-5-5', inputTokens: 6000, outputTokens: 3000, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.05, costBasis: 'computed' as const } }; } };
+const { cat, brief, good, goodDirection, answer } = await import('./helpers/northline-spec.js');
+/** a fixture spec as Claude answers it (no columns, services left to Roger); anything else as it is */
+const asAnswer = (x: unknown) => (x && typeof x === 'object' && 'hero' in x && (x as Spec).hero.textStart !== undefined ? answer(x as Spec) : x);
+/** `answers` are the DesignSpec answers in order (`prompts` their prompts); the design direction is answered soundly first */
+function fakeTransport(answers: unknown[], direction: unknown = goodDirection()): AiTransport & { prompts: string[]; directionPrompts: string[] } {
+  const t = { via: 'fake' as const, model: 'claude-sonnet-5-5', prompts: [] as string[], directionPrompts: [] as string[], async call(req: { stage: string; prompt: string }) { if (req.stage === 'design:direction') { t.directionPrompts.push(req.prompt); return { data: direction, usage: { via: 'fake' as const, model: 'claude-sonnet-5-5', inputTokens: 3000, outputTokens: 800, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.014, costBasis: 'computed' as const } }; } t.prompts.push(req.prompt); return { data: asAnswer(answers[Math.min(t.prompts.length - 1, answers.length - 1)]), usage: { via: 'fake' as const, model: 'claude-sonnet-5-5', inputTokens: 6000, outputTokens: 3000, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.05, costBasis: 'computed' as const } }; } };
   return t;
 }
 
@@ -85,7 +88,7 @@ test('rendering: every word comes from the brief through the spec; positions and
   const onAccent = good();
   onAccent.sections[2].background = 'accent';
   assert.match(renderSpec(onAccent, cat, brief), /\.on-accent \.btn-primary\{background:var\(--on-accent\);color:var\(--accent\)/);
-  assert.match(renderSpec(onAccent, cat, brief), /class="sec density-regular stack on-accent"/);
+  assert.match(renderSpec(onAccent, cat, brief), /class="sec density-regular stack sparse on-accent"/);
   // a different spec is a different page, not a renamed one
   const other = good();
   other.hero = { ...other.hero, textStart: 3, textSpan: 8, align: 'center', aside: { kind: 'none', start: 1, span: 0, items: [], photoId: null } };
@@ -151,4 +154,91 @@ test('photos render eagerly (a full-page preview shows every one) and a photo ba
   assert.match(html, /\.band img\{width:100%;height:clamp\(220px,26vw,380px\)/);
   s.sections[0].media = { placement: 'mosaic', photoIds: ['stock'] };
   assert.match(D.validateSpec(s, withPhotos, brief).join(' | '), /media: photo "stock" is not one of the business's verified photos/);
+});
+
+// ───────────────────────── geometry from the renderer, offerings from the catalog ─────────────────────────
+test('Claude chooses positions, never column numbers: every combination fits the grid and never overlaps', async () => {
+  const G = await import('../src/studio/concepts/geometry.js');
+  for (const side of ['left', 'right', 'centre'] as const) for (const width of ['narrow', 'mid', 'wide'] as const) for (const aside of ['none', 'image', 'service-index']) {
+    const c = G.heroColumns(side, width, aside);
+    assert.ok(c.textStart >= 1 && c.textStart + c.textSpan - 1 <= 12, `${side}/${width}/${aside}: text fits`);
+    if (aside !== 'none') {
+      assert.ok(c.asideStart >= 1 && c.asideStart + c.asideSpan - 1 <= 12 && c.asideSpan >= 4, `${side}/${width}/${aside}: aside fits`);
+      const [a0, a1, b0, b1] = [c.textStart, c.textStart + c.textSpan - 1, c.asideStart, c.asideStart + c.asideSpan - 1];
+      assert.ok(a1 < b0 || b1 < a0, `${side}/${width}/${aside}: no overlap`);
+    }
+    // and the existing column checks pass on whatever the renderer derives
+    const s = answer(good()); s.hero.textSide = side; s.hero.textWidth = width; s.hero.aside = { ...s.hero.aside, kind: aside as never, items: aside === 'service-index' ? s.hero.aside.items : [], photoId: null };
+    assert.doesNotMatch(D.validateSpec(D.assembleSpec(s, cat), cat, brief).join(' | '), /columns|overlap/, `${side}/${width}/${aside}`);
+  }
+  for (const arr of ['stack', 'side-by-side'] as const) { const c = G.sectionColumns(arr); assert.ok(arr === 'stack' || c.headingStart + c.headingSpan - 1 < c.contentStart, arr); }
+  // the contract asks for the choices, not the numbers
+  assert.ok(D.SPEC_CONTRACT.includes('"textSide": "left"|"right"|"centre"') && D.SPEC_CONTRACT.includes('"textWidth": "narrow"|"mid"|"wide"'));
+  assert.doesNotMatch(D.SPEC_CONTRACT, /textStart|textSpan|headingStart|contentSpan|"start": int|"span": int/);
+  // a text on the right with an image on the left stays on one row (the renderer packs the hero grid densely)
+  const right = answer(good()); right.hero.textSide = 'right';
+  const html = (await import('../src/studio/concepts/spec-render.js')).renderSpec(D.assembleSpec(right, cat), cat, brief);
+  assert.match(html, /\.hero-grid\{[^}]*grid-auto-flow:row dense/);
+});
+
+test('a services section lists every verified service, from the catalog, whatever the answer put in it', () => {
+  const withPics = { ...(cat as object), photos: [{ id: 'p1', url: 'https://x/p1.jpg', width: 1200, height: 800, orientation: 'landscape', uses: [], alt: '', services: [] }], services: [{ ...cat.services[0], imageId: 'p1' }, { ...cat.services[1], imageId: 'stock-9' }] } as unknown as typeof cat;
+  const a = answer(good());
+  a.sections[0].items = [{ title: { label: 'Our offer' }, body: null, photoId: null }]; // Claude's own list is not used
+  const s = D.assembleSpec(a, withPics);
+  assert.deepEqual(s.sections[0].items, [
+    { title: { service: 'svc-int', field: 'name' }, body: { service: 'svc-int', field: 'description' }, photoId: 'p1' },
+    { title: { service: 'svc-mig', field: 'name' }, body: { service: 'svc-mig', field: 'description' }, photoId: null },
+  ], 'every service, in the catalog\'s order; only a verified picture');
+  assert.doesNotMatch(D.validateSpec(s, withPics, brief).join(' | '), /services section must list/);
+  assert.ok(D.specRequest(cat, brief, null).prompt.includes('Roger fills its items from the verified list, so give it "items": []'));
+});
+
+// ───────────────────────── layout from what renders; readable item text ─────────────────────────
+test('a side-by-side section is stacked when its second column would hold too little; kept when it has real content', async () => {
+  const { renderSpec, arrangedFor, SUBSTANTIAL_ITEM_CHARS } = await import('../src/studio/concepts/spec-render.js');
+  const planned = D.assembleSpec(answer(good()), cat);
+  const sec = (mut: (x: Spec['sections'][number]) => void) => { const x = structuredClone(planned.sections[0]); x.layout.arrangement = 'side-by-side'; Object.assign(x.layout, { headingStart: 1, headingSpan: 4, contentStart: 6, contentSpan: 7 }); mut(x); return x; };
+  // two items: side by side, as planned
+  assert.equal(arrangedFor(sec(() => {}), cat).arrangement, 'side-by-side');
+  // buttons alone: stacked, with the stacked columns
+  assert.deepEqual(arrangedFor(sec((x) => { x.items = []; x.actions = ['cta-primary']; }), cat), { ...planned.sections[0].layout, arrangement: 'stack', headingStart: 1, headingSpan: 8, contentStart: 1, contentSpan: 12 });
+  // one short item: stacked; one item whose description fills a column: side by side
+  assert.equal(arrangedFor(sec((x) => { x.items = [{ title: { label: 'Integration' }, body: null, photoId: null }]; }), cat).arrangement, 'stack');
+  const long = { ...(cat as object), services: [{ id: 'svc-int', name: 'Integration', description: 'x'.repeat(SUBSTANTIAL_ITEM_CHARS) }] } as unknown as typeof cat;
+  assert.equal(arrangedFor(sec((x) => { x.items = [{ title: { service: 'svc-int', field: 'name' }, body: { service: 'svc-int', field: 'description' }, photoId: null }]; }), long).arrangement, 'side-by-side');
+  // a photo mosaic counts only with a verified photo
+  const pics = { ...(cat as object), photos: [{ id: 'p1', url: 'https://x/p1.jpg', width: 1200, height: 800, orientation: 'landscape', uses: [], alt: '', services: [] }] } as unknown as typeof cat;
+  assert.equal(arrangedFor(sec((x) => { x.items = []; x.media = { placement: 'mosaic', photoIds: ['p1'] }; }), pics).arrangement, 'side-by-side');
+  assert.equal(arrangedFor(sec((x) => { x.items = []; x.media = { placement: 'mosaic', photoIds: ['stock-1'] }; }), pics).arrangement, 'stack');
+  // in the page: the stacked section says it was planned side by side; the saved spec is not changed
+  const s = structuredClone(planned); s.sections[2].layout = { ...s.sections[2].layout, arrangement: 'side-by-side', headingStart: 1, headingSpan: 4, contentStart: 6, contentSpan: 7 };
+  const html = renderSpec(s, cat, brief);
+  assert.match(html, /<section id="contact"[^>]*data-planned="side-by-side" class="sec [^"]*\bstack\b/);
+  assert.match(html, /<section id="work"[^>]*class="sec [^"]*\bside-by-side\b/);
+  assert.equal(s.sections[2].layout.arrangement, 'side-by-side');
+});
+
+test('menu and item text has a readable minimum in any face; larger sizes are kept', async () => {
+  const { renderSpec, ITEM_TITLE_MIN_PX, ITEM_TEXT_MIN_PX } = await import('../src/studio/concepts/spec-render.js');
+  assert.deepEqual([ITEM_TITLE_MIN_PX, ITEM_TEXT_MIN_PX], [20, 16]);
+  const at = (base: number, scale: number, heading = 'Outfit') => { const s = good(); s.type = { ...s.type, heading, base, scale }; return renderSpec(s, cat, brief); };
+  const small = at(15, 1.1);
+  assert.match(small, /h3\{font-size:20px;/, 'an item name: 16.5px by the scale, held at 20px');
+  assert.match(small, /\.text-items h3\{font-size:20px\}/, 'a name in a text list: 15.7px, held at 20px');
+  assert.match(small, /\.item p\{[^}]*font-size:16px\}/, 'the line under it: 15px, held at 16px');
+  const roomy = at(17, 1.5);
+  assert.match(roomy, /h3\{font-size:25\.5px;/, 'a larger size is kept');
+  assert.match(roomy, /\.text-items h3\{font-size:20\.82px\}/);
+  assert.match(roomy, /\.item p\{[^}]*font-size:17px\}/);
+});
+
+test('photos beside a heading in a stacked section are capped on desktop; phones are unchanged', async () => {
+  const { renderSpec, STACKED_PHOTO_MAX_PX } = await import('../src/studio/concepts/spec-render.js');
+  assert.equal(STACKED_PHOTO_MAX_PX, 520);
+  const html = renderSpec(D.assembleSpec(answer(good()), cat), cat, brief);
+  assert.match(html, /@media \(min-width:761px\)\{\.sec\.stack \.beside\{max-width:520px\}\.sec\.stack \.beside img\{aspect-ratio:4\/3\}\}/);
+  assert.doesNotMatch(html, /\.sec\.side-by-side \.beside\{max-width/, 'side-by-side photos keep their column');
+  // the desktop rule must sit outside the phone block (inside it, min-width:761px could never match)
+  assert.ok(html.indexOf('.sec.stack .beside{max-width') < html.indexOf('@media (max-width:760px){'), 'the cap is not nested in the phone media query');
 });

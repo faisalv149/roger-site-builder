@@ -8,7 +8,7 @@ import { claudeVia } from '../../content/claude.js';
 import { studioDocs } from '../../store.js';
 import { sha256, stableStringify } from '../snapshot.js';
 import type { UsageRecord } from './types.js';
-import { apiSchema, parseJsonAnswer, schemaErrors } from './schema-compat.js';
+import { apiSchema, overLength, parseJsonAnswer, schemaErrors, setAt, shortenAtWord, type LongField } from './schema-compat.js';
 
 /**
  * Claude for concept sets, with a hard cost cap. Every call:
@@ -191,7 +191,26 @@ export function defaultTransport(): AiTransport | null {
 // ───────────────────────── one validated, cached, capped request ─────────────────────────
 export const AI_CACHE_VERSION = 'concepts-ai-1';
 
-export async function aiJson<T>(req: AiRequest, o: { transport: AiTransport; ledger: CostLedger; validate: (data: T) => string[]; retries?: number }): Promise<{ data: T | null; attempts: number; errors: string[]; rejected: { attempt: number; errors: string[] }[]; last: T | null }> {
+/**
+ * Rewrite the fields that run over their limits, and nothing else: one small request listing each field, its limit and
+ * its text. Each answer must be within its limit and is never cut; the map is by the field's place (e.g. $.thesis).
+ * null when the rewrite is not usable (then the normal repair, if any is left, asks again in full).
+ */
+async function shortenFields(stage: string, long: LongField[], o: { transport: AiTransport; ledger: CostLedger }, notes: Record<string, string[]> = {}): Promise<Record<string, string> | null> {
+  const places = long.map((f) => f.at);
+  const r = await aiJson<{ fields: { at: string; text: string }[] }>({
+    stage: `${stage}:shorten`, maxOutputTokens: 2000,
+    system: 'You rewrite text fields that are over their length limit. Keep each one\'s meaning and every fact; say it in fewer words. Never add a fact, never cut a sentence off. Answer only with the JSON asked for.',
+    prompt: `Rewrite each field within its limit (characters):\n${long.map((f) => `${f.at} (at most ${f.limit}; now ${f.text.length}${notes[f.at]?.length ? `; also: ${notes[f.at].map((m) => m.replace(/^[^:]+:\s*/, '')).join('; ')}` : ''}): ${JSON.stringify(f.text)}`).join('\n')}`,
+    schema: { type: 'object', additionalProperties: false, required: ['fields'], properties: { fields: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['at', 'text'], properties: { at: { type: 'string', enum: places }, text: { type: 'string' } } } } } },
+  }, {
+    transport: o.transport, ledger: o.ledger, retries: 0, fieldRepair: false,
+    validate: (d) => long.flatMap((f) => { const x = d.fields.find((y) => y.at === f.at)?.text?.trim(); return !x ? [`${f.at}: missing`] : x.length > f.limit ? [`${f.at}: still ${x.length} characters, over ${f.limit}`] : []; }),
+  }).catch((e) => { if (e instanceof ApiRequestError) throw e; return null; });
+  return r?.data ? Object.fromEntries(r.data.fields.map((f) => [f.at, f.text.trim()])) : null;
+}
+
+export async function aiJson<T>(req: AiRequest, o: { transport: AiTransport; ledger: CostLedger; validate: (data: T) => string[]; retries?: number; /** false: no field-level rewrite of over-long texts (the rewrite's own request) */ fieldRepair?: boolean; /** planner-only notes (never shown on a site): over-long ones are cut locally at a word boundary, no AI call */ localShorten?: (path: (string | number)[]) => boolean }): Promise<{ data: T | null; attempts: number; errors: string[]; rejected: { attempt: number; errors: string[] }[]; last: T | null; /** notes cut locally, with their originals (for debugging) */ shortened: { at: string; original: string; shortened: string }[] }> {
   const retries = Math.max(0, Math.min(2, o.retries ?? conceptRetries()));
   const p = priceOf(o.transport.model);
   const maxOutputTokens = Math.min(req.maxOutputTokens ?? 24_000, p.maxOutput);
@@ -199,6 +218,8 @@ export async function aiJson<T>(req: AiRequest, o: { transport: AiTransport; led
   let lastErrors: string[] = [];
   const rejected: { attempt: number; errors: string[] }[] = [];
   let last: T | null = null;
+  let fieldRepaired = false;
+  const shortened: { at: string; original: string; shortened: string }[] = [];
   for (let attempt = 1; attempt <= 1 + retries; attempt++) {
     const r: AiRequest = { ...req, prompt: feedback ? `${req.prompt}\n\nYour previous answer was rejected:\n${feedback}\nAnswer again, fixing every point.` : req.prompt };
     // keyed by the attempt too: a retry is a new question even when its feedback repeats, and a rerun replays the same
@@ -236,10 +257,41 @@ export async function aiJson<T>(req: AiRequest, o: { transport: AiTransport; led
     last = data as T;
     // the answer against the full original schema first (the limits the API was not sent), then the stage's own checks
     lastErrors = schemaErrors(req.schema, data);
+    // only texts over their limits
+    const long = lastErrors.length ? overLength(req.schema, data) : [];
+    const lengthOnly = long.length > 0 && long.length === lastErrors.length;
+    // every check that reads text (claims, treatments, grounding) runs on the ORIGINAL first: shortening can never hide one
+    const other = lengthOnly ? o.validate(data as T) : [];
+    if (lengthOnly && !other.length && o.localShorten && long.every((f) => o.localShorten!(f.path))) {
+      // planner-only notes, never shown on a site: cut here at a word boundary, no AI call; the originals are kept
+      data = structuredClone(data) as T;
+      for (const f of long) { const to = shortenAtWord(f.text, f.limit); setAt(data, f.path, to); shortened.push({ at: f.at, original: f.text, shortened: to }); }
+      last = data as T;
+      rejected.push({ attempt, errors: [...lastErrors, `${long.length} planner note(s) shortened locally at a word boundary (originals kept): ${long.map((f) => f.at).join(', ')}`] });
+      lastErrors = schemaErrors(req.schema, data);
+    } else if (lengthOnly && o.fieldRepair !== false && !fieldRepaired) {
+      // otherwise those fields alone are rewritten (once per request), never cut, then checked again; worth it only when
+      // every problem is in those fields (their length, or a rule about the same text such as a label's word count)
+      const placeOf = (at: string) => at.replace(/^\$\./, '').replace(/\.label$/, '');
+      const notes: Record<string, string[]> = Object.fromEntries(long.map((f) => [f.at, other.filter((m) => m.startsWith(`${placeOf(f.at)}:`))]));
+      const elsewhere = other.filter((m) => !long.some((f) => m.startsWith(`${placeOf(f.at)}:`)));
+      if (elsewhere.length) lastErrors = [...lastErrors, ...other];
+      else {
+        fieldRepaired = true;
+        const fixed = await shortenFields(req.stage, long, o, notes);
+        if (fixed) {
+          data = structuredClone(data) as T;
+          for (const f of long) setAt(data, f.path, fixed[f.at]);
+          last = data as T;
+          rejected.push({ attempt, errors: [...lastErrors, `${long.length} field(s) rewritten within their limits: ${long.map((f) => f.at).join(', ')}`] });
+          lastErrors = schemaErrors(req.schema, data);
+        } else lastErrors = [...lastErrors, ...other]; // the rewrite could not be used: every problem is reported
+      }
+    } else if (other.length) lastErrors = [...lastErrors, ...other];
     if (!lastErrors.length) lastErrors = o.validate(data as T);
-    if (!lastErrors.length) return { data: data as T, attempts: attempt, errors: [], rejected, last };
+    if (!lastErrors.length) return { data: data as T, attempts: attempt, errors: [], rejected, last, shortened };
     rejected.push({ attempt, errors: lastErrors });
     feedback = lastErrors.slice(0, 20).map((x) => `- ${x}`).join('\n');
   }
-  return { data: null, attempts: 1 + retries, errors: lastErrors, rejected, last };
+  return { data: null, attempts: 1 + retries, errors: lastErrors, rejected, last, shortened };
 }

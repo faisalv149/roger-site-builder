@@ -16,6 +16,10 @@ import { addComparisonToReport, canScoreNewSite, scoreMessage, scoreNewSite } fr
 import { saveBuild } from '../store.js';
 import type { Job } from '../jobs.js';
 import { advanceIntake, intakeBusy, intakeModeOf, newIntake, requestVersion, type IntakeMode, type IntakeRun } from './intake.js';
+import { resolveBusiness, type Resolution } from '../studio/resolve-business.js';
+import { respondCustom, settle } from './custom-flow.js';
+import { advanceCustom, customBusy, customMessages, staffRecheck, staffReject, staffResume, staffSend, type CustomRun } from './custom-intake.js';
+import { listConversationRecords, withSharedLock } from '../store.js';
 
 /**
  * Reference conversation for the Roger iMessage flow. Your iMessage gateway posts each
@@ -33,6 +37,8 @@ interface Session {
   candidates: BusinessCandidate[];
   idx: number;
   chosen?: BusinessCandidate;
+  /** when the owner said yes to the chosen listing ("Is this you?")  */
+  confirmedAt?: string;
   lastSiteUrl?: string;
   lastBuildId?: string;
   /** when the running build started (ms) */
@@ -52,6 +58,12 @@ interface Session {
   intakeMode?: IntakeMode;
   /** the running (or finished) concept intake: which stage, which job holds it, and each stage's timing */
   intake?: IntakeRun;
+  /** the custom full-site intake (test-only): its run, and the name and location the customer gave */
+  custom?: CustomRun;
+  query?: string;
+  /** the beta invite this conversation belongs to (custom intake) */
+  inviteId?: string;
+  from?: string;
 }
 const fresh = (): Session => ({ state: 'start', candidates: [], idx: 0 });
 
@@ -110,8 +122,14 @@ interface Ctx { async: boolean; s: Session; pending?: InboundResult['pending'] }
  * async: reply "On it" right away and send the preview when the build finishes
  * (saved to the conversation and POSTed to IMESSAGE_OUTBOUND_URL). Otherwise everything comes back in one go.
  */
-export async function handleInbound(from: string, text: string, opts: { async?: boolean; intake?: string } = {}): Promise<InboundResult> {
+export async function handleInbound(from: string, text: string, opts: { async?: boolean; intake?: string; /** a verified beta invite (the server checks it) */ inviteId?: string } = {}): Promise<InboundResult> {
+  if (opts.intake === 'custom' || (await loadSession(from)).intakeMode === 'custom') return inConversation(from, () => inbound(from, text, opts));
+  return inbound(from, text, opts);
+}
+async function inbound(from: string, text: string, opts: { async?: boolean; intake?: string; inviteId?: string }): Promise<InboundResult> {
   const ctx: Ctx = { async: !!opts.async, s: await loadSession(from) };
+  if (opts.inviteId) ctx.s.inviteId = opts.inviteId;
+  ctx.s.from = from;
   // the concept intake: on for everyone only with ROGER_INTAKE_CONCEPTS=1; otherwise per conversation, by an authenticated test intake
   // 'open' only by an authenticated test intake; 'concepts' by that or by ROGER_INTAKE_CONCEPTS=1
   const mode = intakeModeOf(opts.intake);
@@ -133,6 +151,7 @@ const buildLimitMs = () => Number(process.env.BUILD_LIMIT_SECONDS || 900) * 1000
  * instance may be running it: a finished build has a saved record; until then it counts as running.
  */
 async function pending(s: Session): Promise<boolean> {
+  if (s.state === 'building' && s.custom) return customBusy(s.custom);
   if (s.state === 'building' && s.intake) return intakeBusy(s.intake);
   if (s.state !== 'building' || !s.lastBuildId) return false;
   if (getJob(s.lastBuildId)) return true;
@@ -150,7 +169,9 @@ export async function isPending(from: string): Promise<boolean> {
  * next one, and send the top-ranked preview once the site is built. Safe to call often: it starts nothing twice.
  */
 export async function pollIntake(from: string): Promise<IntakeRun | undefined> {
-  const s = await loadSession(from);
+  const s0 = await loadSession(from);
+  if (s0.intakeMode === 'custom') { await pollCustom(from); return undefined; }
+  const s = s0;
   if (s.state !== 'building' || !s.intake || !intakeBusy(s.intake)) return s.intake;
   const run = await advanceIntake(s.intake);
   // another poll may have delivered meanwhile: only the one that sees it still building delivers
@@ -290,8 +311,10 @@ const andThen = (s: Session, first: Reply): Reply[] => { const n = nextStep(s); 
 
 async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
   const msg = text.trim();
-  if (/^(restart|reset|start over)$/i.test(msg)) { ctx.s = fresh(); return respond(from, 'hi', ctx); }
+  if (/^(restart|reset|start over)$/i.test(msg)) { ctx.s = { ...fresh(), ...(ctx.s.intakeMode ? { intakeMode: ctx.s.intakeMode } : {}), ...(ctx.s.inviteId ? { inviteId: ctx.s.inviteId } : {}), from }; return respond(from, 'hi', ctx); }
   const s = ctx.s;
+  // the custom full-site intake (test-only) has its own conversation (custom-flow.ts)
+  if (s.intakeMode === 'custom') { const r = await respondCustom(msg, s as never); if (s.state === 'building') ctx.pending = { jobId: s.custom?.id ?? 'custom' }; return r; }
 
   if (s.state === 'building' && s.intake) {
     s.intake = await advanceIntake(s.intake);
@@ -354,6 +377,7 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
     if (searching && !YES.test(msg)) return findBusiness(msg, s); // they sent a different business instead of yes or no
     if (!YES.test(msg)) return [{ text: 'Is this your business? Just reply yes or no.', quickReplies: ['Yes, that\'s me', 'No, not us'] }];
     s.chosen = s.candidates[s.idx];
+    s.confirmedAt = new Date().toISOString();
     s.state = 'offer';
     const site = s.website || s.chosen.website;
     if (site) {
@@ -416,6 +440,8 @@ async function findBusiness(msg: string, s: Session): Promise<Reply[]> {
     s.state = 'need-business';
     return [{ text: 'What\'s your business name and ZIP code? I\'ll use them to find your Google listing.' }];
   }
+  // the open intake with no website: the name and/or address resolve to one Google listing the owner confirms
+  if (s.intakeMode === 'open' && !s.website) return findOpen(query, s);
   let candidates: BusinessCandidate[];
   try {
     ({ candidates } = await lookupCandidates(query, { website: s.website, limit: 5 }));
@@ -437,6 +463,34 @@ async function findBusiness(msg: string, s: Session): Promise<Reply[]> {
   return [fromCard(await confirmBusinessCard(candidates[0]))];
 }
 
+/**
+ * The open intake's lookup (resolveBusiness, on Roger's Google search): one business that matches the name (and the
+ * address, if given) is offered to confirm; when several match, the owner chooses among them, one at a time; a ZIP,
+ * street or town alone is never taken as the business: the businesses there are offered, or the name is asked for.
+ * The listing the owner says yes to is the place ID the intake designs from.
+ */
+async function findOpen(query: string, s: Session): Promise<Reply[]> {
+  let r: Resolution;
+  try { r = await resolveBusiness({ text: query }); } catch (e) {
+    console.warn(`[imessage] open lookup of "${query}" failed: ${(e as Error).message}`);
+    s.state = 'need-business';
+    return [{ text: 'Sorry, I couldn\'t reach Google just now. Could you send that again in a minute?' }];
+  }
+  const offered = r.status === 'confirmed' ? [r.candidate] : r.candidates;
+  if (!offered.length) {
+    s.state = 'need-business';
+    return [{ text: r.status === 'need-name'
+      ? 'That looks like an address, not a business name. What\'s the business called? Send the name and ZIP code and I\'ll find you on Google.'
+      : 'I couldn\'t find that on Google. Could you send the business name and ZIP code exactly as they appear on Google? A Google Maps link to your listing works too.' }];
+  }
+  s.candidates = offered;
+  s.idx = 0;
+  s.state = 'confirm';
+  const intro = r.status === 'choose' ? `I found ${offered.length} businesses that match. Let's find yours.` : r.status === 'need-name' ? `That's an address, so I looked for the businesses there${offered.length > 1 ? ` and found ${offered.length}` : ''}.` : '';
+  const card = fromCard(await confirmBusinessCard(offered[0]));
+  return intro ? [{ text: intro }, card] : [card];
+}
+
 /** "Yes, build it": start the build and send the preview when it is ready. */
 async function build(from: string, ctx: Ctx): Promise<Reply[]> {
   const s = ctx.s;
@@ -456,7 +510,8 @@ async function build(from: string, ctx: Ctx): Promise<Reply[]> {
  */
 async function buildConcepts(from: string, ctx: Ctx): Promise<Reply[]> {
   const s = ctx.s;
-  s.intake = await advanceIntake(newIntake({ placeId: s.chosen!.placeId, website: s.website }, s.intakeMode));
+  // the owner said "yes, that's me" to this listing (s.chosen is set only by that answer): recorded as their confirmation
+  s.intake = await advanceIntake(newIntake({ placeId: s.chosen!.placeId, website: s.website, confirmed: { by: 'owner', placeId: s.chosen!.placeId, at: s.confirmedAt ?? new Date().toISOString() } }, s.intakeMode));
   s.state = 'building';
   s.buildStartedAt = Date.now();
   s.lastBuildId = undefined;
@@ -628,4 +683,67 @@ function updatedCard(job: Job): Reply {
 export async function resetSession(from: string) {
   const c = await getConversation(from);
   if (c) { c.session = undefined; c.updatedAt = new Date().toISOString(); await saveConversation(c); }
+}
+
+// ───────────────────────── the custom full-site intake: polls and staff decisions ─────────────────────────
+/** one change at a time per conversation (a message, a poll, a staff decision), so none overwrites another */
+const conversationLocks = new Map<string, Promise<unknown>>();
+function inConversation<T>(from: string, fn: () => Promise<T>): Promise<T> {
+  const before = conversationLocks.get(from) ?? Promise.resolve();
+  // in this process one at a time, and across processes (web functions and the worker) by a shared lock
+  const p = before.catch(() => undefined).then(() => withSharedLock(`conv-${from}`, fn));
+  const tail = p.catch(() => undefined);
+  conversationLocks.set(from, tail);
+  void tail.then(() => { if (conversationLocks.get(from) === tail) conversationLocks.delete(from); });
+  return p;
+}
+
+/** each poll moves the run forward and sends what the customer has not had yet (once) */
+async function pollCustom(from: string): Promise<void> {
+  await inConversation(from, async () => {
+    const s = await loadSession(from);
+    if (!s.custom || !customBusy(s.custom)) return;
+    s.custom = await advanceCustom(s.custom);
+    const replies = customMessages(s.custom);
+    settle(s as never);
+    await record(from, outgoing(replies), s);
+    if (replies.length) await channelFor(from).deliver(from, replies);
+  });
+}
+
+/** staff: send a reviewed version's link to the customer (once), or reject it (the customer keeps any earlier preview) */
+export async function staffDecision(from: string, n: number, decision: 'send' | 'reject' | 'recheck' | 'resume', reviewer: string, note = ''): Promise<{ ok: boolean; reason?: string; url?: string }> {
+  return inConversation(from, async () => {
+    const s = await loadSession(from);
+    if (!s.custom) return { ok: false, reason: 'this conversation has no custom intake' };
+    let result: { ok: boolean; reason?: string; url?: string };
+    if (decision === 'send') { const r = await staffSend(s.custom, n, reviewer, note || undefined); result = { ok: r.sent, reason: r.reason, url: r.url }; }
+    else if (decision === 'recheck') result = await staffRecheck(s.custom, n);
+    else if (decision === 'resume') result = await staffResume(s.custom, n);
+    else result = staffReject(s.custom, n, reviewer, note || 'rejected by staff');
+    if (!result.ok) return result;
+    const replies = customMessages(s.custom);
+    settle(s as never);
+    await record(from, outgoing(replies), s);
+    if (replies.length) await channelFor(from).deliver(from, replies);
+    return result;
+  });
+}
+
+/** every conversation on the custom intake, newest first, for the staff review screen */
+export async function customConversations(): Promise<{ from: string; updatedAt: string; business?: string; run: CustomRun; messages: Conversation['messages'] }[]> {
+  return (await listConversationRecords())
+    .filter((c) => (c.session as Session | undefined)?.custom)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map((c) => ({ from: c.from, updatedAt: c.updatedAt, business: c.business, run: (c.session as Session).custom!, messages: c.messages }));
+}
+
+/** every custom-intake conversation with work in flight, moved forward once (the server's timer; polls do the same) */
+export async function advanceAllCustom(): Promise<number> {
+  let n = 0;
+  for (const c of await listConversationRecords()) {
+    const s = c.session as Session | undefined;
+    if (s?.intakeMode === 'custom' && s.custom && customBusy(s.custom)) { await pollCustom(c.from); n++; }
+  }
+  return n;
 }

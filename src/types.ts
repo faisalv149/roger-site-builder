@@ -100,7 +100,6 @@ export interface BusinessCandidate {
   primaryTypeLabel?: string;
   website?: string;
   mapsUrl?: string;
-  photoRef?: string;
   /** Google's place types: a postal code or a town is not a business */
   types?: string[];
   primaryType?: string;

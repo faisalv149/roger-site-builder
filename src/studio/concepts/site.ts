@@ -1,3 +1,4 @@
+import { writeStoredFile } from '../../google-names.js';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +24,11 @@ import { renderSpec, specConcept } from './spec-render.js';
 import { stripDebrisHtml, stripSeasonalHtml } from '../../util/text.js';
 import { ownContentCss } from './shell.js';
 import type { ConceptJob } from './jobs.js';
+import { applyPhotoChecks, observeCatalogPhotos, listingUrl } from './listing-photos.js';
+import { identityKnown } from './designspec.js';
+import type { StudioReuse } from '../../content/facts.js';
+import type { BusinessBrief } from '../schema.js';
+import { photoFingerprint } from '../../design/fingerprint.js';
 
 /**
  * A chosen Phase 2 concept becomes the business's full site, through the existing builder: it researches the
@@ -98,6 +104,12 @@ export interface SiteJob {
   switched?: boolean;
   /** the business record whose built draft this job may re-render: given explicitly (a business key and brief revision), never guessed from a shared website */
   reuse?: { businessKey: string; revision: number };
+  /** the owner confirmed this business (the Google listing they said yes to): the only basis on which Studio work is reused */
+  confirmed?: OwnerConfirmation;
+  /** build a new draft even when this business already has one (its own folder, so no other draft's site is overwritten) */
+  fresh?: { slug: string };
+  /** the completed Studio work the build reused instead of asking Claude again, and what was genuinely missing */
+  reused?: { from: string; services: number; photoChecks: number; missing: string[] };
 }
 const save = (j: SiteJob) => studioDocs.put('studio-site-jobs', j.id, { ...j, updatedAt: new Date().toISOString() });
 export const getSiteJob = (id: string) => studioDocs.get<SiteJob>('studio-site-jobs', id);
@@ -107,13 +119,18 @@ async function ownerLink(draftId: string) {
 }
 
 /** Start (or switch) the site for a set's concept. A business with a draft from this set only switches design. */
-export async function startSiteJob(setId: string, conceptId: string, opts: { reuse?: { businessKey: string; revision: number } } = {}): Promise<SiteJob> {
+/** the owner said yes to this Google listing as their business (the conversation's "Is this you?"), and when */
+export interface OwnerConfirmation { by: 'owner'; placeId: string; at: string }
+export const isOwnerConfirmation = (c: unknown): c is OwnerConfirmation => !!c && typeof c === 'object' && (c as OwnerConfirmation).by === 'owner' && typeof (c as OwnerConfirmation).placeId === 'string' && !!(c as OwnerConfirmation).placeId && typeof (c as OwnerConfirmation).at === 'string';
+
+export async function startSiteJob(setId: string, conceptId: string, opts: { reuse?: { businessKey: string; revision: number }; fresh?: { slug: string }; confirmed?: OwnerConfirmation } = {}): Promise<SiteJob> {
   const set = await getConceptSet(setId);
   if (!set) throw new Error('No such concept set');
   if (!set.concepts.some((c) => c.id === conceptId)) throw new Error(`conceptId must be one of this set's concepts (${set.concepts.map((c) => c.id).join(', ')})`);
   const now = new Date().toISOString();
   if (opts.reuse && (!opts.reuse.businessKey || !Number.isInteger(opts.reuse.revision))) throw new Error('reuse needs a business key and a brief revision');
-  const job: SiteJob = { id: `sj_${randomBytes(6).toString('hex')}`, setId, conceptId, status: 'queued', stages: [], createdAt: now, updatedAt: now, resumes: 0, ...(opts.reuse ? { reuse: opts.reuse } : {}) };
+  if (opts.fresh && !/^[a-z0-9-]{3,80}$/.test(opts.fresh.slug)) throw new Error('a fresh build needs its own folder name (lowercase letters, digits and dashes), so it never overwrites another draft\'s site');
+  const job: SiteJob = { id: `sj_${randomBytes(6).toString('hex')}`, setId, conceptId, status: 'queued', stages: [], createdAt: now, updatedAt: now, resumes: 0, ...(opts.reuse ? { reuse: opts.reuse } : {}), ...(opts.fresh ? { fresh: opts.fresh } : {}), ...(isOwnerConfirmation(opts.confirmed) ? { confirmed: opts.confirmed } : {}) };
   await save(job);
   void keepAlive(runSiteJob(job.id));
   return job;
@@ -151,12 +168,17 @@ async function run(id: string) {
     // share a website are never mixed.
     const target = job.reuse ?? { businessKey: set.brief.businessKey, revision: set.brief.revision };
     let existing: SiteJob | undefined;
-    for (const j of done) { const s2 = j.setId === job.setId ? set : await getConceptSet(j.setId); if (s2 && draftMatches(s2.brief, target)) { existing = j; break; } }
+    if (!job.fresh) for (const j of done) { const s2 = j.setId === job.setId ? set : await getConceptSet(j.setId); if (s2 && draftMatches(s2.brief, target)) { existing = j; break; } }
     if (job.reuse && !existing) throw new Error(`no built site for ${job.reuse.businessKey} revision ${job.reuse.revision} to re-render`);
     if (existing) stage('Reuse the built site', 'done', { note: `draft ${existing.draftId} (built from set ${existing.setId}): re-rendered in the new design, no new research` });
     let draftId = existing?.draftId && (await getDraft(existing.draftId)) ? existing.draftId : undefined;
     if (!draftId) {
-      const r = await buildSite({ placeId, website, audit: false, scoreNew: false }, (e) => { if (e.type === 'step') stage(e.step, e.status === 'start' ? 'running' : e.status === 'error' ? 'failed' : 'done', { ms: e.ms, note: e.note }); });
+      // the confirmed brief, its verified facts and the set's completed photo checks: the build reads these instead of
+      // asking Claude again; what is genuinely missing is named, never silently researched again
+      const w = await studioReuse(set.id, brief, job.confirmed);
+      job.reused = w.summary;
+      stage('Reuse Studio work', 'done', { note: w.reuse ? `${w.summary.from}: ${w.summary.services} verified offering(s), ${w.summary.photoChecks} photo check(s)${w.summary.missing.length ? `; missing: ${w.summary.missing.join('; ')}` : ''}` : `nothing reused: ${w.summary.missing.join('; ')}` });
+      const r = await buildSite({ placeId, website, audit: false, scoreNew: false, ...(w.reuse ? { reuse: w.reuse } : {}), ...(job.fresh ? { slug: job.fresh.slug } : {}) }, (e) => { if (e.type === 'step') stage(e.step, e.status === 'start' ? 'running' : e.status === 'error' ? 'failed' : 'done', { ms: e.ms, note: e.note }); });
       draftId = r.draftId;
       job.review = r.review ? { status: r.review.status, checks: r.review.checks.filter((c) => c.level !== 'info').map((c) => ({ id: c.id, level: c.level, message: c.message })) } : undefined;
       if (!draftId) throw new Error('the build made no editable draft (the design pilot is off)');
@@ -176,6 +198,50 @@ async function run(id: string) {
     clearInterval(beat);
     await save(job);
   }
+}
+
+/**
+ * The completed Studio work a build may reuse for this set, only when the owner confirmed the business: their "yes" names
+ * the same Google listing as the brief (the same business key and revision), and the brief's identity is settled. Then:
+ * the brief's verified offerings, service area and emergency availability, and the image checks of its photos from the
+ * set's own concept job, each with the checked image's fingerprint (a check without one is passed on but never attached).
+ * Without the owner's confirmation nothing is reused, and the build researches the business itself.
+ */
+export async function studioReuse(setId: string, brief: BusinessBrief, confirmed?: OwnerConfirmation): Promise<{ reuse?: StudioReuse; summary: NonNullable<SiteJob['reused']> }> {
+  const missing: string[] = [];
+  const none = (why: string) => ({ summary: { from: `brief ${brief.businessKey} r${brief.revision}`, services: 0, photoChecks: 0, missing: [why] } });
+  const placeId = brief.identity.listing?.placeId;
+  if (!isOwnerConfirmation(confirmed)) return none('the owner has not confirmed this business: nothing is reused, and the build researches it itself');
+  if (!placeId || confirmed.placeId !== placeId) return none(`the owner confirmed Google listing ${confirmed.placeId}, but the brief is for ${placeId ?? 'no listing'}: nothing is reused`);
+  if (!identityKnown(brief)) return none(`the brief's identity is ${brief.identity.status}, not settled: nothing is reused`);
+  const job = (await studioDocs.list<ConceptJob>('studio-concept-jobs')).find((j) => j.setId === setId && j.input.businessKey === brief.businessKey && j.input.revision === brief.revision);
+  const services = (brief.services.items ?? []).filter((x) => x.status === 'verified' && x.evidence.length).map((x) => ({ name: x.name, ...(x.description?.value ? { description: x.description.value } : {}) }));
+  if (!services.length) missing.push('offerings: the brief verifies none, so none are listed (Claude is not asked to find some)');
+  const area = brief.serviceArea?.status === 'verified' ? brief.serviceArea.value?.places ?? [] : [];
+  const emergency = brief.availability?.emergency?.status === 'verified' && !!brief.availability.emergency.value;
+  const checks: NonNullable<StudioReuse['photoChecks']> = [];
+  const listing = job?.work.listing;
+  if (placeId && listing?.labelled === 'vision') for (const x of listing.items) { if (x.kind !== 'unknown') checks.push({ url: listingUrl(placeId, x.n), width: x.width, height: x.height, kind: x.kind, ...(x.seen ? { seen: x.seen } : {}), ...(x.fp ? { fp: x.fp } : {}) }); }
+  else if (placeId) missing.push(`Google listing photo checks: ${job ? `concept job ${job.id} has ${listing ? `only "${listing.labelled}" labels` : 'none'}` : 'no concept job for this set'}, so those photos are labelled by Claude`);
+  if (job?.work.seen && Object.keys(job.work.seen).length) {
+    const { inventory } = await getBrief(brief.businessKey, brief.revision);
+    const review = await getReview(job.input.reviewId);
+    if (inventory && review) {
+      const cat = resolveCatalog(brief, inventory, review);
+      // the business's own photos: the fingerprint of the very copy the image check looked at (the set's img/<id>.jpg)
+      for (const p of cat.photos) {
+        const v = job.work.seen[p.id];
+        if (!v || p.url.startsWith('google-listing:')) continue;
+        const file = path.join(setDir(setId), 'img', `${p.id}.jpg`);
+        const fp = v.fp; // only the fingerprint captured with this description, never stamp a newer image onto old text
+        checks.push({ url: p.url, width: p.width, height: p.height, kind: v.kind, ...(v.seen ? { seen: v.seen } : {}), ...(fp ? { fp } : {}) });
+      }
+    }
+  }
+  const unprinted = checks.filter((c) => !c.fp).length;
+  if (unprinted) missing.push(`${unprinted} saved photo check(s) have no image fingerprint (made before identity was recorded): those photos are looked at again, never given the old description`);
+  const from = `brief ${brief.businessKey} r${brief.revision}${job ? ` · concept job ${job.id}` : ''} · confirmed by the owner ${confirmed.at}`;
+  return { reuse: { from, facts: { services, ...(area.length ? { serviceAreas: area } : {}), ...(emergency ? { emergency } : {}) }, ...(checks.length ? { photoChecks: checks } : {}) }, summary: { from, services: services.length, photoChecks: checks.length, missing } };
 }
 
 /** A job left running nowhere (its instance stopped) is started again by the poll that notices. */
@@ -237,7 +303,17 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
     // an open design: the same spec, the same renderer, the same photos (with what the set's image checks saw); only
     // undated seasonal promotions come off, and the inner pages join its menu
     const job = (await studioDocs.list<ConceptJob>('studio-concept-jobs')).find((j) => j.setId === set.id);
-    for (const p of cat.photos) { const v = job?.work.seen?.[p.id]; if (v) { p.seenKind = v.kind; if (v.seen) p.seen = v.seen; } }
+    if (job) {
+      await observeCatalogPhotos(cat.photos);
+      for (const p of cat.photos.filter((p) => !p.url.startsWith('google-listing:'))) {
+        const file = path.join(cdir, 'img', `${p.id}.jpg`);
+        if (fs.existsSync(file)) p.fp = await photoFingerprint(fs.readFileSync(file)).catch(() => undefined);
+      }
+      const unverified: { id: string; reason: string }[] = [];
+      applyPhotoChecks(cat.photos, job.work, unverified);
+      omitted.push(...unverified.map((p) => ({ what: p.id, reason: p.reason })));
+      cat.photos = cat.photos.filter((p) => !p.url.startsWith('google-listing:') || !!p.fp);
+    }
     const live = handoffSpec(spec, cat);
     omitted.push(...live.omitted);
     html = renderSpec(live.spec, cat, brief, { photoSrc: (id) => `img/${id}.jpg`, pages: inner.map((p) => ({ label: pageLabel(p), href: p.route })), designId: concept.designSpecId });
@@ -250,7 +326,7 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
   fs.mkdirSync(dest, { recursive: true });
   for (const file of new Set([...html.matchAll(/(?:src|href)="img\/([A-Za-z0-9_.-]+)"/g)].map((m) => m[1]))) {
     const data = await read(`img/${file}`);
-    if (data) fs.writeFileSync(path.join(dest, file), data);
+    if (data) writeStoredFile(path.join(dest, file), data);
   }
   html = html.replace(/((?:src|href)=")img\//g, '$1assets/concept/');
   // the SEO head from the builder's home page
@@ -273,7 +349,7 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
     else add.push(`<li><a href="${p.route}">${label}</a></li>`);
   }
   if (add.length) html = html.replace(/(<nav id="site-menu" aria-label="Sections"><ul>[\s\S]*?)(<\/ul><\/nav>)/, `$1${add.join('')}$2`);
-  fs.writeFileSync(homeFile, html);
+  writeStoredFile(homeFile, html);
   // inner pages in the concept's design: its header, menu and footer, its tokens (colour, type, corners, spacing)
   applyConceptShell(siteDir, homeFile, html, tokens, shellOf(concept), ownCss, spec ? { contentCss: ownContentCss(tokens, { tracking: spec.type.tracking, headingColor: tokens.colors.ink }) } : undefined);
   for (const file of htmlFiles(siteDir)) {
@@ -285,7 +361,7 @@ export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
     if (file !== homeFile) pageHtml = dropMissingImages(pageHtml, path.dirname(file)).html;
     // no undated seasonal promotion on any page: the builder's inner pages are checked too
     const r = file === homeFile ? { html: pageHtml, removed: [] as string[] } : stripSeasonalHtml(pageHtml);
-    fs.writeFileSync(file, r.html);
+    writeStoredFile(file, r.html);
     for (const t of r.removed) omitted.push({ what: `${page} page: "${t}"`, reason: 'an undated seasonal promotion — it may be out of date, so it is left off the site until the owner gives a date' });
   }
   if (omitted.length) d.concept.omitted = omitted; else delete d.concept.omitted; // a site with nothing left out keeps its record as before

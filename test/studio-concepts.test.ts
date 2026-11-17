@@ -318,13 +318,20 @@ const answerOf = (plans: DirectionPlan[]) => ({ concepts: plans.map((p, i) => ({
 })) });
 
 test('the open planner never falls back to the fixed directions: no valid DesignSpec fails its stage, with the reason', async () => {
-  const { agreed } = await getBriefs();
+  const { agreed, inventory } = await getBriefs();
   const asked: string[] = [];
-  const t: AiTransport = { via: 'fake', model: 'claude-sonnet-5-5', async call(r) { asked.push(r.stage); return { data: r.stage === 'design:spec' ? { thesis: 'only a thesis' } : {}, usage: { via: 'fake', model: 'claude-sonnet-5-5', inputTokens: 6000, outputTokens: 3000, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.05, costBasis: 'computed' } }; } };
+  // a sound direction for this brief (its brand colour and fonts, one of its services), then a spec that is not one
+  const { brandColors, brandFonts } = await import('../src/studio/concepts/designspec.js');
+  const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
+  const font = brandFonts(agreed)[0] ?? 'Inter';
+  const idea = { summary: 'Its services first, plainly.', palette: { ground: 'white', surface: 'paper', ink: 'ink', accent: brandColors(agreed)[0] ?? 'ink' }, type: { heading: font, body: font, treatment: 'Plain.' }, hero: { textSide: 'left', aside: 'service-index', photoBehindText: false, note: 'Its services as an index.' }, sections: [{ content: 'the services', arrangement: 'stack', itemStyle: 'ruled', background: 'surface', media: 'none' }], boldElement: 'The services index.', alignment: 'left' };
+  const direction = { audience: 'Homeowners with a plumbing problem.', mainJob: { text: 'Get them to call.', action: null }, characteristic: { text: 'Its services.', evidence: [{ kind: 'service', id: cat.services[0].id }] }, idea, critique: [], revised: null, changes: null };
+  const t: AiTransport = { via: 'fake', model: 'claude-sonnet-5-5', async call(r) { asked.push(r.stage); return { data: r.stage === 'design:spec' ? { thesis: 'only a thesis' } : r.stage === 'design:direction' ? direction : {}, usage: { via: 'fake', model: 'claude-sonnet-5-5', inputTokens: 6000, outputTokens: 3000, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.05, costBasis: 'computed' } }; } };
   const job = await startConceptJob({ businessKey: agreed.businessKey, revision: agreed.revision, briefHash: agreed.briefHash, planner: 'open' }, { transport: t });
   const done = await waitForConceptJob(job.id);
   assert.equal(done.status, 'failed');
   assert.match(done.error ?? '', /^directions: open planner: no valid DesignSpec after 2 attempt\(s\): no valid spec after 2 attempt\(s\): \$: "palette" is missing/);
+  assert.equal(asked.filter((s) => s === 'design:direction').length, 1, 'the direction came first, accepted once');
   assert.equal(asked.filter((s) => s === 'design:spec').length, 2, 'one attempt and one repair');
   assert.ok(!asked.includes('directions'), 'the fixed directions were never asked for');
   assert.ok(done.stages.filter((s) => ['compose', 'render', 'validate'].includes(s.name)).every((s) => s.status === 'pending'), 'nothing was composed or rendered from another design');

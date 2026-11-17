@@ -1,4 +1,6 @@
+import { writeStoredFile } from '../google-names.js';
 import fs from 'node:fs';
+import { forStorage } from '../google-names.js';
 import path from 'node:path';
 import sharp from 'sharp';
 import { config } from '../config.js';
@@ -163,8 +165,8 @@ ${pageSpeedSection(ps)}
 ${a.passed.length ? `<h2>What's already working</h2><ul class="passed">${a.passed.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : ''}
 <p class="meta">Checked ${new Date(a.generatedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })} · page ~${a.metrics.pageKb} KB · server ${a.metrics.ttfbMs} ms${(ps?.mobile?.scores.performance ?? ps?.performance) !== undefined ? ` · PageSpeed ${ps?.mobile?.scores.performance ?? ps?.performance}/100 on phones` : ''}</p>
 </main></body></html>`;
-  fs.writeFileSync(path.join(dir, 'index.html'), html);
-  fs.writeFileSync(path.join(dir, 'audit.json'), JSON.stringify(a, null, 2));
+  writeStoredFile(path.join(dir, 'index.html'), html);
+  writeStoredFile(path.join(dir, 'audit.json'), JSON.stringify(forStorage(a, 'audit.json'), null, 2));
   await persistDir(dir); // on Vercel: so any server instance can serve the report
   return { dir, url, image };
 }

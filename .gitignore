@@ -4,3 +4,7 @@ data
 .env
 .vercel
 
+
+# local env variants (beta staff login, etc.)
+.env.*
+!.env.example

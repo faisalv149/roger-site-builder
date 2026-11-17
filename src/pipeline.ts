@@ -1,3 +1,4 @@
+import { writeStoredFile } from './google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
@@ -23,11 +24,12 @@ import type { SourceBundle } from './content/model.js';
 import sharp from 'sharp';
 import { cloneTheme, getTheme, validateTheme, type ThemeEntry } from './theme/load.js';
 import { selectTheme } from './theme/select.js';
-import { extractFacts, heuristicFacts } from './content/facts.js';
+import { extractFacts, heuristicFacts, reusedFacts, type StudioReuse } from './content/facts.js';
 import { pickServices } from './content/services.js';
 import { buildModel, type SiteModel } from './content/model.js';
 import { pickLogo } from './brand/logo.js';
-import { processPhotos } from './brand/photos.js';
+import { processPhotos, type ProcessedPhoto } from './brand/photos.js';
+import { photoFingerprint, samePhoto } from './design/fingerprint.js';
 import { resolveBrand, brandTextOnSurface } from './brand/brand.js';
 import { renderPage } from './render/page.js';
 import { screenshot, screenshotsAvailable, writeIcons, writeOgCard } from './render/og.js';
@@ -51,7 +53,8 @@ import { detectCategory, profileFor } from './design/categories.js';
 import { offeringsFrom, type Offering } from './design/offerings.js';
 import { toMeta, type PhotoInfo } from './design/photos.js';
 import type { Appearance } from './design/schema.js';
-import { withLiveReviews } from './sources/google-live.js';
+import { withLivePhotos, withLiveReviews } from './sources/google-live.js';
+import { forStorage } from './google-names.js';
 import { phoneKey, reviewLike } from './sources/site-content.js';
 import { composeModel, findDraft, newDraftId, putDraft, tokensFor, type DraftBase, type DraftRecord } from './drafts.js';
 
@@ -80,6 +83,8 @@ export interface BuildInput {
    * Lighthouse / Google PageSpeed), for a before-and-after comparison. Adds about 20-30 s; the Studio turns it on.
    */
   scoreNew?: boolean;
+  /** completed Studio work for this business and brief revision (the open-design handoff): used instead of asking Claude again */
+  reuse?: StudioReuse;
   /** Personalisation pilot (plumbing): the owner's answers, a request for an alternative design, the saved plan. */
   design?: {
     preferences?: DesignPreferences;
@@ -208,6 +213,37 @@ function ownPage(dest: string | undefined, home: string): string | undefined {
   } catch { return undefined; }
 }
 
+/**
+ * What each processed photo shows, from the Studio's completed checks, matched by the photo's identity: its image
+ * fingerprint (photoFingerprint, recorded when it was checked) and its size, wherever it now sits in the listing. A
+ * check made before fingerprints were recorded, or a photo that matches no check (or two equally well), is not
+ * established: its old description is never attached, and only those photos are looked at again.
+ */
+export async function reusedLabels(items: ProcessedPhoto[], b: Business, reuse: StudioReuse, ask: (items: ProcessedPhoto[]) => Promise<PhotoLabels>): Promise<PhotoLabels> {
+  const checks = reuse.photoChecks ?? [];
+  const listing = checks.filter((c) => c.url.startsWith(`google-listing:${b.placeId}#`));
+  const website = checks.filter((c) => !c.url.startsWith('google-listing:'));
+  const found = await Promise.all(items.map(async (it) => {
+    const pool = (it.photo.source === 'website' ? website : listing).filter((c) => c.fp && c.width === it.photo.width && c.height === it.photo.height);
+    if (!pool.length) return undefined;
+    const fp = await photoFingerprint(it.raw).catch(() => undefined);
+    return fp ? samePhoto(fp, pool) : undefined;
+  }));
+  const missing = items.filter((_, i) => !found[i]);
+  const asked = missing.length ? await ask(missing) : undefined;
+  let k = 0;
+  const KINDS = ['team', 'work', 'vehicle', 'storefront', 'other'];
+  const kinds: PhotoLabels['kinds'] = [], seen: PhotoLabels['seen'] = [];
+  items.forEach((_, i) => {
+    const c = found[i];
+    if (c) { kinds.push((KINDS.includes(c.kind) ? c.kind : 'unknown') as PhotoLabels['kinds'][number]); seen.push(c.seen); return; }
+    kinds.push(asked?.kinds[k] ?? 'unknown'); seen.push(asked?.seen[k]); k++;
+  });
+  const reused = found.filter(Boolean).length;
+  const unprinted = checks.filter((c) => !c.fp).length;
+  return { kinds, seen, source: 'vision', reused, note: missing.length ? `${missing.length} photo(s) whose identity could not be established (${unprinted ? `${unprinted} saved check(s) predate fingerprints; ` : ''}no single saved check with the same image) were ${asked?.source === 'vision' ? 'looked at again by Claude' : `not labelled (${asked?.note ?? asked?.source ?? 'no answer'})`}; no old description was attached to them` : `all ${reused} reused from ${reuse.from}, each matched by its image fingerprint` };
+}
+
 export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promise<BuildResult> {
   const started = Date.now();
   const steps: Step[] = [];
@@ -288,15 +324,16 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   const doAudit = input.audit !== false && !!scan;
   const photosP = timed(steps, emit, 'Process photos', () => processPhotos(b, theme, { outDir: assetDir, publicPrefix: 'assets' }), (r) => `${r.usable} usable · ${r.rejected.length} rejected`);
   // design builds: what each photo shows (vision / sample labels), while Claude reads the facts
+  const ask = (items: ProcessedPhoto[]) => labelPhotos(items, { name: b.name, category: b.primaryTypeLabel || b.primaryType }).catch((e): PhotoLabels => ({ kinds: items.map(() => 'unknown' as const), seen: items.map(() => undefined), source: 'none', note: `labelling failed: ${(e as Error).message}` }));
   const labelsP = designOn
-    ? photosP.then((p) => timed(steps, emit, 'Read photos', () => labelPhotos(p.items, { name: b.name, category: b.primaryTypeLabel || b.primaryType }).catch((e): PhotoLabels => ({ kinds: p.items.map(() => 'unknown' as const), seen: p.items.map(() => undefined), source: 'none', note: `labelling failed: ${(e as Error).message}` })),
-        (r) => (r.source === 'vision' ? `${r.kinds.filter((k) => k !== 'unknown').length} labelled by Claude` : r.source === 'fixture' ? 'sample-data labels' : 'no labels: ranking by quality only')))
+    ? photosP.then((p) => timed(steps, emit, 'Read photos', () => (input.reuse?.photoChecks ? reusedLabels(p.items, b, input.reuse, ask) : ask(p.items)),
+        (r) => (r.reused !== undefined ? `${r.reused} reused from ${input.reuse!.from}${r.kinds.length - r.reused ? `; ${r.note ?? ''}` : '; none asked of Claude again'}` : r.source === 'vision' ? `${r.kinds.filter((k) => k !== 'unknown').length} labelled by Claude` : r.source === 'fixture' ? 'sample-data labels' : 'no labels: ranking by quality only')))
     : Promise.resolve(undefined);
   const designAsk = designOn ? { design: { style: prefs?.style, service: prefs?.service, goal: prefs?.goal } } : {};
   const [photos, logoRes, factsRes, audit, labels] = await Promise.all([
     photosP,
     timed(steps, emit, 'Find logo', () => pickLogo(scan, { outDir: assetDir, publicPrefix: 'assets', band: theme.palette.surface, maxHeightPx: theme.logo.maxHeight.desktop, minChroma: theme.brandColor.minChroma }), (r) => (r.logo ? `from ${r.logo.sourceUrl.split('/').pop()}` : 'none, using wordmark')),
-    timed(steps, emit, claudeEnabled() ? 'Extract facts (Claude)' : 'Extract facts', () => extractFacts(b, theme, scan, designAsk), (r) => `${r.claude.ran ? (r.claude.validated ? `Claude read the page (${r.claude.ms} ms)${r.claude.dropped.length ? `, dropped ${r.claude.dropped.length} unsupported` : ''}` : `Claude ${r.claude.error ? 'failed' : 'was rejected'}: ${r.claude.fallbackReason}`) : `Claude did not run: ${r.claude.fallbackReason}`} · ${[r.facts.years && `${r.facts.years} yrs`, r.facts.licensed && 'licensed', r.facts.insured && 'insured', r.facts.emergency && 'emergency', r.facts.open24h && '24h'].filter(Boolean).join(', ') || 'no stated facts (unknown, not absent)'} · ${r.services.length} services`),
+    timed(steps, emit, input.reuse?.facts ? 'Extract facts (reused brief)' : claudeEnabled() ? 'Extract facts (Claude)' : 'Extract facts', () => (input.reuse?.facts ? Promise.resolve(reusedFacts(b, scan, input.reuse.facts, input.reuse.from)) : extractFacts(b, theme, scan, designAsk)), (r) => `${r.claude.ran ? (r.claude.validated ? `Claude read the page (${r.claude.ms} ms)${r.claude.dropped.length ? `, dropped ${r.claude.dropped.length} unsupported` : ''}` : `Claude ${r.claude.error ? 'failed' : 'was rejected'}: ${r.claude.fallbackReason}`) : `Claude did not run: ${r.claude.fallbackReason}`} · ${[r.facts.years && `${r.facts.years} yrs`, r.facts.licensed && 'licensed', r.facts.insured && 'insured', r.facts.emergency && 'emergency', r.facts.open24h && '24h'].filter(Boolean).join(', ') || 'no stated facts (unknown, not absent)'} · ${r.services.length} services`),
     doAudit ? timed(steps, emit, 'Audit existing website', () => auditWebsite(scan!, b), (r) => `score ${r.score}/100 · ${r.issues.length} issues`) : Promise.resolve(undefined),
     labelsP,
   ]);
@@ -371,7 +408,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       ? fs.readFileSync(src)
       : await fetch(`${config.publicBaseUrl}${stock.url}`, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.arrayBuffer() : undefined)).then((b) => (b ? Buffer.from(b) : undefined)).catch(() => undefined);
     if (data) {
-      fs.writeFileSync(path.join(assetDir, path.basename(src)), data);
+      writeStoredFile(path.join(assetDir, path.basename(src)), data);
       hero = { publicPath: `assets/${path.basename(src)}`, width: stock.width || 1920, height: stock.height || 1080, alt: stock.alt || '', source: 'stock' };
     }
   }
@@ -390,7 +427,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
         try {
           const out = await sharp(buf).rotate().resize({ width: 960, withoutEnlargement: true }).webp({ quality: 78 }).toBuffer({ resolveWithObject: true });
           const file = `video-${++posterN}.webp`;
-          fs.writeFileSync(path.join(assetDir, file), out.data);
+          writeStoredFile(path.join(assetDir, file), out.data);
           poster = { publicPath: `assets/${file}`, width: out.info.width, height: out.info.height };
         } catch { /* the poster picture is optional: the video still shows as a titled link */ }
       }
@@ -537,7 +574,8 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       ink: brand.brandInk,
     });
     const { theme: _t, ...dump } = model;
-    fs.writeFileSync(path.join(siteDir, 'site.json'), JSON.stringify({ ...dump, themeName: entry.name }, null, 2));
+    // (Google's photo resource names and authors are not written: the photos are live references, withLivePhotos)
+    writeStoredFile(path.join(siteDir, 'site.json'), JSON.stringify(forStorage({ ...dump, business: withLivePhotos(dump.business), themeName: entry.name }, `${slug}/site.json`), null, 2));
     return html.length;
   }, (n) => `${Math.round(n / 1024)} KB html`);
 
@@ -644,7 +682,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     // For preview links sent to the owner, show the real design in the iMessage rich card.
     for (const p of sitePlan?.pages.map((x) => `${x.route}index.html`) ?? ['index.html']) {
       const f = path.join(siteDir, p);
-      fs.writeFileSync(f, fs.readFileSync(f, 'utf8').split(`content="${model.urls.og}"`).join(`content="${model.urls.site}preview.jpg"`).split(`content="${previewContext(slug).base}/og.jpg"`).join(`content="${model.urls.site}preview.jpg"`));
+      writeStoredFile(f, fs.readFileSync(f, 'utf8').split(`content="${model.urls.og}"`).join(`content="${model.urls.site}preview.jpg"`).split(`content="${previewContext(slug).base}/og.jpg"`).join(`content="${model.urls.site}preview.jpg"`));
     }
   }
 

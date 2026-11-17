@@ -1,3 +1,4 @@
+import { writeStoredFile } from '../../google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
@@ -242,7 +243,7 @@ export async function renderSet(concepts: Concept[], cat: Catalog, setId: string
     for (const concept of concepts) {
       const name = `${concept.id}${opts.suffix ?? ''}`;
       const html = path.join(dir, `${name}.html`);
-      fs.writeFileSync(html, conceptHtml(concept, cat, setId));
+      writeStoredFile(html, conceptHtml(concept, cat, setId));
       step(`${name} HTML`);
       const url = `file:///${html.replace(/\\/g, '/').replace(/^\//, '')}`;
       const shoot = async (kind: 'desktop' | 'mobile') => {

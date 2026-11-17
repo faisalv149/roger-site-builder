@@ -86,13 +86,27 @@ async function recordPage(ctx: StageCtx, url: string, r: Awaited<ReturnType<type
 }
 
 // ───────────────────────── 1. identity ─────────────────────────
+/**
+ * The home page at the address given. A plain-http address that gets no answer at all (no HTTP status: a timeout or a
+ * refused connection) is tried once over https, since many sites serve only https while their listing still says http.
+ * Pages are keyed without the scheme, so the https result replaces the failed record.
+ */
+export async function readHome(ctx: StageCtx, home: string, fetcher: typeof fetchWithRetry = fetchWithRetry): Promise<{ page: SnapshotPage; home: string }> {
+  const page = ctx.work.pages[urlKey(home)] ?? (await recordPage(ctx, home, await fetcher(home), { allowRender: true }));
+  if (page.status !== 'failed' || page.httpStatus || !/^http:\/\//i.test(home)) return { page, home };
+  const secure = home.replace(/^http:/i, 'https:');
+  const again = await recordPage(ctx, secure, await fetcher(secure), { allowRender: true });
+  if (again.status === 'failed') { ctx.work.pages[urlKey(home)] = page; await ctx.save(); return { page, home }; }
+  ctx.note(`${home} did not answer (${page.error}); ${secure} did, so the https address is read.`);
+  return { page: again, home: secure };
+}
+
 export async function identityStage(ctx: StageCtx): Promise<void> {
   const w = ctx.work;
   const notes: string[] = [];
   const rejected: IdentitySnapshot['rejected'] = [];
   if (w.input.website) {
-    const home = normalizeUrl(w.input.website);
-    const page = w.pages[urlKey(home)] ?? (await recordPage(ctx, home, await fetchWithRetry(home), { allowRender: true }));
+    const { page, home } = await readHome(ctx, normalizeUrl(w.input.website));
     if (page.status === 'failed') throw new Error(`The website did not load (${page.error}) after ${page.attempts} attempts.`);
     const html = (await getBody(page.bodyHash))!;
     const content = extractSiteContent(html, page.finalUrl || home);
@@ -134,7 +148,9 @@ export async function identityStage(ctx: StageCtx): Promise<void> {
       let home: string | undefined;
       try { home = normalizeUrl(listing.website); } catch { notes.push(`The listing's website "${listing.website}" is not a valid address.`); }
       if (home) {
-        const page = w.pages[urlKey(home)] ?? (await recordPage(ctx, home, await fetchWithRetry(home), { allowRender: true }));
+        const read = await readHome(ctx, home);
+        const page = read.page;
+        home = read.home;
         if (page.status === 'failed') notes.push(`The listing's website (${home}) did not load: ${page.error}.`);
         else {
           const content = extractSiteContent((await getBody(page.bodyHash))!, page.finalUrl || home);

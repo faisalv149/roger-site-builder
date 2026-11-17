@@ -5,6 +5,7 @@ import type { Catalog } from './review.js';
 import type { PageMetrics, Rendered } from './render.js';
 import { isListing } from './listing-photos.js';
 import { photoRole } from './directions.js';
+import { factValues } from './designspec.js';
 import type { Check, Concept } from './types.js';
 import { UI_DEBRIS, undatedSeasonal } from '../../util/text.js';
 
@@ -164,9 +165,34 @@ export function previewRules(r: Rendered, html: string): Check {
   return { id: 'preview-rules', level: out.length ? 'fail' : 'pass', message: out.length ? `${out.length} preview rule(s) broken` : 'The hero leads with something lasting, and no crawler debris shows as text.', ...(out.length ? { details: out } : {}) };
 }
 
+/**
+ * An open design's page shows what it must, read from the rendered page (not from headings): the verified hours and
+ * address, each in its facts block with its text on the page; the rating and the reviews link in one block; no hero aside
+ * drawn with nothing in it.
+ */
+export function factsShown(html: string, m: PageMetrics, cat: Catalog): Check {
+  const errs: string[] = [];
+  const values = factValues(cat);
+  const flat = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase();
+  const text = flat(m.text);
+  for (const k of ['hours', 'address'] as const) {
+    const v = values[k];
+    if (!v) continue;
+    if (!html.includes(`data-fact="${k}"`)) errs.push(`the verified ${k} are not on the page`.replace('address are', 'address is'));
+    else if (!v.every((line) => text.includes(flat(line)))) errs.push(`the verified ${k} block does not show every line (${v.join('; ')})`);
+  }
+  const hero = html.match(/<section[^>]*data-kind="hero"[\s\S]*?<\/section>/)?.[0] ?? '';
+  for (const a of hero.matchAll(/<(div|ol|figure) class="hero-aside[^"]*"[^>]*>([\s\S]*?)<\/\1>/g)) if (!a[2].replace(/<(?!img)[^>]+>/g, '').trim()) errs.push('the hero has an empty aside box');
+  const reviewActs = cat.actions.filter((a) => a.kind === 'reviews').map((a) => a.id);
+  const blocks = [...html.matchAll(/<section id="([^"]+)"[\s\S]*?<\/section>/g)].filter((x) => x[0].includes('data-fact="rating"') || reviewActs.some((id) => x[0].includes(`data-action="${id}"`)));
+  if (blocks.length > 1) errs.push(`the rating and the reviews link are spread over ${blocks.length} sections (${blocks.map((x) => x[1]).join(', ')})`);
+  if ((html.match(/data-fact="rating"/g) ?? []).length > 1) errs.push('the rating is shown more than once');
+  return { id: 'facts', level: errs.length ? 'fail' : 'pass', message: errs.length ? `${errs.length} required fact problem(s)` : `Verified ${(['hours', 'address'] as const).filter((k) => values[k]).join(' and ') || 'facts'} shown from data; the rating at most once, with its reviews link; no empty hero box.`, ...(errs.length ? { details: errs } : {}) };
+}
+
 export function checkConcept(concept: Concept, r: Rendered, cat: Catalog, availablePhotos = cat.photos.length): Check[] {
   const html = fs.existsSync(r.html) ? fs.readFileSync(r.html, 'utf8') : '';
-  return [previewRules(r, html), grounding(r.desktop.metrics, cat), grounding(r.mobile.metrics, cat), rights(r.desktop.metrics, cat, concept, html), links(r.desktop.metrics, cat), links(r.mobile.metrics, cat), imagery(r.desktop.metrics, cat), photosShown(r.desktop.metrics, cat, availablePhotos), accessibility(r.desktop.metrics, r.mobile.metrics)]
+  return [previewRules(r, html), grounding(r.desktop.metrics, cat), grounding(r.mobile.metrics, cat), rights(r.desktop.metrics, cat, concept, html), links(r.desktop.metrics, cat), links(r.mobile.metrics, cat), imagery(r.desktop.metrics, cat), photosShown(r.desktop.metrics, cat, availablePhotos), accessibility(r.desktop.metrics, r.mobile.metrics), ...(concept.designSpecId ? [factsShown(html, r.desktop.metrics, cat), factsShown(html, r.mobile.metrics, cat)] : [])]
     .reduce<Check[]>((acc, c) => { const prev = acc.find((x) => x.id === c.id); if (!prev) acc.push(c); else if (c.level === 'fail') { prev.level = 'fail'; prev.message = c.message; prev.details = [...new Set([...(prev.details ?? []), ...(c.details ?? [])])]; } return acc; }, []);
 }
 

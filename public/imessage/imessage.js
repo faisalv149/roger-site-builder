@@ -18,7 +18,12 @@ const postJson = async (path, body) => {
 
 // One conversation per browser until "Restart". The server saves every message (data/conversations/),
 // so a reload or a server restart picks the conversation back up.
-const FROM_KEY = 'roger-imsg-from';
+// a test intake for this simulator tab (?intake=custom: the custom full-site path with staff review); none for clients
+const INTAKE = (() => { const v = new URLSearchParams(location.search).get('intake'); return v === 'custom' ? v : ''; })();
+// an invited beta tester's token (from the invite link; kept for this browser so a reload keeps working)
+const INVITE = (() => { if (!INTAKE) return ''; const q = new URLSearchParams(location.search).get('invite'); try { if (q) localStorage.setItem('roger-imsg-invite', q); return q || localStorage.getItem('roger-imsg-invite') || ''; } catch { return q || ''; } })();
+const CONVO_OPTS = INVITE ? { headers: { 'x-roger-invite': INVITE } } : {};
+const FROM_KEY = INTAKE ? `roger-imsg-from-${INTAKE}` : 'roger-imsg-from';
 const newFrom = () => `imsg-${Math.random().toString(36).slice(2, 8)}`;
 const stored = (() => { try { return localStorage.getItem(FROM_KEY); } catch { return null; } })();
 let from = stored || newFrom();
@@ -102,7 +107,7 @@ async function waitForLater(count) {
   showTyping();
   for (;;) {
     await sleep(1500);
-    const c = await fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const c = await fetch(`/api/conversations/${encodeURIComponent(from)}`, CONVO_OPTS).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (!c || c.pending) continue;
     if (c.messages.length <= count) { hideTyping(); return [{ quickReplies: ['Is my preview ready?'] }]; } // the build died (server restart); Roger explains on the next text
     const later = c.messages.slice(count).filter((m) => m.dir === 'out');
@@ -124,11 +129,13 @@ async function send(raw) {
   showTyping();
   try {
     // async: a build answers "On it" now and sends the preview when it's done, however long that takes
-    const res = await postJson('/api/imessage/inbound', { from, text, async: true });
+    const res = await postJson('/api/imessage/inbound', { from, text, async: true, ...(INTAKE ? { intake: INTAKE } : {}), ...(INVITE ? { invite: INVITE } : {}) });
     setReceipt(row, `<b>Read</b> ${timeNow()}`);
     let replies = res.replies;
     await showReplies(replies);
-    if (res.pending) replies = await waitForLater(res.messageCount);
+    // the custom intake: Roger's reply is the update; the link comes later as its own message (picked up by the quiet
+    // check below), so no typing indicator stays up through research, generation and checks
+    if (res.pending && !INTAKE) replies = await waitForLater(res.messageCount);
     hideTyping();
     setSuggest(replies.at(-1)?.quickReplies || []);
     seen = await savedCount();
@@ -177,11 +184,11 @@ setSuggest(START);
 
 /* messages Roger sends on its own later (the new site's score after a preview): checked quietly every few seconds */
 let seen = 0;
-const savedCount = () => fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => (r.ok ? r.json() : null)).then((c) => c?.messages?.length || 0).catch(() => 0);
+const savedCount = () => fetch(`/api/conversations/${encodeURIComponent(from)}`, CONVO_OPTS).then((r) => (r.ok ? r.json() : null)).then((c) => c?.messages?.length || 0).catch(() => 0);
 setInterval(async () => {
   if (busy || document.hidden || !seen) return;
-  const c = await fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-  if (!c || c.pending || busy || c.messages.length <= seen) return;
+  const c = await fetch(`/api/conversations/${encodeURIComponent(from)}`, CONVO_OPTS).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!c || (c.pending && !INTAKE) || busy || c.messages.length <= seen) return;
   const later = c.messages.slice(seen).filter((m) => m.dir === 'out');
   seen = c.messages.length;
   if (!later.length) return;
@@ -190,7 +197,7 @@ setInterval(async () => {
 }, 4000);
 
 /* pick up a saved conversation after a reload */
-if (stored) fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => (r.ok ? r.json() : null)).then((c) => {
+if (stored) fetch(`/api/conversations/${encodeURIComponent(from)}`, CONVO_OPTS).then((r) => (r.ok ? r.json() : null)).then((c) => {
   if (!c?.messages?.length || log.querySelector('.row')) return; // nothing saved, or the user already started typing
   const started = new Date(c.startedAt);
   $('#today').textContent = `${started.toDateString() === new Date().toDateString() ? 'Today' : started.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} ${started.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
@@ -203,7 +210,7 @@ if (stored) fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => 
   if (lastOut) setReceipt(lastOut, c.messages[c.messages.length - 1].dir === 'out' ? '<b>Read</b>' : 'Delivered');
   seen = c.messages.length;
   setSuggest([...c.messages].reverse().find((m) => m.dir === 'out')?.quickReplies || START);
-  if (c.pending) { // reloaded while the preview is still building
+  if (c.pending && !INTAKE) { // reloaded while the preview is still building
     busy = true; updateSend(); setSuggest([]);
     return waitForLater(c.messages.length).then((later) => { hideTyping(); setSuggest(later.at(-1)?.quickReplies || []); }).finally(async () => { seen = await savedCount(); busy = false; updateSend(); });
   }
@@ -212,7 +219,7 @@ if (stored) fetch(`/api/conversations/${encodeURIComponent(from)}`).then((r) => 
 /* presenter panel: what's live, what's mocked, and things to try */
 fetch('/api/health').then((r) => r.json()).then((h) => {
   const claude = h.claudeVia === 'cli' ? ['on', `Local Claude Code · ${h.model}`] : h.claudeVia === 'api' ? ['on', `Claude API · ${h.model}`] : ['', 'Off (template replies)'];
-  $('#status').innerHTML = `<div><dt>Google data</dt><dd class="${h.mock ? 'warn' : 'on'}">${h.mock ? 'Sample businesses (mock)' : 'Live Google Places'}</dd></div>`
+  $('#status').innerHTML = (INTAKE ? `<div><dt>Preview</dt><dd class="warn">Custom full site${INVITE ? ' · invited beta' : ''}<span id="staffReview" hidden> · <a href="/app/imessage-reviews.html" target="_blank" rel="noopener">staff review</a></span></dd></div>` : '') + `<div><dt>Google data</dt><dd class="${h.mock ? 'warn' : 'on'}">${h.mock ? 'Sample businesses (mock)' : 'Live Google Places'}</dd></div>`
     + `<div><dt>Claude</dt><dd class="${claude[0]}">${esc(claude[1])}</dd></div>`;
   const tries = h.mock
     ? ['Hi', 'Summit Peak Roofing 78704', 'BlueLine Plumbing Denver', 'Greenway Lawn Landscape Charlotte', 'ComfortPro Heating Air Tempe']
@@ -223,3 +230,10 @@ fetch('/api/health').then((r) => r.json()).then((h) => {
 }).catch(() => {});
 
 if (matchMedia('(min-width: 821px)').matches) input.focus({ preventScroll: true });
+
+/* staff links (Open Studio, staff review) only for authenticated staff; an invited tester never sees them */
+fetch('/api/staff/me').then((r) => r.json()).then((m) => {
+  if (!m?.staff) return;
+  document.getElementById('openStudio')?.removeAttribute('hidden');
+  document.getElementById('staffReview')?.removeAttribute('hidden');
+}).catch(() => {});

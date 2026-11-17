@@ -1,11 +1,12 @@
+import { copyStoredTree } from '../google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { persistDir, restoreDir } from '../files.js';
 import { studioDocs } from '../store.js';
 import { getBrief, getStudioJob, resumeIfStale, startStudioJob } from '../studio/jobs.js';
-import { getConceptJob, getConceptSet, resumeConceptIfStale, startConceptJob, type ConceptJob } from '../studio/concepts/jobs.js';
-import { getSiteJob, resumeSiteIfStale, startSiteJob, type SiteJob } from '../studio/concepts/site.js';
+import { getConceptJob, getConceptSet, requiredFailures, resumeConceptIfStale, startConceptJob, type ConceptJob } from '../studio/concepts/jobs.js';
+import { getSiteJob, resumeSiteIfStale, startSiteJob, type OwnerConfirmation, type SiteJob } from '../studio/concepts/site.js';
 import { getReferenceJob, resumeReferenceIfStale, startReferenceJob, type ReferenceJob } from '../studio/concepts/references.js';
 
 /**
@@ -30,11 +31,11 @@ import { getReferenceJob, resumeReferenceIfStale, startReferenceJob, type Refere
  */
 
 export type IntakeStage = 'brief' | 'references' | 'concepts' | 'site' | 'done' | 'failed';
-export type IntakeMode = 'concepts' | 'open';
+export type IntakeMode = 'concepts' | 'open' | 'custom';
 type TimedStage = 'brief' | 'references' | 'concepts' | 'site';
 export interface IntakeRun {
   id: string;
-  input: { placeId: string; website?: string };
+  input: { placeId: string; website?: string; /** the owner said yes to this listing in the conversation: the basis for reusing Studio work */ confirmed?: OwnerConfirmation };
   /** 'open': brief → references → open DesignSpec concept → site (test-only); default: the ranked directions */
   mode?: IntakeMode;
   stage: IntakeStage;
@@ -68,10 +69,13 @@ export interface IntakeRun {
 
 export const conceptIntakeEnabled = (requested?: string) => process.env.ROGER_INTAKE_CONCEPTS === '1' || requested === 'concepts';
 /** which intake a conversation gets: 'open' only when an authenticated test intake asks for it; the flag never turns it on */
-export const intakeModeOf = (requested?: string): IntakeMode | undefined => (requested === 'open' ? 'open' : conceptIntakeEnabled(requested) ? 'concepts' : undefined);
+export const intakeModeOf = (requested?: string): IntakeMode | undefined => (requested === 'open' ? 'open' : requested === 'custom' ? 'custom' : conceptIntakeEnabled(requested) ? 'concepts' : undefined);
 
 const now = () => new Date().toISOString();
 const ms = (a?: string, b?: string) => (a && b ? Date.parse(b) - Date.parse(a) : undefined);
+
+/** the owner's confirmation, when the conversation recorded one for this listing */
+const confirmedOf = (run: IntakeRun) => (run.input.confirmed?.placeId === run.input.placeId ? { confirmed: run.input.confirmed } : {});
 
 export function newIntake(input: IntakeRun['input'], mode?: IntakeMode): IntakeRun {
   return { id: `in_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, input, ...(mode === 'open' ? { mode } : {}), stage: 'brief', startedAt: now(), timings: {} };
@@ -99,7 +103,8 @@ async function savedSet(businessKey: string, revision: number, open?: { referenc
   const kind = (x: ConceptJob) => (open ? x.input.planner === 'open' && !!x.work.designSpecId && (x.input.referenceJobId ?? undefined) === open.referenceJobId : x.input.planner !== 'open');
   for (const j of jobs.filter((x) => x.status === 'done' && x.input.businessKey === businessKey && x.input.revision === revision && kind(x)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
     const set = await getConceptSet(j.setId);
-    if (set?.concepts.length) return j;
+    // (a set made before the required checks, or one that failed them, e.g. no verified photos shown, is not reused)
+    if (set?.concepts.length && !requiredFailures(set.concepts).length) return j;
   }
   return undefined;
 }
@@ -145,7 +150,13 @@ export async function advanceIntake(run: IntakeRun): Promise<IntakeRun> {
         // saved research: a finished strategy for this brief revision
         const saved = (await studioDocs.list<ReferenceJob>('studio-reference-jobs')).filter((j) => j.status === 'done' && j.work.strategy && j.input.businessKey === brief.businessKey && j.input.revision === brief.revision).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
         if (saved) { begin(run, 'references', { reused: true, job: saved.id }); run.referenceJobId = saved.id; }
-        else {
+        else if (!brief.identity?.website?.value) {
+          // no website: the open design reads the Google listing (as the Google-only flow does); no reference research
+          begin(run, 'references');
+          finish(run, 'references', [{ name: 'no website: designed from the Google listing, no reference research', ms: 0, status: 'skipped' }]);
+          run.stage = 'concepts';
+          continue;
+        } else {
           const job = await startReferenceJob({ businessKey: brief.businessKey, revision: brief.revision }).catch((e: Error) => { fail(run, 'references: start', e.message); return undefined; });
           if (!job) return run;
           run.referenceJobId = job.id;
@@ -197,7 +208,7 @@ export async function advanceIntake(run: IntakeRun): Promise<IntakeRun> {
       run.stage = 'site';
     } else if (run.stage === 'site') {
       if (!run.siteJobId) {
-        const job = await startSiteJob(run.setId!, run.conceptId!);
+        const job = await startSiteJob(run.setId!, run.conceptId!, confirmedOf(run));
         run.siteJobId = job.id;
         begin(run, 'site', { job: job.id });
         return run;
@@ -265,7 +276,7 @@ export async function snapshotVersion(siteUrl: string, slug: string, opts: { des
     if (!opts.replace) throw new Error(`/sites/${slug}/ already holds a version; a version's link never changes`);
     fs.rmSync(to, { recursive: true, force: true });
   }
-  fs.cpSync(from, to, { recursive: true });
+  copyStoredTree(from, to);
   await persistDir(to);
   return `${config.publicBaseUrl}/sites/${slug}/`;
 }
@@ -277,7 +288,7 @@ export async function snapshotVersion(siteUrl: string, slug: string, opts: { des
 export async function reapplyVersion(run: IntakeRun, versionId: string, wait = 120_000): Promise<IntakeVersion> {
   const v = run.versions?.find((x) => x.id === versionId);
   if (!v) throw new Error(`no version ${versionId}`);
-  const job = await startSiteJob(v.setId, 'a');
+  const job = await startSiteJob(v.setId, 'a', confirmedOf(run));
   const started = Date.now();
   let j = await getSiteJob(job.id);
   while (j && j.status !== 'done' && j.status !== 'failed' && Date.now() - started < wait) { await new Promise((r) => setTimeout(r, 300)); j = await getSiteJob(job.id); }
@@ -331,7 +342,7 @@ async function advanceVersion(run: IntakeRun): Promise<IntakeRun> {
       v.stage = 'site';
     } else if (v.stage === 'site') {
       if (!v.siteJobId) {
-        const job = await startSiteJob(v.setId!, 'a');
+        const job = await startSiteJob(v.setId!, 'a', confirmedOf(run));
         v.siteJobId = job.id;
         v.timings.site = { startedAt: now(), job: job.id };
         break;

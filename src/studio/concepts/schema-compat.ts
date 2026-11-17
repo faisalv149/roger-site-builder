@@ -112,6 +112,50 @@ export function parseJsonAnswer(text: string): Record<string, unknown> {
   throw new Error(why.slice(0, 200));
 }
 
+/** a text over its limit: where it is ($.a.b[2].c, and as a path), its limit, and the text itself */
+export interface LongField { at: string; path: (string | number)[]; limit: number; text: string }
+
+/**
+ * Every string in `data` longer than its schema's maxLength, with its place. Under an anyOf, the branch the value
+ * actually fits (apart from lengths) is followed. Used to rewrite only those fields; nothing is ever cut.
+ */
+export function overLength(schema: unknown, data: unknown): LongField[] {
+  const out: LongField[] = [];
+  const onlyLength = (s: unknown, x: unknown) => schemaErrors(s, x, 200).every((e) => / over the limit of \d+$/.test(e));
+  const walk = (s: unknown, x: unknown, path: (string | number)[]) => {
+    if (!isObj(s)) return;
+    const branches = (s.anyOf ?? s.oneOf) as unknown[] | undefined;
+    if (Array.isArray(branches)) { const b = branches.find((y) => onlyLength(y, x)); if (b) walk(b, x, path); return; }
+    if (typeof x === 'string' && typeof s.maxLength === 'number' && [...x].length > s.maxLength) out.push({ at: placeOf(path), path, limit: s.maxLength, text: x });
+    if (Array.isArray(x) && isObj(s.items)) x.forEach((v, i) => walk(s.items, v, [...path, i]));
+    if (isObj(x) && isObj(s.properties)) for (const [k, v] of Object.entries(x)) if (k in s.properties) walk(s.properties[k], v, [...path, k]);
+  };
+  walk(schema, data, []);
+  return out;
+}
+const placeOf = (path: (string | number)[]) => `$${path.map((p) => (typeof p === 'number' ? `[${p}]` : `.${p}`)).join('')}`;
+
+/**
+ * A planner-only note cut to fit its limit at a word boundary, ending in "…" (counted). Only for text that never appears
+ * on a website; visible copy is rewritten, never cut.
+ */
+export function shortenAtWord(text: string, limit: number): string {
+  const t = text.trim();
+  if ([...t].length <= limit) return t;
+  const room = limit - 1; // the ellipsis takes one
+  let cut = [...t].slice(0, room).join('');
+  const space = cut.search(/\s\S*$/);
+  if (space > room / 2) cut = cut.slice(0, space);
+  return `${cut.replace(/[\s,;:–—-]+$/, '')}…`;
+}
+
+/** set the value at a path in place (the path from overLength) */
+export function setAt(data: unknown, path: (string | number)[], value: unknown): void {
+  let o = data as Record<string | number, unknown>;
+  for (const p of path.slice(0, -1)) o = o[p] as Record<string | number, unknown>;
+  o[path[path.length - 1]] = value;
+}
+
 const typeOf = (x: unknown) => (x === null ? 'null' : Array.isArray(x) ? 'array' : typeof x);
 const fits = (t: string, x: unknown) => (t === 'integer' ? Number.isInteger(x) : t === 'number' ? typeof x === 'number' && Number.isFinite(x) : typeOf(x) === t);
 const show = (x: unknown) => { const s = JSON.stringify(x) ?? String(x); return s.length > 40 ? `${s.slice(0, 37)}…` : s; };
@@ -136,8 +180,10 @@ export function schemaErrors(schema: unknown, data: unknown, limit = 30): string
       const branches = (s.anyOf ?? s.oneOf) as unknown[];
       const tries = branches.map((b) => { const e: string[] = []; check(b, x, at, e); return e; });
       if (!tries.some((e) => !e.length)) {
-        // the branch whose type matches explains the problem best; else say no branch fits
-        const near = tries.find((e) => !e.some((m) => m.includes(' should be ')));
+        // the branch the value fits apart from lengths explains it best, then one whose type matches (fewest problems);
+        // else say no branch fits
+        const lengthOnly = tries.find((e) => e.every((m) => / over the limit of \d+$/.test(m)));
+        const near = lengthOnly ?? tries.filter((e) => !e.some((m) => m.includes(' should be '))).sort((a, b) => a.length - b.length)[0];
         out.push(...(near?.length ? near : [`${at}: ${show(x)} fits none of the allowed forms`]));
         return;
       }

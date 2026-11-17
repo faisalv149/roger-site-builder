@@ -1,3 +1,4 @@
+import { writeStoredFile } from '../google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -98,7 +99,7 @@ export function saveCustomTheme(raw: unknown): ValidationResult & { file?: strin
   const v = validateTheme(raw);
   if (!v.ok || !v.id) return v;
   const file = path.join(config.dirs.customThemes, `${v.id}.theme.json`);
-  fs.writeFileSync(file, JSON.stringify(raw, null, 2));
+  writeStoredFile(file, JSON.stringify(raw, null, 2));
   loadThemes(true);
   return { ...v, file };
 }

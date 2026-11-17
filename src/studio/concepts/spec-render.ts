@@ -1,3 +1,4 @@
+import { writeStoredFile } from '../../google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
@@ -5,8 +6,12 @@ import { browserGone, launchBrowser } from '../../render/og.js';
 import type { Concept, ComposedSection, SectionKind } from './types.js';
 import { MEASURE_SCRIPT, setDir, singleProcessChrome, type PageMetrics, type Rendered } from './render.js';
 import type { Catalog } from './review.js';
+import { LABEL_ONLY, REVIEW_ATTRIBUTION } from './labels.js';
+import { decorativeFont } from './font-kind.js';
+import { heroColumns, sectionColumns } from './geometry.js';
+import { LISTING_CSS, isListing, parseListing, placeholderSrc } from './listing-photos.js';
 import type { BusinessBrief } from '../schema.js';
-import { brandColors, resolveColor, resolveText, textOn, visibleText, type DesignSpec, type ItemSpec, type Role, type SectionSpec, type TextRef } from './designspec.js';
+import { brandColors, factValues, resolveColor, resolveText, textOn, visibleText, type DesignSpec, type FactKind, type ItemSpec, type Role, type SectionSpec, type TextRef } from './designspec.js';
 
 /**
  * Renders a DesignSpec as one static homepage. This is an interpreter of layout primitives, not a set of templates:
@@ -15,12 +20,63 @@ import { brandColors, resolveColor, resolveText, textOn, visibleText, type Desig
  * heading, intro, items, actions — arranged as the spec says.
  */
 
-/** a line that attributes a review ("Five star review by Jef R.:", "Review by - Yelp"): never a review without its text */
-export const REVIEW_ATTRIBUTION = /\b(review|reviewed|testimonial)s?\b[^.!?]*\bby\b|^(\d|one|two|three|four|five)[- ]?star\b.*\breview|^reviews? (by|from|on)\b/i;
-/** a website's label for content held elsewhere (a widget, a form, another page): nothing on its own */
-export const LABEL_ONLY = /^(contact( us)?|get in touch|find us( on)?|follow us( on)?|connect( with us)?|social( media)?|newsletter|sign up|subscribe|events?|we are updating our events|please stay tuned|(opening |business |store |our )?hours|location(s)?|visit( us)?|address|directions|map|(our )?reviews?|testimonials?|gallery|photos|faq|(our )?menu|about( us)?|order online|delivery options|read more|learn more|click here)\s*(\.\.\.|…|:)?$/i;
+// what a line of the business's own text is (shared with the planner's selection): see labels.ts
+export { LABEL_ONLY, REVIEW_ATTRIBUTION } from './labels.js';
+/** the smallest size an item title in a decorative face is set at (a handwriting or script face has a small x-height) */
+export const DECORATIVE_MIN_PX = 26;
+/** the smallest sizes for menu and item text in any face: an item's name, and the line under it */
+export const ITEM_TITLE_MIN_PX = 20;
+export const ITEM_TEXT_MIN_PX = 16;
+/** on desktop, the photos beside a heading in a stacked section stay this wide at most (4:3), not the full text column */
+export const STACKED_PHOTO_MAX_PX = 520;
+export { decorativeFont } from './font-kind.js';
+
+/** an item's description long enough to fill a column on its own */
+export const SUBSTANTIAL_ITEM_CHARS = 80;
+/**
+ * The arrangement a section is drawn with, decided by what actually renders in it. Side by side needs a second column
+ * with something in it: two or more items, a photo mosaic, or one item with a substantial description. Buttons alone, or
+ * a rating line alone, are too little: the section is stacked instead (heading, then its content), with the renderer's
+ * stacked columns. `sec.items` are the ones that render (after the renderer's own cleaning).
+ */
+export function arrangedFor(sec: SectionSpec, cat: Catalog): SectionSpec['layout'] {
+  const L = sec.layout;
+  if (L.arrangement !== 'side-by-side') return L;
+  const verified = (id: string) => cat.photos.some((p) => p.id === id);
+  const mosaic = sec.media?.placement === 'mosaic' && sec.media.photoIds.some(verified);
+  const one = sec.items.length === 1 ? `${visibleText(sec.items[0].title, cat) ?? ''} ${visibleText(sec.items[0].body, cat) ?? ''}`.trim() : '';
+  const values = factValues(cat);
+  const facts = (sec.facts ?? []).filter((k) => k !== 'rating' && values[k]);
+  const enough = sec.items.length >= 2 || mosaic || one.length >= SUBSTANTIAL_ITEM_CHARS || facts.includes('hours') || facts.length >= 2;
+  return enough ? L : { ...L, arrangement: 'stack', ...sectionColumns('stack') };
+}
+
+/**
+ * A photo gallery's tiles, balanced: up to four photos in one row; more in rows of near-equal size (the shorter rows
+ * first, so their larger tiles lead), each row the same height. On a phone, two columns, and an odd count opens with one
+ * full-width tile, so no photo is left alone on the last row. Spans are on a 12-column grid.
+ */
+export function mosaicLayout(n: number): { span: number; ar: string; mSpan: number; mAr: string }[] {
+  if (n <= 0) return [];
+  const rowSizes = n <= 4 ? [n] : (() => { const rows = Math.ceil(n / 4), base = Math.floor(n / rows), extra = n % rows; return Array.from({ length: rows }, (_, i) => (i < rows - extra ? base : base + 1)); })();
+  const widest = Math.max(...rowSizes);
+  const ratio = (a: number, b: number) => { const g = (x: number, y: number): number => (y ? g(y, x % y) : x); const d = g(a, b); return `${a / d}/${b / d}`; };
+  return rowSizes.flatMap((k) => Array.from({ length: k }, () => ({ span: 12 / k, ar: n <= 4 ? '1' : ratio(widest, k) }))).map((t, i) => ({ ...t, ...(n === 1 ? { mSpan: 2, mAr: '4/3' } : n % 2 && i === 0 ? { mSpan: 2, mAr: '2/1' } : { mSpan: 1, mAr: '1' }) }));
+}
+
+/** A sparse section (no photos, at most one item, little text) gets compact spacing whatever its planned density. */
+export const SPARSE_TEXT_CHARS = 160;
+export function isSparse(sec: SectionSpec, cat: Catalog): boolean {
+  const verified = (id?: string | null) => !!id && cat.photos.some((p) => p.id === id);
+  if (sec.items.some((it) => verified(it.photoId)) || (sec.media && sec.media.placement !== 'none' && sec.media.photoIds.some(verified))) return false;
+  if (sec.items.length > 1) return false;
+  const text = [sec.intro, ...sec.items.flatMap((it) => [it.title, it.body])].map((r) => visibleText(r, cat) ?? '').join(' ').trim();
+  return text.length < SPARSE_TEXT_CHARS;
+}
+
 /** what kind of content a line is, for deciding whether it may stand alone */
-export function contentKind(text: string): 'review-attribution' | 'label' | 'name' {
+
+export function contentKind(text: string):'review-attribution' | 'label' | 'name' {
   const t = text.trim();
   return REVIEW_ATTRIBUTION.test(t) ? 'review-attribution' : LABEL_ONLY.test(t) ? 'label' : 'name';
 }
@@ -49,25 +105,43 @@ export function renderSpec(spec: DesignSpec, cat: Catalog, brief: BusinessBrief,
   const fg = (r: Role) => (r === 'accent' ? P.onAccent : textOn(bg[r], P.ink));
   const T = spec.type;
   const size = (step: number) => +(T.base * T.scale ** step).toFixed(2);
+  // a decorative heading face (script, hand-lettering, marker…) reads small: item titles never go below a readable minimum
+  const itemSize = (step: number) => Math.max(size(step), decorativeFont(T.heading) ? DECORATIVE_MIN_PX : ITEM_TITLE_MIN_PX);
   const t = (r: TextRef | null | undefined) => esc(visibleText(r, cat) ?? '');
-  const photo = (id: string | null | undefined, cls = '') => { const p = id ? cat.photos.find((x) => x.id === id) : undefined; return p ? `<img class="${cls}" src="${esc(src(p.id, p.url))}" data-asset="${esc(p.id)}" alt="${esc(p.seen ?? p.alt ?? '')}">` : ''; }; // eager, decoded before capture: a preview's full-page capture must show every photo
+  const photo = (id: string | null | undefined, cls = '') => {
+    const p = id ? cat.photos.find((x) => x.id === id) : undefined;
+    if (!p) return '';
+    // a Google listing photo is never copied: a stand-in of its shape, with its credit slot in the same box (the photo and
+    // its photographer's credit and Google Maps attribution are filled in when the page is served; preview only)
+    const g = isListing(p) ? parseListing(p.url) : undefined;
+    if (g) return `<span class="gph"><img class="${cls}" src="${esc(placeholderSrc(p.width, p.height))}" data-asset="${esc(p.id)}" alt="${esc(p.seen ?? p.alt ?? '')}" data-gphoto="${g.placeId}#${g.n}" data-gsize="${p.width}x${p.height}"${p.fp ? ` data-gfp="${p.fp}"` : ''}><span class="gcredit" data-gcredit="${g.placeId}#${g.n}"></span></span>`;
+    return `<img class="${cls}" src="${esc(src(p.id, p.url))}" data-asset="${esc(p.id)}" alt="${esc(p.seen ?? p.alt ?? '')}">`; // eager, decoded before capture: a preview's full-page capture must show every photo
+  };
+  // verified facts, from the catalog's data (named by the spec's `facts`, never by a heading): a labelled list
+  const values = factValues(cat);
+  const FACT_LABEL: Record<FactKind, string> = { hours: 'Hours', address: 'Address', phone: 'Phone', rating: 'Google rating' };
+  const factHtml = (k: FactKind) => (k === 'phone' && cat.phone ? `<a href="${esc(cat.phone.href)}">${esc(cat.phone.display)}</a>` : (values[k] ?? []).map(esc).join('<br>'));
+  const factList = (kinds: FactKind[] = []) => { const rows = [...new Set(kinds)].filter((k) => values[k]).map((k) => `<div data-fact="${k}"><dt>${FACT_LABEL[k]}</dt><dd>${factHtml(k)}</dd></div>`); return rows.length ? `<dl class="facts">${rows.join('')}</dl>` : ''; };
   const action = (id: string, primary: boolean) => { const a = cat.actions.find((x) => x.id === id); return a ? `<a class="btn${primary ? ' btn-primary' : ''}" href="${esc(a.href)}" data-action="${esc(a.id)}">${esc(a.label)}</a>` : ''; };
   const actions = (ids: string[]) => (ids.length ? `<div class="actions">${ids.map((id, i) => action(id, i === 0)).join('')}</div>` : '');
   const col = (start: number, span: number) => `grid-column:${start} / span ${span}`;
   const logoOk = brief.brand.logo.status === 'verified' && cat.logo;
   const mark = logoOk ? `<img class="logo" src="${esc(cat.logo!.url)}" alt="${esc(cat.business.name)}">` : `<span class="wordmark">${esc(cat.business.name.replace(/,?\s+(LLC|Inc\.?|Ltd\.?)$/i, ''))}</span>`;
   // a nav link names what the section is (its kind), not a cut-off heading; a heading short enough is used as it is
-  const KIND_LABEL: Record<SectionSpec['kind'], string> = { services: 'Services', capabilities: 'Capabilities', work: 'Work', principles: 'Approach', story: 'About', contact: 'Contact', statement: '' };
+  // (a kind name such as "Work", "Capabilities" or "Approach" says nothing about what the section shows: the heading does)
+  const KIND_LABEL: Record<SectionSpec['kind'], string> = { services: 'Services', capabilities: '', work: '', principles: '', story: 'About', contact: 'Contact', statement: '' };
   // ── empty content out, by type: a review without its text, a label with nothing under it (an Hours label shows the
   // verified hours instead, if any), and a section left with nothing to show (with its menu link) ──
   const textOf = (r: TextRef | null | undefined) => (r ? visibleText(r, cat) ?? '' : '');
   const isHours = (title: string) => /^(opening |business |store |our )?hours:?$/i.test(title.trim());
+  const hoursByFacts = spec.sections.some((x) => (x.facts ?? []).includes('hours')) || (spec.hero.aside.kind === 'contact-card' && (spec.hero.aside.facts ?? []).includes('hours'));
   const keepItem = (it: ItemSpec) => {
     const title = textOf(it.title), body = textOf(it.body);
     if (!title.trim()) return false;
     if (contentKind(title) === 'review-attribution') return false;
     if (body && contentKind(body) === 'review-attribution' && body.length < 60) return false;
-    if (!body && isHours(title)) return !!cat.hours?.length;
+    // (a design that shows the hours by its facts needs no such label: they would show twice)
+    if (!body && isHours(title)) return !!cat.hours?.length && !hoursByFacts;
     if (!body && contentKind(title) === 'label') return false;
     return true;
   };
@@ -79,8 +153,20 @@ export function renderSpec(spec: DesignSpec, cat: Catalog, brief: BusinessBrief,
   const hasReviewText = (sec: SectionSpec) => sec.items.some((it) => { const t = textOf(it.title), b = textOf(it.body); return (b.length >= 40 && contentKind(b) === 'name') || (t.length >= 60 && contentKind(t) === 'name'); });
   const hasContent = (sec: SectionSpec) => (reviewsBand.has(sec.id)
     ? hasReviewText(sec) || !!ratingLine
-    : sec.items.length > 0 || !!textOf(sec.intro) || sec.actions.length > 0 || (!!sec.media && sec.media.placement !== 'none' && sec.media.photoIds.some((id) => cat.photos.some((p) => p.id === id))));
-  const liveSections = spec.sections.map(cleanSection).filter(hasContent);
+    : sec.items.length > 0 || !!textOf(sec.intro) || sec.actions.length > 0 || (sec.facts ?? []).some((k) => values[k]) || (!!sec.media && sec.media.placement !== 'none' && sec.media.photoIds.some((id) => cat.photos.some((p) => p.id === id))));
+  // the rating and the link to the reviews are one block: sections that hold nothing but them are merged into the first
+  // section that shows the rating (or the first of them), and the rating line shows only there
+  const reviewActs = new Set(cat.actions.filter((a) => a.kind === 'reviews').map((a) => a.id));
+  const showsRating = (sec: SectionSpec) => !!ratingLine && ((sec.facts ?? []).includes('rating') || (reviewsBand.has(sec.id) && !hasReviewText(sec)));
+  const reviewsOnly = (sec: SectionSpec) => !sec.items.length && !textOf(sec.intro) && !(sec.media && sec.media.placement !== 'none' && sec.media.photoIds.length) && (sec.facts ?? []).every((k) => k === 'rating') && sec.actions.every((a) => reviewActs.has(a)) && (showsRating(sec) || sec.actions.length > 0);
+  let liveSections = spec.sections.map(cleanSection).filter(hasContent);
+  const carriers = liveSections.filter((sec) => showsRating(sec) || reviewsOnly(sec));
+  const ratingHome = carriers.find((sec) => !reviewsOnly(sec)) ?? carriers[0];
+  if (ratingHome) {
+    const merged = carriers.filter((sec) => sec !== ratingHome && reviewsOnly(sec));
+    const acts = [...new Set([...ratingHome.actions, ...merged.flatMap((sec) => sec.actions)])];
+    liveSections = liveSections.filter((sec) => !merged.includes(sec)).map((sec) => (sec === ratingHome ? { ...sec, actions: acts } : sec));
+  }
   const live = new Set(liveSections.map((x) => x.id));
   const sectionLabel = (id: string) => { const s = spec.sections.find((x) => x.id === id); if (!s) return id; const h = resolveText(s.heading, cat) ?? ''; return h && h.split(/\s+/).length <= 2 ? h.replace(/[.:]$/, '') : KIND_LABEL[s.kind] || shortLabel(h); };
   const pages = opts.pages ?? [];
@@ -96,17 +182,23 @@ export function renderSpec(spec: DesignSpec, cat: Catalog, brief: BusinessBrief,
   // ── hero ──
   const h = spec.hero;
   const asideItems = (h.aside.items ?? []).filter((r) => textOf(r).trim() && contentKind(textOf(r)) === 'name').map((r) => `<li>${t(r)}</li>`).join('');
-  const aside = h.aside.kind === 'none' || !h.aside.span ? '' : h.aside.kind === 'image' && h.aside.photoId
-    ? `<figure class="hero-aside" style="${col(h.aside.start, h.aside.span)}">${photo(h.aside.photoId)}</figure>`
-    : h.aside.kind === 'statement'
-      ? `<div class="hero-aside aside-statement" style="${col(h.aside.start, h.aside.span)}">${(h.aside.items ?? []).map((r) => `<p>${t(r)}</p>`).join('')}</div>`
-      : h.aside.kind === 'contact-card'
-        ? `<div class="hero-aside aside-card" style="${col(h.aside.start, h.aside.span)}">${(h.aside.items ?? []).map((r) => `<p>${t(r)}</p>`).join('')}${cat.email ? `<p class="mono"><a href="mailto:${esc(cat.email)}">${esc(cat.email)}</a></p>` : ''}</div>`
-        : `<ol class="hero-aside aside-${h.aside.kind}" style="${col(h.aside.start, h.aside.span)}">${asideItems}</ol>`;
+  const asideLines = (h.aside.items ?? []).filter((r) => textOf(r).trim()).map((r) => `<p>${t(r)}</p>`).join('');
+  const asideInner = h.aside.kind === 'none' || !h.aside.span ? ''
+    : h.aside.kind === 'image' ? photo(h.aside.photoId)
+      : h.aside.kind === 'statement' ? asideLines
+        : h.aside.kind === 'contact-card' ? `${asideLines}${factList(h.aside.facts)}${cat.email ? `<p class="mono"><a href="mailto:${esc(cat.email)}">${esc(cat.email)}</a></p>` : ''}`
+          : asideItems;
+  const asideCols = col(h.aside.start, h.aside.span);
+  const aside = !asideInner ? '' : h.aside.kind === 'image'
+    ? `<figure class="hero-aside" style="${asideCols}">${asideInner}</figure>`
+    : h.aside.kind === 'statement' || h.aside.kind === 'contact-card'
+      ? `<div class="hero-aside ${h.aside.kind === 'statement' ? 'aside-statement' : 'aside-card'}" style="${asideCols}">${asideInner}</div>`
+      : `<ol class="hero-aside aside-${h.aside.kind}" style="${asideCols}">${asideInner}</ol>`;
+  const textCols = !aside && h.aside.kind !== 'none' && h.textSide && h.textWidth ? heroColumns(h.textSide, h.textWidth, 'none') : { textStart: h.textStart, textSpan: h.textSpan };
   const heroPhoto = h.backgroundPhoto ? cat.photos.find((p) => p.id === h.backgroundPhoto) : undefined;
-  const hero = `<section class="hero${heroPhoto ? ' hero-photo' : ''}" data-kind="hero" data-variant="open"${heroPhoto ? ' data-bg="#000000:0.5"' : ''} style="background:${bg[h.background]};color:${heroPhoto ? '#FFFFFF' : fg(h.background)}">${heroPhoto ? photo(heroPhoto.id, 'hero-bg') : ''}
+  const hero = `<section class="hero${heroPhoto ? ' hero-photo' : ''}" data-kind="hero" data-variant="open"${heroPhoto ? ` data-bg="#000000:0.5" data-text-color="${fg(h.background)}"` : ''} style="background:${bg[h.background]};color:${heroPhoto ? '#FFFFFF' : fg(h.background)}">${heroPhoto ? photo(heroPhoto.id, 'hero-bg') : ''}
   <div class="grid hero-grid">
-    <div class="hero-text" style="${col(h.textStart, h.textSpan)}">
+    <div class="hero-text" style="${col(textCols.textStart, textCols.textSpan)}">
       ${t(h.kicker) ? `<p class="kicker">${t(h.kicker)}</p>` : ''}
       <h1>${t(h.headline)}</h1>
       ${h.lede ? `<p class="lede">${t(h.lede)}</p>` : ''}
@@ -119,14 +211,15 @@ export function renderSpec(spec: DesignSpec, cat: Catalog, brief: BusinessBrief,
   // ── sections ──
   // an "Hours" label with nothing under it shows the verified hours, or is left out when there are none (never an empty heading)
   const hoursLabel = (it: ItemSpec) => !it.body && isHours(visibleText(it.title, cat) ?? '');
-  const hoursBody = (it: ItemSpec) => (hoursLabel(it) && cat.hours?.length ? `<p>${cat.hours.map(esc).join('<br>')}</p>` : '');
+  const hoursBody = (it: ItemSpec) => (hoursLabel(it) && cat.hours?.length && !hoursByFacts ? `<p>${cat.hours.map(esc).join('<br>')}</p>` : '');
   const item = (it: ItemSpec, i: number, style: SectionSpec['layout']['itemStyle']) => `<li class="item${it.photoId ? ' has-photo' : ''}">${photo(it.photoId, 'item-photo')}${style === 'numbered' ? `<span class="num" aria-hidden="true">${String(i + 1).padStart(2, '0')}</span>` : ''}<h3>${t(it.title)}</h3>${it.body ? `<p>${t(it.body)}</p>` : hoursBody(it)}</li>`;
   const section = (sec: SectionSpec) => {
     const s = sec; // already cleaned (liveSections)
-    const L = s.layout;
+    const L = arrangedFor(s, cat);
     const media = s.media && s.media.placement !== 'none' ? s.media : undefined;
     const head = `<div class="sec-head" style="${col(L.headingStart, L.headingSpan)}"><h2>${t(s.heading)}</h2>${s.intro ? `<p class="intro">${t(s.intro)}</p>` : ''}${media?.placement === 'beside' ? `<div class="beside" data-n="${Math.min(2, media.photoIds.length)}">${media.photoIds.map((id) => photo(id)).join('')}</div>` : ''}</div>`;
-    const mosaic = media?.placement === 'mosaic' ? `<div class="mosaic" style="--n:${Math.min(4, media.photoIds.length)}">${media.photoIds.map((id) => photo(id)).join('')}</div>` : '';
+    const tiles = media?.placement === 'mosaic' ? media.photoIds.map((id) => photo(id)).filter(Boolean) : [];
+    const mosaic = tiles.length ? `<div class="mosaic" data-n="${tiles.length}">${mosaicLayout(tiles.length).map((t, i) => `<div class="tile" style="--span:${t.span};--ar:${t.ar};--m-span:${t.mSpan};--m-ar:${t.mAr}">${tiles[i]}</div>`).join('')}</div>` : '';
     const withPhoto = s.items.filter((it) => it.photoId && cat.photos.some((p) => p.id === it.photoId));
     const textOnly = s.items.filter((it) => !withPhoto.includes(it));
     const list = (items: ItemSpec[], cls: string, style: SectionSpec['layout']['itemStyle'], cols: number) => (items.length ? `<ul class="items${cls ? ` ${cls}` : ''} style-${style}" style="--cols:${cols}">${items.map((it) => item(it, s.items.indexOf(it), style)).join('')}</ul>` : '');
@@ -134,10 +227,11 @@ export function renderSpec(spec: DesignSpec, cat: Catalog, brief: BusinessBrief,
       // mixed: the photo items as a photo row, the rest as an intentional text list (names in columns, ruled), never cards with empty image space
       ? list(withPhoto, 'photo-items', L.itemStyle === 'numbered' ? 'plain' : L.itemStyle, Math.min(Math.max(L.itemColumns, withPhoto.length), 4)) + list(textOnly, 'text-items', 'ruled', Math.min(4, Math.max(2, L.itemColumns)))
       : list(s.items, '', L.itemStyle, L.itemColumns);
-    const rating = reviewsBand.has(s.id) && ratingLine ? `<p class="rating">${esc(ratingLine)}</p>` : '';
-    const body = `<div class="sec-body" style="${col(L.contentStart, L.contentSpan)}">${rating}${items}${mosaic}${actions(s.actions)}</div>`;
+    const rating = s.id === ratingHome?.id && ratingLine ? `<p class="rating" data-fact="rating">${esc(ratingLine)}</p>` : '';
+    const facts = factList((s.facts ?? []).filter((k) => k !== 'rating'));
+    const body = `<div class="sec-body" style="${col(L.contentStart, L.contentSpan)}">${rating}${facts}${items}${mosaic}${actions(s.actions)}</div>`;
     const band = media?.placement === 'band' ? `<div class="band" data-n="${Math.min(3, media.photoIds.filter((id) => cat.photos.some((p) => p.id === id)).length)}">${media.photoIds.map((id) => photo(id)).join('')}</div>` : '';
-    return `<section id="${esc(s.id)}" data-kind="${esc(s.kind)}" data-variant="open" class="sec density-${L.density} ${L.arrangement}${s.background === 'accent' ? ' on-accent' : ''}" style="background:${bg[s.background]};color:${fg(s.background)}"><div class="grid">${head}${body}</div>${band}</section>`;
+    return `<section id="${esc(s.id)}" data-kind="${esc(s.kind)}" data-variant="open"${L.arrangement !== s.layout.arrangement ? ` data-planned="${s.layout.arrangement}"` : ''} class="sec density-${L.density} ${L.arrangement}${isSparse(s, cat) ? ' sparse' : ''}${s.background === 'accent' ? ' on-accent' : ''}" style="background:${bg[s.background]};color:${fg(s.background)}"><div class="grid">${head}${body}</div>${band}</section>`;
   };
 
   const m = spec.mobile;
@@ -156,7 +250,7 @@ export function renderSpec(spec: DesignSpec, cat: Catalog, brief: BusinessBrief,
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--ground);color:var(--ink);font:400 ${T.base}px/1.6 '${T.body}',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 h1,h2,h3{font-family:'${T.heading}',system-ui,sans-serif;font-weight:${T.headingWeight};letter-spacing:${T.tracking}em;text-transform:${T.headingCase};margin:0;line-height:1.08;text-wrap:balance}
 h1{font-size:clamp(${(size(3) * 0.9).toFixed(1)}px,${(h.headlineSize * 1.1).toFixed(2)}vw,${(T.base * h.headlineSize).toFixed(1)}px)}
-h2{font-size:${size(3)}px}h3{font-size:${size(1)}px;line-height:1.25}
+h2{font-size:${size(3)}px}h3{font-size:${itemSize(1)}px;line-height:1.25}
 p{max-width:${T.measure}ch;margin:0}.mono{font-family:'${T.mono ?? T.body}',ui-monospace,monospace;font-size:.9em}
 a{color:inherit}
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:var(--gutter);row-gap:${(T.base * 2).toFixed(0)}px;max-width:calc(var(--max) + 2*var(--margin));margin:0 auto;padding-inline:var(--margin)}
@@ -167,39 +261,41 @@ a{color:inherit}
 .btn{display:inline-flex;align-items:center;min-height:46px;padding:0 22px;border-radius:var(--radius);border:1.5px solid currentColor;text-decoration:none;font-weight:600;font-size:.95em}.btn-primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:${(T.base * 2).toFixed(0)}px}
 .on-accent .btn-primary{background:var(--on-accent);color:var(--accent);border-color:var(--on-accent)}
-.hero{min-height:${h.minHeight}vh;display:flex;align-items:${({ start: 'flex-start', center: 'center', end: 'flex-end' })[h.verticalAlign]};padding-block:${(T.base * 5).toFixed(0)}px}.hero-grid{width:100%;align-items:${h.verticalAlign === 'end' ? 'end' : h.verticalAlign}}
+.hero{min-height:${h.minHeight}vh;display:flex;align-items:${({ start: 'flex-start', center: 'center', end: 'flex-end' })[h.verticalAlign]};padding-block:${(T.base * 5).toFixed(0)}px}.hero-grid{width:100%;align-items:${h.verticalAlign === 'end' ? 'end' : h.verticalAlign};grid-auto-flow:row dense}
 .hero-text{text-align:${h.align === 'center' ? 'center' : 'left'}}.hero-text p{${h.align === 'center' ? 'margin-inline:auto' : ''}}.hero-text .actions{justify-content:${h.align === 'center' ? 'center' : 'flex-start'}}
 .kicker{font-family:'${T.mono ?? T.body}',monospace;font-size:.82em;letter-spacing:.08em;text-transform:uppercase;opacity:.75;margin-bottom:${T.base}px}.lede{font-size:${size(1)}px;line-height:1.5;margin-top:${(T.base * 1.5).toFixed(0)}px;opacity:.88}
 .hero-aside{margin:0;padding:0;list-style:none;align-self:${h.verticalAlign === 'end' ? 'end' : 'center'}}.hero-aside li{padding:14px 0;border-top:${rule};font-family:'${T.heading}',sans-serif;font-size:${size(1)}px}.hero-aside li:last-child{border-bottom:${rule}}
 .aside-card{background:color-mix(in srgb,currentColor 6%,transparent);border-radius:var(--radius);padding:28px}.aside-card p+p{margin-top:12px}.aside-statement p{font-family:'${T.heading}',sans-serif;font-size:${size(2)}px;line-height:1.25}.hero-aside img{width:100%;border-radius:var(--radius)}
-.sec{padding-block:var(--pad)}.density-compact{--pad:${(T.base * 3.5).toFixed(0)}px}.density-regular{--pad:${(T.base * 5.5).toFixed(0)}px}.density-airy{--pad:${(T.base * 8).toFixed(0)}px}
+.sec{padding-block:var(--pad)}.density-compact{--pad:${(T.base * 3.5).toFixed(0)}px}.density-regular{--pad:${(T.base * 5.5).toFixed(0)}px}.density-airy{--pad:${(T.base * 8).toFixed(0)}px}.sec.sparse{--pad:${(T.base * 3.5).toFixed(0)}px}
 .sec.side-by-side .grid{align-items:start}.sec.side-by-side .sec-head{position:sticky;top:96px}.intro{margin-top:${T.base}px;font-size:${size(0.5)}px;opacity:.85}
-.items{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(var(--cols),minmax(0,1fr));gap:${(T.base * 2).toFixed(0)}px var(--gutter)}.item p{margin-top:10px;opacity:.85}
+.items{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(var(--cols),minmax(0,1fr));gap:${(T.base * 2).toFixed(0)}px var(--gutter)}.item p{margin-top:10px;opacity:.85;font-size:${Math.max(T.base, ITEM_TEXT_MIN_PX)}px}
 .style-ruled .item{border-top:${rule === 'none' ? '1px solid currentColor' : rule};padding-top:20px}.style-card .item{background:color-mix(in srgb,currentColor 5%,transparent);border-radius:var(--radius);padding:28px}
 .style-numbered .item{border-top:${rule === 'none' ? '1px solid currentColor' : rule};padding-top:18px}.num{display:block;font-family:'${T.mono ?? T.heading}',monospace;font-size:.85em;opacity:.6;margin-bottom:12px}
 .style-large-type .item h3{font-size:${size(2.5)}px;line-height:1.15}.style-large-type .item{padding-block:8px}
 .site-footer{padding-block:${(T.base * 4).toFixed(0)}px;border-top:1px solid color-mix(in srgb,var(--ink) 14%,transparent)}.foot-actions{display:flex;gap:20px;justify-content:flex-end;align-items:center;flex-wrap:wrap}
 .hero-photo{position:relative;overflow:hidden}.hero-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.hero-photo::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,rgba(0,0,0,.62),rgba(0,0,0,.22));z-index:1}.hero-photo .hero-grid{position:relative;z-index:2}
 .item-photo{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius);margin-bottom:16px}
-.beside{display:grid;gap:12px;margin-top:28px}.beside img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius)}
-.mosaic{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:12px;margin-top:32px}.mosaic img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius)}
+.beside{display:grid;gap:12px;margin-top:28px}.beside img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius)}@media (min-width:761px){.sec.stack .beside{max-width:${STACKED_PHOTO_MAX_PX}px}.sec.stack .beside img{aspect-ratio:4/3}}
+.mosaic{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;margin-top:32px}.mosaic>.tile{grid-column:span var(--span);min-width:0}.mosaic img{display:block;width:100%;aspect-ratio:var(--ar);object-fit:cover;border-radius:var(--radius)}
 .band{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:6px;margin-top:var(--pad)}.band img{width:100%;height:clamp(220px,26vw,380px);object-fit:cover;display:block}
 .links a,.foot-actions a,.aside-card a,.menu nav a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px}
 .menu:not([open]) nav{display:none}.menu nav a{justify-content:flex-start;white-space:nowrap}
 .skip{position:absolute;left:-9999px;top:8px;background:var(--ground);color:var(--ink);padding:12px 16px;z-index:30}.skip:focus{left:16px}
-.items{align-items:start}.text-items{margin-top:28px}.text-items .item{border-top:1px solid color-mix(in srgb,currentColor 35%,transparent);padding-top:14px}.text-items h3{font-size:${size(0.5)}px}
+.items{align-items:start}.text-items{margin-top:28px}.text-items .item{border-top:1px solid color-mix(in srgb,currentColor 35%,transparent);padding-top:14px}.text-items h3{font-size:${itemSize(0.5)}px}
 .rating{font-family:'${T.heading}',system-ui,sans-serif;font-size:${size(1.5)}px;letter-spacing:${T.tracking}em;margin:0 0 18px}
+.facts{margin:0;display:grid;gap:18px}.facts dt{font-family:'${T.mono ?? T.body}',monospace;font-size:.82em;letter-spacing:.08em;text-transform:uppercase;opacity:.75}.facts dd{margin:4px 0 0;font-size:${size(0.5)}px;line-height:1.5}.facts+.items,.facts+.actions{margin-top:${(T.base * 2).toFixed(0)}px}.aside-card .facts+p{margin-top:12px}
+${cat.photos.some(isListing) ? `${LISTING_CSS}\n.gph{position:relative;display:block;min-width:0}.hero-photo>.gph{position:absolute;inset:0}` : ''}
 .sticky-bar{display:none}
 @media (max-width:760px){
   :root{--margin:20px;--gutter:16px}
   .grid>*{grid-column:1 / -1 !important}
   h1{font-size:min(${(T.base * h.headlineSize * m.headingScale).toFixed(1)}px,11.5vw);overflow-wrap:normal}h2{font-size:${(size(3) * Math.max(m.headingScale, 0.7)).toFixed(1)}px}
   .links,.site-header .header-grid>.btn{display:none}
-  ${m.navigation === 'menu-button' ? `.menu{display:block;grid-column:auto !important;justify-self:end;position:relative}.menu summary{list-style:none;cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}.menu summary::-webkit-details-marker{display:none}.menu nav{position:absolute;right:0;top:48px;background:var(--ground);color:var(--ink);padding:16px;display:grid;gap:14px;min-width:220px;border-radius:var(--radius);box-shadow:0 12px 32px rgba(0,0,0,.18)}.header-grid{grid-template-columns:1fr auto}`
-    : m.navigation === 'inline-links' ? '.links{display:flex;grid-column:1 / -1 !important;justify-content:flex-start;gap:18px;overflow-x:auto;padding-top:8px}' : `.site-header .header-grid>.btn{display:inline-flex;grid-column:auto !important}.header-grid{grid-template-columns:1fr auto}`}
+  ${m.navigation === 'menu-button' ? `.menu{display:block;grid-column:auto !important;justify-self:end;position:relative}.menu summary{list-style:none;cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:600}.menu summary::-webkit-details-marker{display:none}.menu nav{position:absolute;right:0;top:48px;background:var(--ground);color:var(--ink);padding:16px;display:grid;gap:14px;min-width:220px;border-radius:var(--radius);box-shadow:0 12px 32px rgba(0,0,0,.18)}.header-grid{grid-template-columns:1fr auto}.header-grid>.wordmark,.header-grid>.logo{grid-column:1 !important;min-width:0}`
+    : m.navigation === 'inline-links' ? '.links{display:flex;grid-column:1 / -1 !important;justify-content:flex-start;gap:18px;overflow-x:auto;padding-top:8px}' : `.site-header .header-grid>.btn{display:inline-flex;grid-column:auto !important}.header-grid{grid-template-columns:1fr auto}.header-grid>.wordmark,.header-grid>.logo{grid-column:1 !important;min-width:0}`}
   .hero{min-height:auto;padding-block:${(T.base * 3).toFixed(0)}px}
   ${m.heroOrder === 'aside-hidden' ? '.hero-aside{display:none}' : m.heroOrder === 'aside-first' ? '.hero-aside{order:-1}' : ''}
-  .items{grid-template-columns:repeat(${m.itemColumns},minmax(0,1fr))}.mosaic{grid-template-columns:repeat(2,minmax(0,1fr))}.band{grid-auto-columns:42%;overflow-x:auto;scroll-snap-type:x mandatory}.band[data-n="1"]{grid-auto-columns:100%;overflow:visible}.band[data-n="2"]{grid-auto-columns:calc(50% - 3px);overflow:visible}.text-items{grid-template-columns:repeat(2,minmax(0,1fr))}.band img{scroll-snap-align:start}.beside{grid-template-columns:repeat(2,minmax(0,1fr))}.beside[data-n="1"]{grid-template-columns:1fr}
+  .items{grid-template-columns:repeat(${m.itemColumns},minmax(0,1fr))}.mosaic{grid-template-columns:repeat(2,minmax(0,1fr))}.mosaic>.tile{grid-column:span var(--m-span)}.mosaic img{aspect-ratio:var(--m-ar)}.sec.sparse{--pad:${(T.base * 2.5).toFixed(0)}px}.band{grid-auto-columns:42%;overflow-x:auto;scroll-snap-type:x mandatory}.band[data-n="1"]{grid-auto-columns:100%;overflow:visible}.band[data-n="2"]{grid-auto-columns:calc(50% - 3px);overflow:visible}.text-items{grid-template-columns:repeat(2,minmax(0,1fr))}.band img{scroll-snap-align:start}.beside{grid-template-columns:repeat(2,minmax(0,1fr))}.beside[data-n="1"]{grid-template-columns:1fr}
   .hero-photo{min-height:70vh}.sec.side-by-side .sec-head{position:static}
   .foot-actions{justify-content:flex-start}
   ${sticky ? `.sticky-bar{display:flex;position:fixed;left:0;right:0;bottom:0;padding:12px 20px calc(12px + env(safe-area-inset-bottom,0px));background:var(--ground);box-shadow:0 -6px 20px rgba(0,0,0,.12);z-index:20}.sticky-bar .btn{flex:1;justify-content:center}body{padding-bottom:76px}` : ''}
@@ -224,7 +320,7 @@ export async function renderDesignFiles(id: string, html: string): Promise<{ htm
   const dir = designDir(id);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'index.html');
-  fs.writeFileSync(file, html);
+  writeStoredFile(file, html);
   const browser = await launchBrowser();
   try {
     const shot = async (mobile: boolean) => {
@@ -292,7 +388,7 @@ export async function renderSpecSet(items: { concept: Concept; spec: DesignSpec 
   try {
     for (const { concept, spec } of items) {
       const html = path.join(dir, `${concept.id}.html`);
-      fs.writeFileSync(html, renderSpec(spec, cat, brief, { photoSrc: (id) => `img/${id}.jpg` }));
+      writeStoredFile(html, renderSpec(spec, cat, brief, { photoSrc: (id) => `img/${id}.jpg` }));
       step(`${concept.id} HTML (open planner)`);
       const shoot = async (kind: 'desktop' | 'mobile') => {
         const browser = shared ?? await launchBrowser();

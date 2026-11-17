@@ -19,8 +19,8 @@ export const brief = {
 
 /** a spec as the API returns it: every field the schema requires is present, null or empty where unused */
 export const answered = (s: Spec): Spec => ({
-  ...s, hero: { backgroundPhoto: null, ...s.hero },
-  sections: s.sections.map((x) => ({ media: { placement: 'none' as const, photoIds: [] }, ...x, items: x.items.map((it) => ({ photoId: null, ...it })) })),
+  ...s, hero: { backgroundPhoto: null, ...s.hero, aside: { facts: [], ...s.hero.aside } },
+  sections: s.sections.map((x) => ({ media: { placement: 'none' as const, photoIds: [] }, facts: [], ...x, items: x.items.map((it) => ({ photoId: null, ...it })) })),
   referencesUsed: s.referencesUsed ?? [],
 });
 export const good = (): Spec => answered({
@@ -39,3 +39,29 @@ export const good = (): Spec => answered({
   imagery: { approach: 'No photos are verified: type, rules and space carry the page.', roles: [] },
   mobile: { heroOrder: 'text-first', navigation: 'menu-button', stickyAction: 'cta-primary', headingScale: 0.62, itemColumns: 1 },
 });
+
+type Direction = import('../../src/studio/concepts/director.js').Direction;
+/** a sound design direction for the consultancy: grounded in its own words, brand colours and fonts; one default found and revised */
+export const goodDirection = (): Direction => ({
+  audience: 'Operations leads at mid-sized firms whose systems do not talk to each other, deciding whether to call a specialist.',
+  mainJob: { text: 'Get a project conversation started.', action: 'cta-primary' },
+  characteristic: { text: 'Its own line about systems that talk to each other, and two concrete services.', evidence: [{ kind: 'ownLine', id: '0' }, { kind: 'service', id: 'svc-int' }] },
+  idea: { summary: 'An engineered ledger: one strong sentence, then the work in numbered rows.', palette: { ground: 'white', surface: 'tint:#005BEA:6', ink: '#000018', accent: '#005BEA' }, type: { heading: 'Outfit', body: 'Manrope', treatment: 'Calm, exact.' }, hero: { textSide: 'left', aside: 'service-index', photoBehindText: false, note: 'Its own line across seven columns, the services indexed beside it.' }, sections: [{ content: 'the two services', arrangement: 'side-by-side', itemStyle: 'numbered', background: 'surface', media: 'none' }, { content: 'the story', arrangement: 'stack', itemStyle: 'large-type', background: 'inverse', media: 'none' }, { content: 'how to start', arrangement: 'stack', itemStyle: 'plain', background: 'ground', media: 'none' }], boldElement: 'The headline set large.', alignment: 'left' },
+  critique: [{ trait: 'numbered markers on content that is not a sequence', where: 'the work in numbered rows', verdict: 'revise', why: 'the two services are not steps' }],
+  revised: { summary: 'An engineered index: one strong sentence, then the work as ruled rows.', palette: { ground: 'white', surface: 'tint:#005BEA:6', ink: '#000018', accent: '#005BEA' }, type: { heading: 'Outfit', body: 'Manrope', treatment: 'Calm, exact.' }, hero: { textSide: 'left', aside: 'service-index', photoBehindText: false, note: 'Its own line across seven columns, the services indexed beside it.' }, sections: [{ content: 'the two services', arrangement: 'side-by-side', itemStyle: 'ruled', background: 'surface', media: 'none' }, { content: 'the story', arrangement: 'stack', itemStyle: 'large-type', background: 'inverse', media: 'none' }, { content: 'how to start', arrangement: 'stack', itemStyle: 'plain', background: 'ground', media: 'none' }], boldElement: 'The headline set large.', alignment: 'left' },
+  changes: 'Numbered rows became ruled rows: the services are not a sequence.',
+});
+
+type SpecAnswer = import('../../src/studio/concepts/designspec.js').SpecAnswer;
+/** a DesignSpec as Claude answers it now: choices instead of columns, and a services section's items left to Roger */
+export function answer(s: Spec): SpecAnswer {
+  const { textStart, textSpan, textSide: _side, textWidth: _width, aside, ...hero } = s.hero;
+  const { start, span: _span, ...asideRest } = aside;
+  const beside = aside.kind !== 'none';
+  const textSide = beside ? (start < textStart ? 'right' as const : 'left' as const) : textStart === 1 ? 'left' as const : textStart + textSpan - 1 === 12 ? 'right' as const : 'centre' as const;
+  const textWidth = beside ? (textSpan <= 5 ? 'narrow' as const : textSpan === 6 ? 'mid' as const : 'wide' as const) : (textSpan <= 6 ? 'narrow' as const : textSpan <= 8 ? 'mid' as const : 'wide' as const);
+  return {
+    ...structuredClone(s), hero: { ...structuredClone(hero), textSide, textWidth, aside: structuredClone(asideRest) },
+    sections: s.sections.map(({ layout: { headingStart: _a, headingSpan: _b, contentStart: _c, contentSpan: _d, ...layout }, ...x }) => ({ ...structuredClone(x), layout, items: x.kind === 'services' ? [] : structuredClone(x.items) })),
+  };
+}

@@ -47,7 +47,7 @@ function score(b: Business, q: string): number {
 }
 const toCandidate = (b: Business): BusinessCandidate => ({
   placeId: b.placeId, name: b.name, address: b.formattedAddress, rating: b.rating, reviewCount: b.reviewCount,
-  primaryTypeLabel: b.primaryTypeLabel, primaryType: b.primaryType, types: b.types, phone: b.phone, googleWebsite: b.website, website: b.website, mapsUrl: b.mapsUrl, photoRef: b.photos[0]?.ref,
+  primaryTypeLabel: b.primaryTypeLabel, primaryType: b.primaryType, types: b.types, phone: b.phone, googleWebsite: b.website, website: b.website, mapsUrl: b.mapsUrl,
 });
 
 // ───────────────────────── search ─────────────────────────
@@ -111,7 +111,6 @@ export async function searchCandidates(input: string, opts: { zip?: string; limi
       googleWebsite: p.websiteUri,
       website: p.websiteUri,
       mapsUrl: p.googleMapsUri,
-      photoRef: p.photos?.[0]?.name,
     }),
   );
   return { intent, ...onlyBusinesses(all) };

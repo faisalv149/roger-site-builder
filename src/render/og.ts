@@ -1,3 +1,4 @@
+import { writeStoredFile } from '../google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
@@ -17,13 +18,13 @@ export function monogramSvg(name: string, bg: string, fg: string): string {
 
 export async function writeIcons(dir: string, opts: { name: string; brand: string; ink: string; logoFile?: string }) {
   const mono = monogramSvg(opts.name, opts.brand, opts.ink);
-  fs.writeFileSync(path.join(dir, 'favicon.svg'), mono);
+  writeStoredFile(path.join(dir, 'favicon.svg'), mono);
   const touch = opts.logoFile
     ? await sharp({ create: { width: 180, height: 180, channels: 4, background: '#FFFFFF' } })
         .composite([{ input: await sharp(opts.logoFile).resize(150, 150, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toBuffer(), gravity: 'center' }])
         .png().toBuffer()
     : await sharp(Buffer.from(mono)).resize(180, 180).png().toBuffer();
-  fs.writeFileSync(path.join(dir, 'apple-touch-icon.png'), touch);
+  writeStoredFile(path.join(dir, 'apple-touch-icon.png'), touch);
 }
 
 /** Branded 1200×630 share image: hero photo + name + rating. Used for og:image / iMessage rich links. */
@@ -98,7 +99,8 @@ async function startBrowser() {
     }
   }
   // STUDIO_SINGLE_PROCESS=1: the serverless Chromium's single-process mode, so tests can reproduce it locally
-  return chromium.launch({ executablePath: config.chromiumPath, args: ['--no-sandbox', ...(process.env.STUDIO_SINGLE_PROCESS === '1' ? ['--single-process', '--no-zygote'] : [])] });
+  // (a container's small /dev/shm crashes Chromium's renderer; the flag is harmless elsewhere)
+  return chromium.launch({ executablePath: config.chromiumPath, args: ['--no-sandbox', '--disable-dev-shm-usage', ...(process.env.STUDIO_SINGLE_PROCESS === '1' ? ['--single-process', '--no-zygote'] : [])] });
 }
 
 /** Real screenshot of the generated site (needs Chromium). Returns false if unavailable. */

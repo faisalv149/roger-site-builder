@@ -12,7 +12,11 @@ import { lookupCandidates } from './sources/resolve.js';
 import { confirmBusinessCard } from './imessage/cards.js';
 import { runAudit, type BuildInput } from './pipeline.js';
 import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
-import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead, recordLeadDelivery } from './store.js';
+import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead, recordLeadDelivery, studioDocs } from './store.js';
+import { getFrontendJob, frontendPreview, recoverInterruptedFrontendJobs } from './studio/frontend/jobs.js';
+import { bindConversation, createInvite, inviteForToken, inviteOfConversation, isStaff, listInvites, revokeInvite } from './beta.js';
+import { advanceAllCustom } from './imessage/flow.js';
+import { launchBrowser } from './render/og.js';
 import { deliverLead, ownerEmailOf, configuredChannels } from './lead-delivery.js';
 import { handleInbound, isPending, pollIntake, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
@@ -44,6 +48,19 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 
+// ── the beta (ROGER_BETA=1): only the custom flow is served. The old Studio (theme builder, concepts, owner review,
+// the normal simulator) and every API behind it are off; /app/ is the beta's staff app (reviews and invites). The normal
+// client path is unchanged everywhere the beta switch is off.
+const BETA_PATHS = /^\/$|^\/app\/?$|^\/app\/(index\.html|imessage-reviews\.(html|js|css)|frontend\.(html|js|css))$|^\/imessage\/(index\.html|imessage\.(js|css))?$|^\/v\/|^\/api\/health$|^\/api\/staff\/me$|^\/api\/imessage\/inbound$|^\/api\/conversations\/[^/]+$|^\/api\/studio\/(imessage-reviews|beta-invites)(\/|$)|^\/api\/studio\/(jobs|resolve|businesses|frontend-jobs)$|^\/api\/studio\/jobs\/[A-Za-z0-9_-]+$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}(\/resume)?$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}\/preview(\/[a-z0-9-]+)?$|^\/gphoto\/|^\/robots\.txt$|^\/favicon/;
+if (config.beta.enabled) app.use((req, res, next) => {
+  if (!BETA_PATHS.test(req.path)) return res.status(404).type('text/plain').send('Not part of the Roger beta.');
+  if (req.path === '/' || req.path === '/app' || req.path === '/app/' || req.path === '/app/index.html') return res.redirect(302, '/app/frontend.html');
+  // the normal (paid) builder flow is not part of the beta: only the custom intake
+  if (req.path === '/api/imessage/inbound' && req.body?.intake !== 'custom') return res.status(404).json({ error: 'Only the custom preview is part of the beta.' });
+  next();
+});
+/** the browser is opening a page (it can ask for the password); otherwise a page's own script is calling (it must not) */
+const opensPage = (req: Request) => req.headers['sec-fetch-mode'] === 'navigate' || (!req.path.startsWith('/api/') && !req.headers['sec-fetch-mode']) || /text\/html/.test(String(req.headers.accept ?? '')) && req.headers['sec-fetch-mode'] !== 'cors' && req.headers['sec-fetch-mode'] !== 'same-origin';
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 
 // ── password (STUDIO_PASSWORD) on the Studio, the API and the iMessage page. Generated sites, cards, reports and
@@ -52,19 +69,44 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 // the owner editor (/owner) and its API (/api/owner) use the owner's own key per draft, not the Studio password
 // /p/<token>/: a client's preview link for one chosen concept (src/studio/concepts/share.ts)
 // /drafts/<slug>/: the owner editor's own preview of its draft (the same build as /sites, never a pinned version)
-const OPEN = /^\/(sites|drafts|cards|reports|stock|demo-sites|owner|p|gphoto)\/|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
+const OPEN = /^\/(sites|drafts|cards|reports|stock|demo-sites|owner|p|gphoto|v)\/|^\/v\/fe_[a-z0-9]{16}$|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/staff\/me$|^\/api\/owner\/|^\/robots\.txt$|^\/imessage\/(imessage\.(js|css))?$/;
 // sites post their quote form here from any origin; reading leads (GET) still needs the password
 const isLeadPost = (req: Request) => /^\/api\/leads\/[^/]+$/.test(req.path) && (req.method === 'POST' || req.method === 'OPTIONS');
 const sha = (s: string) => createHash('sha256').update(s).digest();
+// an invited beta tester: the custom simulator's inbound texts and their own conversation only (checked again in the routes)
 app.use((req, res, next) => {
-  if (!config.studioPassword || OPEN.test(req.path) || isLeadPost(req)) return next();
+  void (async () => {
+    if (req.method === 'POST' && req.path === '/api/imessage/inbound' && req.body?.intake === 'custom' && typeof req.body?.invite === 'string') {
+      const inv = await inviteForToken(req.body.invite);
+      if (inv) res.locals.invite = inv;
+    } else if (req.method === 'GET' && /^\/api\/conversations\/[^/]+$/.test(req.path)) {
+      const inv = await inviteForToken(String(req.headers['x-roger-invite'] || ''));
+      if (inv && inv.froms.includes(decodeURIComponent(req.path.split('/').pop()!))) res.locals.invite = inv;
+    }
+  })().then(() => next(), next);
+});
+app.use((req, res, next) => {
+  if (OPEN.test(req.path) || isLeadPost(req) || res.locals.invite) return next();
+  // the beta never runs without staff authentication: everything but customers' links and testers' simulator is closed
+  if (!config.studioPassword && config.beta.enabled) return res.status(503).type('text/plain').send('The beta needs STUDIO_PASSWORD: staff pages and APIs are closed until it is set.');
+  if (!config.studioPassword) return next();
   const [scheme, b64] = (req.headers.authorization || '').split(' ');
   const given = scheme === 'Basic' && b64 ? Buffer.from(b64, 'base64').toString('utf8') : '';
   if (given && timingSafeEqual(sha(given), sha(`${config.studioUser}:${config.studioPassword}`))) return next();
+  // a page asks for the password; an API call made by a page gets a plain refusal (no browser password box for testers)
+  if (!opensPage(req)) return res.status(401).json({ error: 'Staff authentication is required.' });
   res.set('WWW-Authenticate', 'Basic realm="Roger Studio", charset="UTF-8"').status(401).send('Password required');
 });
 
 // ── static ──
+// staff only, whatever else is open: the review screen and every review and invite action
+const staffOnly = (req: Request, res: Response, next: NextFunction) => {
+  if (isStaff(req)) return next();
+  if (config.studioPassword) return !opensPage(req) ? res.status(401).json({ error: 'Staff authentication is required.' }) : res.set('WWW-Authenticate', 'Basic realm="Roger Studio", charset="UTF-8"').status(401).send('Password required');
+  res.status(403).json({ error: 'Staff authentication is required (STUDIO_PASSWORD).' });
+};
+app.use(['/app/imessage-reviews.html', '/app/imessage-reviews.js', '/app/imessage-reviews.css', '/api/studio/imessage-reviews', '/api/studio/beta-invites'], staffOnly);
+app.get('/api/staff/me', (req, res) => res.json({ staff: isStaff(req) }));
 app.use('/app', express.static(path.join(config.dirs.public, 'app')));
 app.use('/imessage', express.static(path.join(config.dirs.public, 'imessage'))); // stand-in iMessage UI for local demos (no gateway)
 app.use('/owner', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'content-security-policy': "frame-ancestors 'self'", 'x-frame-options': 'SAMEORIGIN' }); next(); }, express.static(path.join(config.dirs.public, 'owner')));
@@ -243,14 +285,76 @@ app.get('/api/leads/:slug', wrap(async (req, res) => {
   res.json({ leads: await listLeads(String(req.params.slug).replace(/[^a-z0-9-]/g, '')) });
 }));
 
+// ── a custom-site version the customer was sent (after staff review): its pages, and nothing else ──
+const escHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+async function sentVersion(id: string) {
+  const sent = /^fe_[a-z0-9]{16}$/.test(id) ? await studioDocs.get('customer-links', id) : undefined;
+  return sent ? getFrontendJob(id) : undefined;
+}
+// the link preview image: the version's homepage, rendered once (a sent version never changes)
+app.get('/v/:id/preview.png', wrap(async (req, res) => {
+  const id = String(req.params.id);
+  const job = await sentVersion(id);
+  if (!job) return res.status(404).type('text/plain').send('Not available.');
+  // kept in the datastore where there is one (Vercel: a function's disk does not last), else on the local disk
+  const key = `v-previews/${id}.png`;
+  const kept = remote ? await remote.getFile(key).catch(() => undefined) : undefined;
+  if (kept) return res.set({ 'cache-control': 'public, max-age=31536000, immutable', 'x-robots-tag': 'noindex' }).type('png').send(kept);
+  const file = path.join(config.dirs.out, 'v-previews', `${id}.png`);
+  if (!fs.existsSync(file)) {
+    const browser = await launchBrowser();
+    try {
+      const page = await (await browser.newContext({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 })).newPage();
+      await page.setContent(await frontendPreview(job, 'home', {}, (s) => `/v/${id}${s === 'home' ? '' : `/${s}`}`), { waitUntil: 'load', timeout: 45000 }).catch(() => undefined);
+      await page.waitForTimeout(1500);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      await page.screenshot({ path: file });
+    } finally { await browser.close(); }
+  }
+  const png = fs.readFileSync(file);
+  if (remote) await remote.putFile(key, png, 'image/png').catch((e) => console.warn(`[v] could not keep ${key}: ${(e as Error).message}`));
+  res.set({ 'cache-control': 'public, max-age=31536000, immutable', 'x-robots-tag': 'noindex' }).type('png').send(png);
+}));
+app.get(['/v/:id', '/v/:id/:slug'], wrap(async (req, res) => {
+  const id = String(req.params.id), slug = typeof req.params.slug === 'string' ? req.params.slug : 'home';
+  const job = await sentVersion(id);
+  if (!job) return res.status(404).type('text/plain').send('This preview link is not available.');
+  try {
+    let html = await frontendPreview(job, slug, {}, (s) => `/v/${id}${s === 'home' ? '' : `/${s}`}`);
+    // what a messaging app shows for the link: the business's name, and the homepage image, both from the public origin
+    const title = `${job.input.business.name} · website preview`;
+    const meta = [`<meta property="og:title" content="${escHtml(title)}">`, `<meta property="og:description" content="${escHtml(`A preview of a new website for ${job.input.business.name}.`)}">`, '<meta property="og:type" content="website">',
+      ...(config.publicOrigin ? [`<meta property="og:url" content="${config.publicOrigin}/v/${id}${slug === 'home' ? '' : `/${slug}`}">`, `<meta property="og:image" content="${config.publicOrigin}/v/${id}/preview.png">`, '<meta property="og:image:width" content="1200">', '<meta property="og:image:height" content="630">', '<meta name="twitter:card" content="summary_large_image">'] : [])].join('');
+    html = html.replace('</title>', `</title>${meta}`);
+    res.set({ 'x-robots-tag': 'noindex', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }).type('html').send(html);
+  } catch { res.status(404).type('text/plain').send('No such page.'); }
+}));
+
 // ── iMessage reference flow (your gateway posts inbound texts here) ──
 app.post('/api/imessage/inbound', wrap(async (req, res) => {
   const from = String(req.body.from || 'demo');
   const text = String(req.body.text || '');
   // async: true → "On it, about 20 seconds" now, the preview later (see handleInbound)
   // intake: "concepts" turns on the design-engine intake for this conversation (a test intake: the route needs the Studio login)
-  res.json(await handleInbound(from, text, { async: req.body.async === true || req.body.async === 'true', intake: typeof req.body.intake === 'string' ? req.body.intake : undefined }));
+  const intake = typeof req.body.intake === 'string' ? req.body.intake : undefined;
+  let inviteId: string | undefined;
+  if (intake === 'custom') {
+    // the custom intake (paid design jobs) is invite-only: an invited tester's own conversation, or staff
+    const inv = res.locals.invite as Awaited<ReturnType<typeof inviteForToken>>;
+    if (inv) {
+      if (!(await bindConversation(inv, from))) return res.status(403).json({ error: 'This conversation belongs to another invite.' });
+      inviteId = inv.id;
+    } else if (!isStaff(req)) return res.status(403).json({ error: 'The custom preview is invite-only. Open the link from your invite.' });
+    else { const owner = await inviteOfConversation(from); if (owner) inviteId = owner.id; }
+  }
+  res.json(await handleInbound(from, text, { async: req.body.async === true || req.body.async === 'true', intake, inviteId }));
 }));
+app.get('/api/studio/beta-invites', wrap(async (_req, res) => res.json({ invites: (await listInvites()).map(({ tokenHash: _h, ...i }) => i) })));
+app.post('/api/studio/beta-invites', wrap(async (req, res) => {
+  const r = await createInvite(String(req.body?.label || ''), { spendUsd: Number(req.body?.spendUsd) || undefined });
+  res.status(201).json({ id: r.invite.id, label: r.invite.label, limits: r.invite.limits, url: r.url ?? null, token: r.token, note: r.url ? undefined : 'No public HTTPS origin is configured (ROGER_PUBLIC_ORIGIN): this invite has no shareable link yet.' });
+}));
+app.post('/api/studio/beta-invites/:id/revoke', wrap(async (req, res) => { const inv = await revokeInvite(String(req.params.id)); res.status(inv ? 200 : 404).json({ ok: !!inv }); }));
 app.post('/api/imessage/reset', wrap(async (req, res) => { await resetSession(String(req.body.from || 'demo')); res.json({ ok: true }); }));
 
 // ── owner editor API (own key per draft) and the Studio's owner-link controls ──
@@ -388,9 +492,17 @@ app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: 
 
 // Vercel runs the exported app as a function; everywhere else this is a normal server
 export default app;
-if (!process.env.VERCEL) app.listen(config.port, () => {
+if (!process.env.VERCEL && !process.env.ROGER_NO_LISTEN) void (async () => {
+  // generations stopped mid-run (a restart) continue from their saved stage exactly once, before any request is taken
+  const owner = `server-${process.pid}-${Date.now().toString(36)}`;
+  const r = await recoverInterruptedFrontendJobs(owner).catch((e) => { console.warn('[frontend] recovery failed', e); return { resumed: [], restarted: [], failed: [] }; });
+  if (r.resumed.length + r.restarted.length + r.failed.length) console.log(`[frontend] recovered: resumed ${r.resumed.join(', ') || '-'}; restarted ${r.restarted.join(', ') || '-'}; failed ${r.failed.join(', ') || '-'}`);
+  // custom-intake conversations move forward on their own (not only when the customer's page polls)
+  setInterval(() => { void advanceAllCustom().catch((e) => console.warn('[imessage custom] tick failed', e)); }, 15_000).unref();
+  app.listen(config.port, () => {
   console.log(`Roger Site Builder on ${config.publicBaseUrl}  (mock=${config.mock}, claude=${claudeVia() ?? 'off'}, screenshots=${screenshotsAvailable()}, themes=${loadThemes().size}, password=${config.studioPassword ? 'on' : 'off'}, publish=${config.vercelToken ? 'vercel' : 'off'})`);
   // studio jobs that were running when the server stopped continue where they were
   resumeInterruptedJobs().then((ids) => { if (ids.length) console.log(`[studio] resuming ${ids.length} interrupted job(s): ${ids.join(', ')}`); }).catch((e) => console.warn('[studio] resume failed', e));
   if (!config.studioPassword && !/\/\/(localhost|127\.0\.0\.1)\b/.test(config.publicBaseUrl)) console.warn('[security] STUDIO_PASSWORD is not set: anyone who finds this URL can run builds on your API keys and read conversations.');
-});
+  });
+})();

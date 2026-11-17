@@ -4,7 +4,20 @@
  * Env: SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL, as Vercel's Supabase integration sets it) and
  * SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY). Create the table once with supabase/schema.sql.
  */
-const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '');
+/**
+ * The project's API origin, whatever was pasted: "https://<ref>.supabase.co" as is; with a path ("…/rest/v1/") only its
+ * origin; a dashboard link ("https://supabase.com/dashboard/project/<ref>…") as that project's API origin.
+ */
+function apiOrigin(raw: string): string {
+  const v = raw.trim();
+  if (!v) return '';
+  try {
+    const u = new URL(/^https?:\/\//i.test(v) ? v : `https://${v}`);
+    const ref = u.hostname === 'supabase.com' || u.hostname.endsWith('.supabase.com') ? u.pathname.match(/\/project\/([a-z0-9]{10,40})/i)?.[1] : undefined;
+    return ref ? `https://${ref}.supabase.co` : u.origin;
+  } catch { return v.replace(/\/$/, ''); }
+}
+const url = apiOrigin(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '');
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const BUCKET = 'roger';
 const TABLE = 'roger_docs';
@@ -48,6 +61,20 @@ export async function sbPutDoc(col: string, id: string, doc: string): Promise<vo
   });
 }
 
+/**
+ * Create a record only if none exists with this key (no upsert): true when this call created it, false when it was
+ * already there. The database's primary key makes it atomic, so two workers can never both create it (a claim).
+ */
+export async function sbCreateDoc(col: string, id: string, doc: string): Promise<boolean> {
+  try {
+    await call(`/rest/v1/${TABLE}`, { method: 'POST', headers: { ...json, prefer: 'return=minimal' }, body: JSON.stringify({ collection: col, id, data: JSON.parse(doc), updated_at: new Date().toISOString() }) });
+    return true;
+  } catch (e) {
+    if (/Supabase 409|duplicate key/i.test((e as Error).message)) return false;
+    throw e;
+  }
+}
+
 export async function sbListDocs(col: string): Promise<string[]> {
   const out: string[] = [];
   for (let from = 0; ; from += 1000) {
@@ -87,14 +114,13 @@ export async function sbGetFile(path: string): Promise<Buffer | undefined> {
 
 /** every file path under prefix ("sites/<slug>"), including subfolders */
 export async function sbListFiles(prefix: string): Promise<string[]> {
-  await ensureBucket();
   const files: string[] = [];
   const walk = async (dir: string) => {
     for (let offset = 0; ; offset += 1000) {
       const r = await call(`/storage/v1/object/list/${BUCKET}`, { method: 'POST', headers: json, body: JSON.stringify({ prefix: dir, limit: 1000, offset }) });
       const items = (await r.json()) as { name: string; id: string | null }[];
       for (const it of items) {
-        const p = `${dir}/${it.name}`;
+        const p = dir ? `${dir}/${it.name}` : it.name;
         if (it.id === null) await walk(p); else files.push(p); // folders have no id
       }
       if (items.length < 1000) return;

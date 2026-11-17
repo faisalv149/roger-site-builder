@@ -1,3 +1,4 @@
+import { writeStoredFile } from '../google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
@@ -48,7 +49,7 @@ export async function confirmBusinessCard(c: BusinessCandidate): Promise<IMessag
     <text x="60" y="560" font-family="${FONT}" font-weight="600" font-size="30" fill="#FFD166">${esc(rating)}</text>
   </svg>`;
   await sharp(base).composite([{ input: Buffer.from(svg) }]).jpeg({ quality: 82 }).toFile(path.join(dir, 'card.jpg'));
-  fs.writeFileSync(path.join(dir, 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  writeStoredFile(path.join(dir, 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(c.name)}</title><meta name="robots" content="noindex">
 <meta property="og:title" content="${esc(c.name)}"><meta property="og:description" content="${esc([c.address, rating].filter(Boolean).join(' · '))}">
 <meta property="og:image" content="${esc(image)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">

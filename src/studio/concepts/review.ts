@@ -42,7 +42,7 @@ export function checkPinned(brief: BusinessBrief, review: OwnerReview) {
 // ───────────────────────── the catalog ─────────────────────────
 export interface Fact { id: string; kind: string; label: string; text: string; sources: SourceRef[] }
 export interface ActionDef { id: string; label: string; href: string; kind: 'call' | 'email' | 'book' | 'site' | 'menu' | 'directions' | 'reviews'; factId: string; /** time-limited: never the main action */ seasonal?: string }
-export interface Photo { id: string; url: string; width: number; height: number; orientation: 'landscape' | 'portrait' | 'square'; uses: string[]; alt: string; services: string[]; /** the website pages it appears on */ pages?: string[]; /** what an image check saw in it (when it has no description) */ seen?: string; seenKind?: string }
+export interface Photo { id: string; url: string; width: number; height: number; orientation: 'landscape' | 'portrait' | 'square'; uses: string[]; alt: string; services: string[]; /** the website pages it appears on */ pages?: string[]; /** what an image check saw in it (when it has no description) */ seen?: string; seenKind?: string; /** a Google listing photo: the fingerprint of the picture that description is of (the live page shows it only if it matches) */ fp?: string }
 export interface Catalog {
   brief: BriefRef;
   business: { name: string; category: string | null; website: string | null; summary: string | null };
@@ -306,17 +306,22 @@ export function publicationGate(brief: BusinessBrief, catalog: Catalog, review: 
  * separated ("forStorm" → "for Storm").
  */
 function ownLinesOf(inventory: SiteInventory): string[] {
+  return [...new Set(ownLineSources(inventory).map((x) => x.text))];
+}
+/** the same lines, each with the page it is on and its heading level (every occurrence, in the same order) */
+export function ownLineSources(inventory: SiteInventory): { text: string; page: string; level: number }[] {
   const order = (u: string) => { try { const p = new URL(u).pathname; return p === '/' || /home/i.test(p) ? 0 : /about|story/i.test(p) ? 1 : 2; } catch { return 3; } };
   const clean = (t: string) => stripUiDebris(t.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([a-z])&/g, '$1 &').replace(/\s+/g, ' ').trim());
-  const out: string[] = [];
+  const out: { text: string; page: string; level: number }[] = [];
   for (const p of [...inventory.pages].filter((x) => x.headings?.length).sort((a, b) => order(a.url) - order(b.url))) {
     const hs = p.headings.filter((h) => h.level <= 3).map((h) => ({ level: h.level, text: clean(h.text) }));
     for (let i = 0; i < hs.length; i++) {
       let t = hs[i].text;
+      const level = hs[i].level;
       // a heading set over two lines: the first ends mid-phrase ("… Austin's", "… for")
       while (i + 1 < hs.length && hs[i + 1].level === hs[i].level && /(?:['\u2019]s|\b(?:the|of|for|and|behind|in|to|a|an|with|from|our))$/i.test(t)) { t = `${t} ${hs[i + 1].text}`; i++; }
-      out.push(t);
+      out.push({ text: t, page: p.url, level });
     }
   }
-  return [...new Set(out)];
+  return out;
 }

@@ -191,6 +191,34 @@ function validateClaude(d: ClaudeFacts, h: Facts, text: { site: string; reviews:
  * The result says whether Claude actually ran and whether its answer held up, so a template answer is never
  * mistaken for a model one, and facts nobody stated stay unknown.
  */
+/**
+ * Completed Studio work for this business and brief revision, handed to a build so it does not ask Claude again: the
+ * brief's verified offerings, service area and emergency availability, and the image checks already made of its photos.
+ */
+export interface StudioReuse {
+  /** what it came from (brief and concept job), for the build's notes */
+  from: string;
+  facts?: { services: { name: string; description?: string }[]; serviceAreas?: string[]; emergency?: boolean };
+  /**
+   * what each checked photo shows, with the checked image's fingerprint (its identity; a check without one is never
+   * attached) and size; url says where it came from: "google-listing:<placeId>#<n>" (its place then), or a website address
+   */
+  photoChecks?: { url: string; width: number; height: number; kind: string; seen?: string; fp?: string }[];
+}
+
+/**
+ * The facts step from the confirmed brief instead of a new Claude reading: the brief's verified offerings (never a
+ * theme's typical list), its service area and emergency availability; the rest from the same rules extractFacts falls
+ * back to (website text, Google hours). What only Claude would add (blurbs for theme services, design advice) stays
+ * empty: those are not verified facts.
+ */
+export function reusedFacts(b: Business, scan: WebsiteScan | undefined, reuse: NonNullable<StudioReuse['facts']>, from: string): FactsResult {
+  const h = heuristicFacts(b, scan);
+  const facts: Facts = { ...h, serviceAreas: reuse.serviceAreas?.length ? reuse.serviceAreas : h.serviceAreas, emergency: h.emergency || !!reuse.emergency };
+  const services: OwnService[] = reuse.services.slice(0, 8).map((s) => ({ name: s.name.slice(0, 60), description: (s.description ?? '').slice(0, 160), icon: iconFor(s.name), fromWebsite: true }));
+  return { facts, services, servicesMentioned: [], serviceBlurbs: {}, claude: claudeNotRun(claudeEnabled(), claudeVia(), `the confirmed brief was reused (${from}); no new extraction`), states: factStates(facts, { hoursKnown: !!b.hours?.periods?.length }) };
+}
+
 export async function extractFacts(b: Business, theme: Theme, scan?: WebsiteScan, opts: { design?: { style?: string; service?: string; goal?: string } } = {}): Promise<FactsResult> {
   const h = heuristicFacts(b, scan);
   const themeServices = theme.services.defaults.map((s) => ({ id: s.id, label: s.label }));

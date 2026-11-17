@@ -1,4 +1,6 @@
+import { writeStoredFile } from './google-names.js';
 import fs from 'node:fs';
+import { forStorageText } from './google-names.js';
 import path from 'node:path';
 import { config } from './config.js';
 import type { SiteModel } from './content/model.js';
@@ -61,7 +63,7 @@ export function writeSiteFiles(dir: string, files: SiteFile[], previous?: SitePl
   for (const f of files) {
     const abs = path.join(dir, f.file);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, f.content);
+    writeStoredFile(abs, forStorageText(f.content, f.file));
   }
 }
 

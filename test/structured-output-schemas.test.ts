@@ -14,15 +14,20 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'roger-schemas-'));
 const answers: unknown[] = [];
 const seen: { schema: Record<string, unknown>; format: boolean; prompt: string }[] = [];
 let refuseAll = false;
+/** the design-direction requests (constrained output, recognised by their mainJob field) and the answer they get */
+const directionSeen: { prompt: string; system: string }[] = [];
+let directionAnswer: unknown = {};
 const { apiSchemaFor, server } = await (async () => {
   const S = await import('../src/studio/concepts/schema-compat.js');
   const srv = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => (body += d));
     req.on('end', () => {
-      const j = JSON.parse(body) as { output_config?: { format?: { schema?: Record<string, unknown> } }; messages: { content: string }[] };
+      const j = JSON.parse(body) as { output_config?: { format?: { schema?: Record<string, unknown> } }; messages: { content: string }[]; system?: string };
       const schema = j.output_config?.format?.schema ?? {};
-      seen.push({ schema, format: !!j.output_config?.format, prompt: j.messages[0].content });
+      const isDirection = !!(schema as { properties?: Record<string, unknown> }).properties?.mainJob;
+      if (isDirection) directionSeen.push({ prompt: j.messages[0].content, system: String(j.system ?? '') });
+      else seen.push({ schema, format: !!j.output_config?.format, prompt: j.messages[0].content });
       const bad = S.unsupportedKeywords(schema);
       if (refuseAll || bad.length) {
         res.writeHead(400, { 'content-type': 'application/json', 'request-id': 'req_test_400' });
@@ -33,7 +38,7 @@ const { apiSchemaFor, server } = await (async () => {
         res.writeHead(400, { 'content-type': 'application/json', 'request-id': 'req_test_grammar' });
         return res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'The compiled grammar is too large, which would cause performance issues. Simplify your tool schemas or reduce the number of strict tools.' }, request_id: 'req_test_grammar' }));
       }
-      const a = answers[Math.min(seen.length - 1, answers.length - 1)];
+      const a = isDirection ? directionAnswer : answers[Math.min(seen.length - 1, answers.length - 1)];
       const text = typeof a === 'string' ? a : JSON.stringify(a);
       const ev = (type: string, data: object) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
       res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -61,7 +66,7 @@ const { STRATEGY_SCHEMA } = await import('../src/studio/concepts/references.js')
 const { PLAN_SCHEMA } = await import('../src/studio/concepts/plan.js');
 test.after(() => server.close());
 
-const reset = (list: unknown[], refuse = false) => { fs.rmSync(path.join(tmp, 'data', 'studio-ai'), { recursive: true, force: true }); answers.length = 0; answers.push(...list); seen.length = 0; refuseAll = refuse; };
+const reset = (list: unknown[], refuse = false) => { fs.rmSync(path.join(tmp, 'data', 'studio-ai'), { recursive: true, force: true }); answers.length = 0; answers.push(...list); seen.length = 0; directionSeen.length = 0; refuseAll = refuse; };
 /** every `required` list and `enum` in a schema, in order: the structure the API still enforces */
 const skeleton = (s: unknown): unknown[] => (!s || typeof s !== 'object' ? [] : Array.isArray(s) ? s.flatMap(skeleton) : Object.entries(s).flatMap(([k, v]) => (k === 'required' || k === 'enum' ? [[k, v]] : skeleton(v))));
 
@@ -125,12 +130,14 @@ test('an API refusal stops at once, names its stage, and is never replaced by an
     ownLines: ['Systems that talk to each other.'], services: [], story: null, actions: [], omitted: [], photos: [], logo: null, email: null, claims: [], items: [], facts: {}, allowedText: '',
   } as never;
   const brief = { businessKey: 'site-northline.example.com', revision: 1, identity: { status: 'website-only' }, brand: { colors: [], fonts: [], logo: { value: null, status: 'unknown' } } } as never;
-  await assert.rejects(generateDesignSpec(cat, brief, null, { transport: apiTransport('claude-sonnet-5-5'), fallback: () => 'a direction' }), /rejected the design:spec request \(HTTP 400\)/);
-  assert.equal(seen.length, 1);
+  await assert.rejects(generateDesignSpec(cat, brief, null, { transport: apiTransport('claude-sonnet-5-5'), fallback: () => 'a direction' }), /rejected the design:direction request \(HTTP 400\)/);
+  assert.deepEqual([directionSeen.length, seen.length], [1, 0], 'refused at the direction, its exact stage: no spec was asked for');
 });
 
 // ───────────────────────── design:spec as ordinary JSON ─────────────────────────
-const { cat: northline, brief: northlineBrief, good } = await import('./helpers/northline-spec.js');
+const { cat: northline, brief: northlineBrief, good, goodDirection, answer } = await import('./helpers/northline-spec.js');
+const { assembleSpec } = await import('../src/studio/concepts/designspec.js');
+directionAnswer = goodDirection();
 const { SPEC_CONTRACT, specRequest } = await import('../src/studio/concepts/designspec.js');
 
 test('the DesignSpec schema is too large for constrained output, so design:spec asks for ordinary JSON with a contract', async () => {
@@ -154,37 +161,45 @@ test('the DesignSpec schema is too large for constrained output, so design:spec 
 });
 
 test('through the API: a DesignSpec answered as ordinary JSON is parsed and passes the full schema and every check', async () => {
-  reset([`Here is the design.\n\`\`\`json\n${JSON.stringify(good())}\n\`\`\``]);
+  reset([`Here is the design.\n\`\`\`json\n${JSON.stringify(answer(good()))}\n\`\`\``]);
   const r = await generateDesignSpec(northline, northlineBrief, null, { transport: apiTransport('claude-sonnet-5-5'), fallback: () => 'none' });
   assert.equal(r.source, 'ai', r.fallback?.reason ?? '');
-  assert.deepEqual(r.spec, good());
+  assert.deepEqual(r.spec, assembleSpec(answer(good()), northline));
   assert.equal(r.attempts, 1);
   assert.equal(seen.length, 1);
   assert.equal(seen[0].format, false, 'no output_config.format is sent for design:spec');
   assert.ok(seen[0].prompt.includes(SPEC_CONTRACT), 'the contract is in the prompt');
-  assert.ok(r.calls[0].ok && r.calls[0].costUsd > 0, 'its cost is recorded');
+  const specCall = r.calls.find((c) => c.stage === 'design:spec')!;
+  assert.ok(specCall.ok && specCall.costUsd > 0, 'its cost is recorded');
+  // the direction came first, as constrained output, with the guide as its system prompt; the spec carries its idea
+  assert.equal(directionSeen.length, 1);
+  assert.match(directionSeen[0].system, /^You are the design lead/);
+  assert.ok(!seen[0].prompt.includes('You are the design lead'), 'the guide is not pasted into the spec request');
+  assert.ok(seen[0].prompt.includes('An engineered index'), 'the spec request carries the revised idea');
+  assert.equal(r.direction?.version, 'director-1');
 });
 
 test('a malformed answer uses the single repair; an out-of-range one is refused by the full schema; two bad answers fail with the reason', async () => {
   // malformed, then valid: accepted on the repair, which was told why
-  reset(['{"thesis": "A page", "palette": {', JSON.stringify(good())]);
+  reset(['{"thesis": "A page", "palette": {', JSON.stringify(answer(good()))]);
   let r = await generateDesignSpec(northline, northlineBrief, null, { transport: apiTransport('claude-sonnet-5-5'), fallback: () => 'none' });
   assert.equal(r.source, 'ai', r.fallback?.reason ?? '');
   assert.equal(r.attempts, 2);
   assert.match(r.rejected[0].errors[0], /^the answer was not valid JSON \(/);
   assert.match(seen[1].prompt, /Your previous answer was rejected:\n- the answer was not valid JSON .*answer with one JSON object only/);
-  assert.ok(r.calls[0].costUsd > 0 && !r.calls[0].ok, 'the unreadable answer is paid for and recorded as failed');
+  const first = r.calls.find((c) => c.stage === 'design:spec')!;
+  assert.ok(first.costUsd > 0 && !first.ok, 'the unreadable answer is paid for and recorded as failed');
 
   // a number outside the schema's range (no longer enforced by the API), then valid
   const wide = good(); wide.type.base = 30;
-  reset([JSON.stringify(wide), JSON.stringify(good())]);
+  reset([JSON.stringify(answer(wide)), JSON.stringify(answer(good()))]);
   r = await generateDesignSpec(northline, northlineBrief, null, { transport: apiTransport('claude-sonnet-5-5'), fallback: () => 'none' });
   assert.equal(r.source, 'ai');
   assert.match(r.rejected[0].errors.join(), /\$\.type\.base: 30 is above the maximum 20/);
 
   // a grounding failure (an unsupported action) is still caught after parsing
   const ungrounded = good(); ungrounded.hero.actions = ['call'];
-  reset([JSON.stringify(ungrounded), JSON.stringify(ungrounded)]);
+  reset([JSON.stringify(answer(ungrounded)), JSON.stringify(answer(ungrounded))]);
   r = await generateDesignSpec(northline, northlineBrief, null, { transport: apiTransport('claude-sonnet-5-5'), fallback: () => 'none' });
   assert.equal(r.spec, null);
   assert.equal(seen.length, 2, 'one attempt and one repair, no more');

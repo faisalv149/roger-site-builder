@@ -1,9 +1,12 @@
+import { writeStoredFile } from './google-names.js';
 import fs from 'node:fs';
+import { forStorage } from './google-names.js';
 import path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { config } from './config.js';
 import { configuredChannels, ownerEmailOf } from './lead-delivery.js';
 import type { Business, Facts, ServiceItem, WebsiteScan } from './types.js';
+import { withLivePhotos } from './sources/google-live.js';
 import type { Theme } from './theme/schema.js';
 import type { SiteImage } from './brand/photos.js';
 import type { LogoPick } from './brand/logo.js';
@@ -127,7 +130,8 @@ export function upgradeDraft(raw: unknown): DraftRecord | undefined {
 }
 
 export const getDraft = async (id: string) => upgradeDraft(await draftDocs.get('drafts', id));
-export const putDraft = (d: DraftRecord) => draftDocs.put('drafts', d.id, d);
+/** a draft as it is stored: Google's photo resource names and authors are never kept (withLivePhotos) */
+export const putDraft = (d: DraftRecord) => draftDocs.put('drafts', d.id, d.base?.business ? { ...d, base: { ...d.base, business: withLivePhotos(d.base.business) } } : d);
 export async function findDraft(q: { slug?: string; businessKey?: string }): Promise<DraftRecord | undefined> {
   const all = (await draftDocs.list<DraftRecord>('drafts')).filter((d) => (q.slug ? d.slug === q.slug : true) && (q.businessKey ? d.businessKey === q.businessKey : true));
   all.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
@@ -172,7 +176,7 @@ export async function ensureLocalSite(slug: string): Promise<void> {
   for (const f of await listOut(`sites/${slug}`)) {
     const abs = path.join(dir, f.file);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, f.data);
+    writeStoredFile(abs, f.data);
   }
   fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
 }
@@ -262,7 +266,7 @@ export async function writeSite(base: DraftBase, model: SiteModel, opts: { persi
   writeSiteFiles(dir, files, opts.previousSitePlan);
   const out = files.find((f) => f.file === 'index.html')!.content;
   const { theme: _t, ...dump } = model;
-  fs.writeFileSync(path.join(dir, 'site.json'), JSON.stringify({ ...dump, themeName: base.themeName }, null, 2));
+  writeStoredFile(path.join(dir, 'site.json'), JSON.stringify(forStorage({ ...dump, business: withLivePhotos(dump.business), themeName: base.themeName }, `${path.basename(dir)}/site.json`), null, 2));
   if (opts.persist !== false) await persistDir(dir);
   return out;
 }

@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { aiJson, ApiRequestError, CostLedger, defaultTransport, type AiTransport } from './ai.js';
 import { contractOf } from './schema-compat.js';
+import { TYPE_PRESET_DEFS } from '../../design/directions.js';
+import { heroColumns, sectionColumns, type TextSide, type TextWidth } from './geometry.js';
+import { directionForSpec, directionRequest, directorOn, DIRECTOR_VERSION, isDirectionNote, validateDirection, type Direction } from './director.js';
+import { claimProblems, directionHeroProblems, flaggedLines, heroProblems, menuDetails, plannerSelection, type PlannerSelection } from './manifest-input.js';
+import type { SiteManifest } from '../manifest.js';
 import { rankDirections } from './directions.js';
 import type { Catalog } from './review.js';
 import { stateName } from '../address.js';
@@ -28,6 +33,9 @@ import type { UsageRecord } from './types.js';
 export type TextRef = { ownLine: number } | { service: string; field: 'name' | 'description' } | { story: 'heading' | 'text' } | { label: string };
 export type PaletteValue = string; // a brand hex, a neutral name, or "tint:<brand hex>:<5-30>"
 export type Role = 'ground' | 'surface' | 'inverse' | 'accent';
+/** a verified fact Roger shows from the catalog's own data (never as text Claude writes) */
+export const FACT_KINDS = ['hours', 'address', 'phone', 'rating'] as const;
+export type FactKind = (typeof FACT_KINDS)[number];
 export interface ItemSpec { title: TextRef; body?: TextRef | null; /** a verified photo shown with the item */ photoId?: string | null }
 export interface SectionSpec {
   id: string; purpose: string;
@@ -39,6 +47,8 @@ export interface SectionSpec {
   actions: string[];
   /** verified photos for the section: beside the heading, a mosaic after the items, or an edge-to-edge band */
   media?: { placement: 'none' | 'beside' | 'mosaic' | 'band'; photoIds: string[] };
+  /** the verified facts the section shows, rendered from the catalog's data (absent on designs made before them) */
+  facts?: FactKind[];
 }
 export interface DesignSpec {
   thesis: string;
@@ -53,8 +63,10 @@ export interface DesignSpec {
     /** a verified photo behind the whole hero (text over it, with a scrim), or null */
     backgroundPhoto?: string | null; verticalAlign: 'start' | 'center' | 'end'; align: 'start' | 'center';
     textStart: number; textSpan: number; headlineSize: number;
+    /** the choices the columns are derived from (the renderer's geometry); absent on designs made before them */
+    textSide?: 'left' | 'right' | 'centre'; textWidth?: 'narrow' | 'mid' | 'wide';
     kicker: TextRef | null; headline: TextRef; lede: TextRef | null; actions: string[];
-    aside: { kind: 'none' | 'service-index' | 'statement' | 'line-list' | 'contact-card' | 'image'; start: number; span: number; items: TextRef[]; photoId: string | null };
+    aside: { kind: 'none' | 'service-index' | 'statement' | 'line-list' | 'contact-card' | 'image'; start: number; span: number; items: TextRef[]; photoId: string | null; /** a contact card's verified facts, from the catalog's data */ facts?: FactKind[] };
   };
   sections: SectionSpec[];
   imagery: { approach: string; roles: { photoId: string; use: string; treatment: 'full-bleed' | 'framed' | 'inset' }[] };
@@ -72,6 +84,12 @@ export interface DesignResult {
   strategy: 'used' | 'none saved';
   /** the reference job whose strategy was given to the planner, and the patterns the design says it applied (empty: given, not applied) */
   references?: { referenceJobId: string | null; provided: boolean; applied: string[] };
+  /** the design direction the spec followed (audience, main job, idea, its critique and revision), with the guide's version */
+  direction?: { version: string; data: Direction; attempts: number; rejected: { attempt: number; errors: string[] }[]; /** its planner notes cut locally, with the originals */ shortened?: { at: string; original: string; shortened: string }[] } | null;
+  /** whose colours and fonts these are: the brand's own, or proposed (no brand known), with the proposals */
+  brand?: ReturnType<typeof brandOf>;
+  /** the spec's planner notes cut locally to their limits, with the originals (for debugging) */
+  shortened?: { at: string; original: string; shortened: string }[];
   calls: UsageRecord[]; ms: number;
 }
 
@@ -83,10 +101,37 @@ export function brandFonts(brief: BusinessBrief): string[] { return [...new Set(
 /** a palette value as a hex, or null when it is not allowed */
 export function resolveColor(v: string, brand: string[]): string | null {
   if (NEUTRALS[v]) return NEUTRALS[v];
-  if (HEX.test(v)) return brand.includes(v.toUpperCase()) ? v.toUpperCase() : null;
+  // no brand colour known (no website): any colour is a proposal, labelled as such (see brandOf); else only the brand's
+  if (HEX.test(v)) return !brand.length || brand.includes(v.toUpperCase()) ? v.toUpperCase() : null;
   const m = v.match(/^tint:(#[0-9a-f]{6}):(\d{1,2})$/i);
-  if (m && brand.includes(m[1].toUpperCase()) && +m[2] >= 4 && +m[2] <= 30) return mix(m[1], '#FFFFFF', +m[2] / 100);
+  if (m && (!brand.length || brand.includes(m[1].toUpperCase())) && +m[2] >= 4 && +m[2] <= 30) return mix(m[1], '#FFFFFF', +m[2] / 100);
   return null;
+}
+/** fonts that may be proposed when the brand's own are unknown: the vetted web fonts of Roger's type presets */
+export const PROPOSAL_FONTS = [...new Set(Object.values(TYPE_PRESET_DEFS).flatMap((p) => [p.heading.family, p.body.family]))];
+/** the brand line of a request: the business's own colours and fonts (kept), or none known, so a labelled proposal */
+export function brandLine(brand: string[], fonts: string[], logoVerified: boolean): string {
+  const logo = `logo ${logoVerified ? 'verified' : 'not verified (the header shows the name as a wordmark)'}`;
+  if (brand.length && fonts.length) return `Brand (keep): colours ${brand.join(', ')}; fonts ${fonts.join(', ')}; ${logo}.`;
+  return `Brand: ${brand.length ? `colours ${brand.join(', ')} (keep)` : 'no colours known (no website): propose a palette'}; ${fonts.length ? `fonts ${fonts.join(', ')} (keep)` : `no fonts known: propose a heading and a body font from ${PROPOSAL_FONTS.join(', ')}`}; ${logo}. Proposed colours and fonts are recorded as proposals for the owner, not as the business's brand.`;
+}
+/**
+ * Whether the brief knows which business it is, for designing: verified, website-only, or (a business with no website)
+ * the Google listing it was made from, named by its place id ("probable" only because no website corroborates it). A
+ * Google brief from a search or an address is not enough.
+ */
+export function identityKnown(brief: BusinessBrief): boolean {
+  if (['verified', 'website-only'].includes(brief.identity.status)) return true;
+  return brief.route === 'google' && brief.identity.status === 'probable' && !!brief.identity.listing?.placeId && brief.identity.evidence.includes('the link names this Google listing');
+}
+/** what of a spec's colours and fonts is the brand's own and what is proposed (no brand known) */
+export function brandOf(spec: DesignSpec, brief: BusinessBrief): { colours: 'brand' | 'proposed'; fonts: 'brand' | 'proposed'; proposed: { colours: string[]; fonts: string[] } } {
+  const brand = brandColors(brief), fonts = brandFonts(brief);
+  const hexes = [...new Set(Object.values(spec.palette).flatMap((v) => (String(v).match(/#[0-9a-f]{6}/gi) ?? []).map((h) => h.toUpperCase())))];
+  return {
+    colours: brand.length ? 'brand' : 'proposed', fonts: fonts.length ? 'brand' : 'proposed',
+    proposed: { colours: brand.length ? [] : hexes, fonts: fonts.length ? [] : [...new Set([spec.type.heading, spec.type.body].filter(Boolean))] },
+  };
 }
 function mix(a: string, b: string, t: number) { const p = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)); const x = p(a), y = p(b); return `#${x.map((c, i) => Math.round(c * t + y[i] * (1 - t)).toString(16).padStart(2, '0')).join('').toUpperCase()}`; }
 export function contrast(a: string, b: string) {
@@ -180,7 +225,7 @@ export function validateSpec(s: DesignSpec, cat: Catalog, brief: BusinessBrief, 
   if (pal.inverse && pal.ink && Math.max(contrast(pal.inverse, pal.ink), contrast(pal.inverse, '#FFFFFF')) < 4.5) errs.push('palette: no readable text colour on inverse');
   if (brand.length && !Object.values(s.palette ?? {}).some((v) => brand.some((b) => String(v).toUpperCase().includes(b)))) errs.push('palette: the brand colours are not used at all');
   // type: the brand's own fonts
-  for (const k of ['heading', 'body', 'mono'] as const) { const f = s.type?.[k]; if (f && fonts.length && !fonts.includes(f)) errs.push(`type.${k}: "${f}" is not one of the brand's fonts (${fonts.join(', ')})`); }
+  for (const k of ['heading', 'body', 'mono'] as const) { const f = s.type?.[k]; if (f && fonts.length && !fonts.includes(f)) errs.push(`type.${k}: "${f}" is not one of the brand's fonts (${fonts.join(', ')})`); else if (f && !fonts.length && !PROPOSAL_FONTS.includes(f)) errs.push(`type.${k}: "${f}" is not one of the fonts that may be proposed (${PROPOSAL_FONTS.join(', ')})`); }
   if (!(s.type?.base >= 15 && s.type?.base <= 20)) errs.push('type.base must be 15-20px');
   if (!(s.type?.scale >= 1.1 && s.type?.scale <= 1.6)) errs.push('type.scale must be 1.1-1.6');
   if (!(s.grid?.maxWidth >= 880 && s.grid?.maxWidth <= 1480)) errs.push('grid.maxWidth must be 880-1480');
@@ -227,6 +272,51 @@ export function validateSpec(s: DesignSpec, cat: Catalog, brief: BusinessBrief, 
   act(s.mobile?.stickyAction ? [s.mobile.stickyAction] : [], 'mobile.stickyAction');
   if (!(s.mobile?.headingScale >= 0.5 && s.mobile?.headingScale <= 1)) errs.push('mobile.headingScale must be 0.5-1');
   if (!(s.mobile?.itemColumns >= 1 && s.mobile?.itemColumns <= 2)) errs.push('mobile.itemColumns must be 1 or 2');
+  errs.push(...completeness(s, cat));
+  return errs;
+}
+
+/** the verified facts the catalog holds, for a page to show (an address: the business's own, or its only location) */
+export function factValues(cat: Catalog): Record<FactKind, string[] | null> {
+  const address = cat.address?.formatted ?? (cat.locations?.length === 1 ? cat.locations[0].formatted : null);
+  return {
+    hours: cat.hours?.length ? cat.hours : null,
+    address: address ? [address] : null,
+    phone: cat.phone ? [cat.phone.display] : null,
+    rating: cat.rating && cat.rating.count > 0 ? [`${cat.rating.value}★ from ${cat.rating.count.toLocaleString('en-US')} Google reviews`] : null,
+  };
+}
+const ASIDE_LISTS = ['service-index', 'statement', 'line-list', 'contact-card'];
+/** every photo a spec places */
+export const specPhotos = (s: DesignSpec) => [s.hero?.backgroundPhoto, s.hero?.aside?.kind === 'image' ? s.hero.aside.photoId : null, ...(s.sections ?? []).flatMap((x) => [...(x.items ?? []).map((i) => i.photoId), ...(x.media && x.media.placement !== 'none' ? x.media.photoIds : [])])].filter((x): x is string => !!x);
+/**
+ * What a finished page must show, and nothing it may show empty or twice: the verified hours and address (by the explicit
+ * `facts` fields, whatever the headings say), at least one verified photo when there are any, the rating and the reviews
+ * link in one block, and no hero aside with nothing in it. Facts the brief does not verify cannot be asked for.
+ */
+export function completeness(s: DesignSpec, cat: Catalog): string[] {
+  const errs: string[] = [];
+  const values = factValues(cat);
+  const sections = s.sections ?? [];
+  const aside = s.hero?.aside;
+  const shown = (k: FactKind) => sections.some((x) => (x.facts ?? []).includes(k)) || (aside?.kind === 'contact-card' && (aside.facts ?? []).includes(k));
+  const lists: [string, FactKind[]][] = [...sections.map((x, i): [string, FactKind[]] => [`sections[${i}] (${x.id}).facts`, x.facts ?? []]), ['hero.aside.facts', aside?.facts ?? []]];
+  for (const [where, facts] of lists) {
+    for (const k of facts) if (!values[k]) errs.push(`${where}: "${k}" is not verified in the brief, so it cannot be shown`);
+    if (new Set(facts).size !== facts.length) errs.push(`${where}: a fact is listed twice`);
+  }
+  if (aside && aside.kind !== 'contact-card' && aside.facts?.length) errs.push(`hero.aside.facts: only a contact-card aside shows facts (this one is "${aside.kind}")`);
+  if (values.hours && !shown('hours')) errs.push('facts: the verified opening hours are not shown; add "hours" to the "facts" of the section (or contact-card aside) where visitors look for them');
+  if (values.address && !shown('address')) errs.push('facts: the verified address is not shown; add "address" to the "facts" of the section (or contact-card aside) where visitors find the business');
+  // the rating and the link to the reviews: one block
+  const reviewActions = new Set(cat.actions.filter((a) => a.kind === 'reviews').map((a) => a.id));
+  // (a band headed as reviews with nothing of its own shows the rating too)
+  const reviewsHeading = (x: SectionSpec) => !(x.items ?? []).length && /\b(reviews?|testimonials?|what (people|guests|customers|clients) say)\b/i.test(resolveText(x.heading, cat) ?? '');
+  const ratingHomes = sections.filter((x) => (x.facts ?? []).includes('rating') || (x.actions ?? []).some((a) => reviewActions.has(a)) || (values.rating && reviewsHeading(x)));
+  if (ratingHomes.length > 1) errs.push(`sections: the rating and the reviews link are spread over ${ratingHomes.length} sections (${ratingHomes.map((x) => x.id).join(', ')}); show them once, in one section (its "facts" ["rating"] and the reviews action)`);
+  const asideFilled = (aside?.items ?? []).length > 0 || (aside?.kind === 'contact-card' && ((aside.facts ?? []).some((k) => values[k]) || !!cat.email));
+  if (aside && ASIDE_LISTS.includes(aside.kind) && !asideFilled) errs.push(`hero.aside: a "${aside.kind}" with nothing in it would render as an empty box; give it items${aside.kind === 'contact-card' ? ' or verified facts' : ''}, or choose "none"`);
+  if (cat.photos.length && !specPhotos(s).some((id) => cat.photos.some((p) => p.id === id))) errs.push(`photos: ${cat.photos.length} verified photo(s) are offered but the page shows none; place at least one (hero, an item, or section media)`);
   return errs;
 }
 
@@ -243,6 +333,7 @@ const TEXTREF = { anyOf: [
 ] };
 const NULLABLE = (s: object) => ({ anyOf: [s, { type: 'null' }] });
 const ROLE = en('ground', 'surface', 'inverse', 'accent');
+const FACTS = { type: 'array', maxItems: 4, items: en(...FACT_KINDS) };
 const obj = (props: Record<string, unknown>) => ({ type: 'object', additionalProperties: false, required: Object.keys(props), properties: props });
 export const SPEC_SCHEMA = obj({
   thesis: str(240),
@@ -253,18 +344,19 @@ export const SPEC_SCHEMA = obj({
   header: obj({ style: en('bar', 'minimal', 'split'), links: { type: 'array', maxItems: 5, items: { type: 'string' } }, action: NULLABLE({ type: 'string' }), sticky: { type: 'boolean' } }),
   hero: obj({
     composition: str(240), background: ROLE, backgroundPhoto: NULLABLE({ type: 'string' }), minHeight: int(40, 100), verticalAlign: en('start', 'center', 'end'), align: en('start', 'center'),
-    textStart: int(1, 12), textSpan: int(1, 12), headlineSize: num(2, 7),
+    textSide: en('left', 'right', 'centre'), textWidth: en('narrow', 'mid', 'wide'), headlineSize: num(2, 7),
     kicker: NULLABLE(TEXTREF), headline: TEXTREF, lede: NULLABLE(TEXTREF), actions: { type: 'array', maxItems: 2, items: { type: 'string' } },
-    aside: obj({ kind: en('none', 'service-index', 'statement', 'line-list', 'contact-card', 'image'), start: int(1, 12), span: int(0, 12), items: { type: 'array', maxItems: 8, items: TEXTREF }, photoId: NULLABLE({ type: 'string' }) }),
+    aside: obj({ kind: en('none', 'service-index', 'statement', 'line-list', 'contact-card', 'image'), items: { type: 'array', maxItems: 8, items: TEXTREF }, photoId: NULLABLE({ type: 'string' }), facts: FACTS }),
   }),
   sections: { type: 'array', minItems: 1, maxItems: 8, items: obj({
     id: str(24), purpose: str(160), kind: en('services', 'story', 'principles', 'statement', 'work', 'contact', 'capabilities'),
     heading: TEXTREF, intro: NULLABLE(TEXTREF),
-    layout: obj({ arrangement: en('stack', 'side-by-side'), headingStart: int(1, 12), headingSpan: int(1, 12), contentStart: int(1, 12), contentSpan: int(1, 12), itemColumns: int(1, 4), itemStyle: en('plain', 'ruled', 'numbered', 'card', 'large-type'), density: en('compact', 'regular', 'airy') }),
+    layout: obj({ arrangement: en('stack', 'side-by-side'), itemColumns: int(1, 4), itemStyle: en('plain', 'ruled', 'numbered', 'card', 'large-type'), density: en('compact', 'regular', 'airy') }),
     background: ROLE,
     items: { type: 'array', maxItems: 12, items: obj({ title: TEXTREF, body: NULLABLE(TEXTREF), photoId: NULLABLE({ type: 'string' }) }) },
     actions: { type: 'array', maxItems: 2, items: { type: 'string' } },
     media: obj({ placement: en('none', 'beside', 'mosaic', 'band'), photoIds: { type: 'array', maxItems: 8, items: { type: 'string' } } }),
+    facts: FACTS,
   }) },
   imagery: obj({ approach: str(240), roles: { type: 'array', maxItems: 8, items: obj({ photoId: { type: 'string' }, use: str(80), treatment: en('full-bleed', 'framed', 'inset') }) } }),
   mobile: obj({ heroOrder: en('text-first', 'aside-first', 'aside-hidden'), navigation: en('menu-button', 'inline-links', 'action-only'), stickyAction: NULLABLE({ type: 'string' }), headingScale: num(0.5, 1), itemColumns: int(1, 2) }),
@@ -278,7 +370,57 @@ export const SPEC_SCHEMA = obj({
  */
 export const SPEC_CONTRACT = contractOf(SPEC_SCHEMA, { TextRef: TEXTREF, Role: ROLE });
 
-export function specRequest(cat: Catalog, brief: BusinessBrief, strategy?: DesignStrategy | null, previous: DesignSpec[] = []) {
+/**
+ * Claude's answer: a DesignSpec without geometry. It chooses where the hero text sits and how wide, and each section's
+ * arrangement; the renderer's geometry derives the column ranges. A services section's items are not Claude's either.
+ */
+export type SpecAnswer = Omit<DesignSpec, 'hero' | 'sections'> & {
+  hero: Omit<DesignSpec['hero'], 'textStart' | 'textSpan' | 'aside' | 'textSide' | 'textWidth'> & { textSide: TextSide; textWidth: TextWidth; aside: Omit<DesignSpec['hero']['aside'], 'start' | 'span'> };
+  sections: (Omit<SectionSpec, 'layout'> & { layout: Omit<SectionSpec['layout'], 'headingStart' | 'headingSpan' | 'contentStart' | 'contentSpan'> })[];
+};
+
+/**
+ * The full DesignSpec from Claude's answer: columns from the renderer's geometry, and every services section's items
+ * assembled from the verified catalog (each service by reference, name and description, with its verified picture),
+ * so a services section always lists the business's real offerings and nothing else.
+ */
+export function assembleSpec(a: SpecAnswer, cat: Catalog): DesignSpec {
+  const photos = new Set(cat.photos.map((p) => p.id));
+  const h = heroColumns(a.hero.textSide, a.hero.textWidth, a.hero.aside.kind);
+  const offerings: ItemSpec[] = cat.services.map((s) => ({ title: { service: s.id, field: 'name' }, body: s.description ? { service: s.id, field: 'description' } : null, photoId: s.imageId && photos.has(s.imageId) ? s.imageId : null }));
+  let listed = false;
+  return {
+    ...structuredClone(a),
+    hero: { ...structuredClone(a.hero), textStart: h.textStart, textSpan: h.textSpan, aside: { ...structuredClone(a.hero.aside), start: h.asideStart, span: h.asideSpan } },
+    sections: a.sections.map((x) => {
+      const sec: SectionSpec = { ...structuredClone(x), layout: { ...x.layout, ...sectionColumns(x.layout.arrangement) } };
+      // the first services section lists every service; a later one keeps what it chose (checked like any section)
+      if (x.kind === 'services' && !listed && offerings.length) { sec.items = structuredClone(offerings); listed = true; }
+      return sec;
+    }),
+  };
+}
+
+/** the planner's line about the verified facts: what Roger shows from data, and where it must appear */
+export function factsLine(cat: Catalog): string {
+  const v = factValues(cat);
+  const have = FACT_KINDS.filter((k) => v[k]);
+  const reviews = cat.actions.find((a) => a.kind === 'reviews');
+  const must = [v.hours ? '"hours"' : '', v.address ? '"address"' : ''].filter(Boolean);
+  return [
+    `Verified facts Roger shows from its own data: ${have.length ? have.map((k) => `${k} (${v[k]!.join('; ')})`).join(', ') : 'none'}. Never write them as text or labels: list a fact's name in the "facts" of the section that shows it (or of a contact-card hero aside), and Roger renders it; "facts" is [] elsewhere.`,
+    must.length ? `${must.join(' and ')} must each appear once.` : '',
+    v.rating ? `The rating may appear once; ${reviews ? `put it and the "${reviews.id}" action in the same section (one block, never two sections about the reviews)` : 'in one section'}.` : '',
+    'A hero aside must have something in it (items, or a contact card\'s facts); otherwise choose "none".',
+    cat.photos.length ? 'The page must show at least one of the verified photos.' : '',
+  ].filter(Boolean).join(' ');
+}
+
+/**
+ * `selection`: from the site manifest (existing-website businesses): it replaces the full lists of own lines and photos;
+ * `details`: the menu items the direction asked for, and only those.
+ */
+export function specRequest(cat: Catalog, brief: BusinessBrief, strategy?: DesignStrategy | null, previous: DesignSpec[] = [], direction?: Direction | null, selection?: PlannerSelection | null, details: ReturnType<typeof menuDetails> = []) {
   const brand = brandColors(brief);
   const fonts = brandFonts(brief);
   return {
@@ -288,27 +430,33 @@ export function specRequest(cat: Catalog, brief: BusinessBrief, strategy?: Desig
       `Business: ${cat.business.name}${cat.business.category ? ` (${cat.business.category})` : ''}. ${cat.business.summary ?? ''}`,
       '',
       'Its own words: you may show ONLY these, by reference. Visible text is {"ownLine": i}, {"service": id, "field": "name"|"description"}, {"story": "heading"|"text"}, or a short {"label"} of at most 5 words with no numbers and no claims (no "trusted", "expert", "years", "best", "clients"...).',
-      `ownLines: ${JSON.stringify(cat.ownLines.map((t, i) => `${i}: ${t}`))}`,
+      ...(selection
+        ? [`From ${selection.source ?? "the business's website"} (selected; ids are sources; "line" is the ownLine index to cite; cite only lines given here, in "lines", the menu examples or the details): ${JSON.stringify(selection)}`, ...(details.length ? [`Menu details you asked for (descriptions are the business's own; a price is for the owner's review and may never be shown or stated as confirmed): ${JSON.stringify(details)}`] : []), 'Award claims listed under review may not be shown: they are for the owner to confirm.']
+        : [`ownLines: ${JSON.stringify(cat.ownLines.map((t, i) => `${i}: ${t}`))}`]),
       `services: ${JSON.stringify(cat.services.map((x) => ({ id: x.id, name: x.name, description: x.description ?? null })))}`,
       `story: ${cat.story ? JSON.stringify(cat.story) : 'none'}`,
       `Actions it supports (use only these ids): ${JSON.stringify(cat.actions.map((a) => ({ id: a.id, label: a.label, kind: a.kind })))}${cat.omitted.length ? `. Not supported, never suggest: ${cat.omitted.map((o) => o.what).join('; ')}` : ''}.`,
-      `Verified photos (the business's own; "shows" is what an image check saw): ${cat.photos.length ? JSON.stringify(cat.photos.map((p) => ({ id: p.id, orientation: p.orientation, width: p.width, shows: p.seen ?? (p.alt || 'unknown'), kind: p.seenKind ?? null }))) : 'none — design a type-led site; no image slots'}. Place photos with hero.backgroundPhoto, hero.aside image, item photoId, or section media (beside / mosaic / band); prefer photos whose content is known, and never put one where its content would be misdescribed.`,
+      ...(selection ? [`Place photos only from the selection above (by id) with hero.backgroundPhoto, hero.aside image, item photoId, or section media (beside / mosaic / band); never put one where its content would be misdescribed.`] : [`Verified photos (the business's own; "shows" is what an image check saw): ${cat.photos.length ? JSON.stringify(cat.photos.map((p) => ({ id: p.id, orientation: p.orientation, width: p.width, shows: p.seen ?? (p.alt || 'unknown'), kind: p.seenKind ?? null }))) : 'none — design a type-led site; no image slots'}. Place photos with hero.backgroundPhoto, hero.aside image, item photoId, or section media (beside / mosaic / band); prefer photos whose content is known, and never put one where its content would be misdescribed.`]),
       `Verified location: ${verifiedPlaces(cat).join('; ') || 'none'}. A label may name a place only if it is in that verified location; places the summary mentions are research, not verified, and must not be shown.`,
-      `Brand (keep): colours ${brand.join(', ') || 'none'}; fonts ${fonts.join(', ') || 'none'}; logo ${brief.brand.logo.status === 'verified' && cat.logo ? 'verified' : 'not verified (the header shows the name as a wordmark)'}.`,
-      `Palette values must be a brand hex, a neutral (${Object.keys(NEUTRALS).join(', ')}) or "tint:<brand hex>:<4-30>" (that brand colour at that % over white). Ink on ground needs contrast ≥ 7, onAccent on accent ≥ 4.5. Fonts: only the brand's own.`,
+      factsLine(cat),
+      brandLine(brand, fonts, brief.brand.logo.status === 'verified' && !!cat.logo),
+      brand.length
+        ? `Palette values must be a brand hex, a neutral (${Object.keys(NEUTRALS).join(', ')}) or "tint:<brand hex>:<4-30>" (that brand colour at that % over white). Ink on ground needs contrast ≥ 7, onAccent on accent ≥ 4.5.${fonts.length ? " Fonts: only the brand's own." : ''}`
+        : `Palette values: a hex you propose, a neutral (${Object.keys(NEUTRALS).join(', ')}) or "tint:<hex>:<4-30>". Ink on ground needs contrast ≥ 7, onAccent on accent ≥ 4.5.`,
       strategy ? `Reference strategy (inspiration only, measured from other sites): ${JSON.stringify({ summary: strategy.summary, layoutPatterns: strategy.layoutPatterns.map((p, i) => `${i}: ${p.pattern}`), typography: strategy.typography, navigation: strategy.navigation, avoid: strategy.avoid })}. In "referencesUsed", list the numbers of the layout patterns this design actually applies (an empty list if it applies none); never claim one it does not apply.` : 'No reference strategy is saved for this business: compose from the brief alone, and leave "referencesUsed" empty.',
       '',
       ...(previous.length ? [`Versions already shown to the client: ${previousForPrompt(previous)}. This is another version: compose it differently, not as a variation — a different hero composition (change at least two of: aside kind, photo background, text side, text width, hero height) and a different page structure (at least a third of the sections, and at least two, added, removed or set out differently — or one, when the business has only two sections worth showing besides how to reach it, and none beyond the hero when it has one; necessary sections such as the menu or the visit block may stay as they are). The pages must look different, not only be specified differently. Changing colours, fonts or section order alone does not count. Keep the same brand colours, fonts and verified content.`] : []),
-      'A seasonal or dated promotion with no year (a holiday, a pre-order date) must not lead the hero; it may appear lower. ' +
-      'Compose the site on a 12-column grid. Decide the hero composition (where the text sits, how wide, what sits beside it and why), the section order and each section\'s arrangement, the type scale and weight, the palette roles, the imagery roles, and how it changes on a 390px phone. Make choices that follow from this business\'s content and voice, and say why in "thesis", "hero.composition" and each section\'s "purpose". Use every service at least once. Column ranges must fit 1-12 and side-by-side parts must not overlap.',
+      'A promotion with a date or season but no year (a holiday, a pre-order date) is left out of the preview until the owner confirms it: do not lead with it or build a section on it. ' +
+      'Decide the hero composition (where the text sits: "textSide"; how wide: "textWidth"; what sits beside it and why), the section order and each section\'s arrangement, the type scale and weight, the palette roles, the imagery roles, and how it changes on a 390px phone. Roger places the columns on its 12-column grid from these choices (a centred text has nothing beside it). Make choices that follow from this business\'s content and voice, and say why in "thesis", "hero.composition" and each section\'s "purpose". A section of kind "services" lists every service: Roger fills its items from the verified list, so give it "items": [].',
+      ...(direction ? ['', directionForSpec(direction)] : []),
       '',
-      'Answer with one JSON object and nothing else (no prose, no code fence), following this contract exactly: every key is required, use null only where it is allowed, use [] for an empty list, and add no other keys. "string ≤N" is at most N characters; "int a–b" and "number a–b" are inclusive ranges; "(≤N)" is the most items a list may have.',
+      'Answer with one JSON object and nothing else (no prose, no code fence), following this contract exactly: every key is required, use null only where it is allowed, use [] for an empty list, and add no other keys. "string ≤N" is at most N characters; "int a–b" and "number a–b" are inclusive ranges; "(≤N)" is the most items a list may have. Ids, not names: "header.links" lists the "id" of sections in this spec; "header.action", "hero.actions", each section\'s "actions" and "mobile.stickyAction" use action ids from the list above. The ≤240 texts ("thesis", "hero.composition", "imagery.approach") are one or two short sentences: the limit is hard.',
       SPEC_CONTRACT,
     ].join('\n'),
   };
 }
 
-export interface DesignHooks { /** the reference job the strategy came from (recorded) */ referenceJobId?: string | null; /** versions already shown: this one must differ meaningfully from each */ previous?: DesignSpec[]; transport?: AiTransport | null; fallback?: (cat: Catalog, brief: BusinessBrief) => string; capUsd?: number; /** a concept job's ledger: the planner spends from the job's cap */ ledger?: CostLedger }
+export interface DesignHooks { /** the business's saved site manifest (existing-website businesses): the planner reads a selection of it */ manifest?: SiteManifest | null; /** a business with no website: its listing selection (listingSelection), used when there is no manifest */ selection?: PlannerSelection | null; /** the reference job the strategy came from (recorded) */ referenceJobId?: string | null; /** versions already shown: this one must differ meaningfully from each */ previous?: DesignSpec[]; transport?: AiTransport | null; fallback?: (cat: Catalog, brief: BusinessBrief) => string; capUsd?: number; /** a concept job's ledger: the planner spends from the job's cap */ ledger?: CostLedger }
 const capUsd = () => Number(process.env.STUDIO_DESIGN_CAP_USD ?? 1.5);
 
 /**
@@ -325,16 +473,30 @@ export async function generateDesignSpec(cat: Catalog, brief: BusinessBrief, str
     // the name is a record only (the open planner never uses the directions); it can never hide the reason
     fallback: { direction: (() => { try { return (hooks.fallback ?? ((c, b) => rankDirections(c, b, 1).plans[0]?.name ?? 'none'))(cat, brief); } catch { return 'none'; } })(), reason },
   });
-  if (!['verified', 'website-only'].includes(brief.identity.status)) throw new Error(`The brief's identity is ${brief.identity.status}: settle who the business is first.`);
+  if (!identityKnown(brief)) throw new Error(`The brief's identity is ${brief.identity.status}: settle who the business is first.`);
   const transport = hooks.transport !== undefined ? hooks.transport : defaultTransport();
   if (!transport) return fallbackFor('no Claude transport here', {});
   const ledger = hooks.ledger ?? new CostLedger(hooks.capUsd ?? capUsd(), id);
   const before = ledger.calls.length;
   try {
-    const r = await aiJson<DesignSpec>(specRequest(cat, brief, strategy, hooks.previous ?? []), { transport, ledger, retries: 1, validate: (d) => [...validateSpec(d, cat, brief, strategy), ...differenceProblems(d, hooks.previous ?? [])] });
-    if (!r.data) return fallbackFor(`no valid spec after ${r.attempts} attempt(s): ${r.errors.slice(0, 3).join('; ')}`, { attempts: r.attempts, rejected: r.rejected, calls: ledger.calls.slice(before) });
-    const applied = (r.data.referencesUsed ?? []).map((i) => strategy!.layoutPatterns[i]?.pattern).filter((x): x is string => !!x);
-    return { ...base, source: 'ai', spec: r.data, fallback: null, attempts: r.attempts, rejected: r.rejected, calls: ledger.calls.slice(before), ms: Date.now() - t0, references: { referenceJobId: hooks.referenceJobId ?? null, provided: !!strategy, applied } };
+    // an existing website's manifest: the planner reads a short selection of it; its award claims are never shown
+    const selection = hooks.manifest ? plannerSelection(hooks.manifest, cat) : hooks.selection ?? null;
+    const flagged = hooks.manifest ? flaggedLines(hooks.manifest, cat) : new Set<number>();
+    // the design director first: audience, main job, a grounded idea, its critique and one revision (one repair at most)
+    let direction: DesignResult['direction'] = null;
+    if (directorOn()) {
+      const d = await aiJson<Direction>(directionRequest(cat, brief, strategy, hooks.previous?.length ? previousForPrompt(hooks.previous) : null, selection, hooks.manifest?.menu.map((x) => x.id) ?? []), { transport, ledger, retries: 1, validate: (x) => [...validateDirection(x, cat, brief), ...(selection ? directionHeroProblems(x, selection) : [])], localShorten: isDirectionNote });
+      direction = { version: DIRECTOR_VERSION, data: (d.data ?? d.last)!, attempts: d.attempts, rejected: d.rejected, ...(d.shortened.length ? { shortened: d.shortened } : {}) };
+      if (!d.data) return fallbackFor(`no valid design direction after ${d.attempts} attempt(s): ${d.errors.slice(0, 3).join('; ')}`, { calls: ledger.calls.slice(before), direction });
+    }
+    // Claude's answer has no geometry and no services list: both are assembled before every check, which sees the full spec
+    // menu details only for the items the direction asked for
+    const details = hooks.manifest && direction?.data.menuNeeded?.length ? menuDetails(hooks.manifest, direction.data.menuNeeded, cat) : [];
+    const r = await aiJson<SpecAnswer>(specRequest(cat, brief, strategy, hooks.previous ?? [], direction?.data ?? null, selection, details), { transport, ledger, retries: 1, validate: (a) => { const d = assembleSpec(a, cat); return [...validateSpec(d, cat, brief, strategy), ...differenceProblems(d, hooks.previous ?? []), ...claimProblems(d, cat, flagged), ...(selection ? heroProblems(d, selection) : [])]; }, localShorten: isSpecNote });
+    if (!r.data) return fallbackFor(`no valid spec after ${r.attempts} attempt(s): ${r.errors.slice(0, 3).join('; ')}`, { attempts: r.attempts, rejected: r.rejected, calls: ledger.calls.slice(before), direction });
+    const spec = assembleSpec(r.data, cat);
+    const applied = (spec.referencesUsed ?? []).map((i) => strategy!.layoutPatterns[i]?.pattern).filter((x): x is string => !!x);
+    return { ...base, source: 'ai', spec, fallback: null, brand: brandOf(spec, brief), ...(r.shortened.length ? { shortened: r.shortened } : {}), attempts: r.attempts, rejected: r.rejected, calls: ledger.calls.slice(before), ms: Date.now() - t0, references: { referenceJobId: hooks.referenceJobId ?? null, provided: !!strategy, applied }, direction };
   } catch (e) {
     // the API refusing the request (an invalid schema, a bad key) is a fault to report at this stage, never a reason to
     // quietly show an older kind of design
@@ -449,3 +611,10 @@ export function versionFailure(r: Pick<DesignResult, 'attempts' | 'rejected' | '
 export function previousForPrompt(previous: DesignSpec[]): string {
   return previous.map((p, i) => `version ${i + 1}: ${JSON.stringify(structureOf(p))}`).join('; ');
 }
+
+/**
+ * The DesignSpec's planner-only notes: why the design is as it is, never shown on a site. An over-long one is cut
+ * locally (see aiJson). Never a visible label, a section id, a photo id or any exact choice.
+ */
+const SPEC_NOTES = new Set(['thesis', 'composition', 'purpose', 'approach', 'use']);
+export const isSpecNote = (path: (string | number)[]) => typeof path[path.length - 1] === 'string' && SPEC_NOTES.has(path[path.length - 1] as string);

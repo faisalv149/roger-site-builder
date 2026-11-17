@@ -178,9 +178,37 @@ $('#themeSel').addEventListener('change', () => {
 $('#themeSel').dispatchEvent(new Event('change'));
 
 /* ── 1. find business ── */
+/**
+ * The open flow: the name and/or address resolve to one confirmed Google place ID (POST /api/studio/resolve). A business
+ * is selected only when it is confirmed; when several match, or the input is only an address or ZIP, the user chooses.
+ */
+async function findOpen(q) {
+  state.placeId = null;
+  $('#findBtn').disabled = true;
+  $('#candidates').innerHTML = '<p class="hint">Searching Google…</p>';
+  try {
+    const r = await postJson('/api/studio/resolve', { text: q });
+    const list = r.status === 'confirmed' ? [r.candidate] : r.candidates || [];
+    const why = r.status === 'confirmed' ? '' : `<p class="hint${list.length ? '' : ' err'}">${esc(r.reason)}${list.length ? '' : '. Try the exact name and ZIP, or paste a Google Maps link.'}</p>`;
+    $('#candidates').innerHTML = why + list.map((c, i) => `<button type="button" class="cand" data-i="${i}" aria-pressed="false">
+      <img alt=""><div><b>${esc(c.name)}</b><span>${esc((c.address || '').replace(/, USA$/, ''))}</span><span>${c.rating ? `★ ${c.rating} · ${c.reviewCount} reviews` : 'No reviews'}${c.website ? ' · has website' : ' · no website'}</span></div></button>`).join('');
+    const choose = (i) => {
+      const c = list[i];
+      state.placeId = c.placeId;
+      state.placeWebsite = c.website || '';
+      $$('.cand').forEach((el) => { const on = Number(el.dataset.i) === i; el.classList.toggle('sel', on); el.setAttribute('aria-pressed', String(on)); });
+      $('#website').value = c.website || '';
+      updateEta();
+    };
+    $$('.cand').forEach((el) => el.addEventListener('click', () => choose(Number(el.dataset.i))));
+    if (r.status === 'confirmed') choose(0);
+  } catch (e) { $('#candidates').innerHTML = `<p class="hint err">${esc(e.message)}</p>`; }
+  finally { $('#findBtn').disabled = false; }
+}
 async function find() {
   const q = $('#q').value.trim();
   if (!q) return $('#q').focus();
+  if (isOpen()) return findOpen(q);
   $('#findBtn').disabled = true;
   $('#candidates').innerHTML = '<p class="hint">Searching Google…</p>';
   try {
@@ -204,6 +232,7 @@ async function find() {
 }
 $('#findBtn').addEventListener('click', find);
 $('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); find(); } });
+$('#q').addEventListener('input', () => { if (isOpen() && state.placeId) { state.placeId = null; $$('.cand').forEach((el) => { el.classList.remove('sel'); el.setAttribute('aria-pressed', 'false'); }); } });
 
 /* ── theme upload ── */
 async function takeFile(file) {
@@ -240,7 +269,99 @@ function resetBuildPane(label) {
 }
 
 const BUILD_LABEL = `${ic('sparkles')}<span>Build website</span>`;
+const OPEN_LABEL = `${ic('sparkles')}<span>Generate website</span>`;
+
+/* ── site flow: "open" (Business → Current website → Inspiration → Generate) or the staff builder (themes, options) ── */
+const isOpen = () => document.body.dataset.flow === 'open';
+function setFlow(flow, { init = false } = {}) {
+  document.body.dataset.flow = flow;
+  $$('[data-flow-mode]').forEach((b) => { const on = b.dataset.flowMode === flow; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
+  if (!$('#buildBtn').disabled) $('#buildBtn').innerHTML = flow === 'open' ? OPEN_LABEL : BUILD_LABEL;
+  try { localStorage.setItem('studio-flow', flow); } catch { /* storage off */ }
+  if (!init) updateEta();
+}
+$$('[data-flow-mode]').forEach((b) => b.addEventListener('click', () => setFlow(b.dataset.flowMode)));
+{
+  let saved = null;
+  try { saved = localStorage.getItem('studio-flow'); } catch { /* storage off */ }
+  const asked = new URLSearchParams(location.search).get('flow');
+  setFlow([asked, saved].find((f) => f === 'open' || f === 'builder') || 'builder', { init: true });
+}
+
+/** poll a Studio job until it is done (or failed), showing its stage as a live step */
+async function waitJob(url, step, t0) {
+  for (;;) {
+    const j = await api(url);
+    const running = (j.stages || []).find((s) => s.status === 'running');
+    if (j.status === 'failed') {
+      const st = (j.stages || []).find((s) => s.status === 'failed');
+      const why = `${st ? `${st.name}: ` : ''}${st?.error || j.error || 'failed'}`;
+      logStep({ step, status: 'error', note: why, ms: performance.now() - t0 });
+      throw Object.assign(new Error(`${step}: ${why}`), { logged: true });
+    }
+    if (j.status === 'done') { logStep({ step, status: 'done', ms: performance.now() - t0 }); return j; }
+    logStep({ step, status: 'start', note: running ? running.name : j.status });
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+}
+
+/** the open flow: brief → reference research (the inspiration URL, if given) → open design → site. Existing Studio endpoints only. */
+async function generateOpen() {
+  const q = $('#q').value.trim();
+  if (!state.placeId && !q) { $('#q').focus(); toast('err', 'Find a business first (step 1).'); return; }
+  // the design is made only for a confirmed Google listing: resolve the input first, and stop if the user must choose
+  if (!state.placeId) { await findOpen(q); if (!state.placeId) { toast('err', 'Choose your business in step 1 first.'); return; } }
+  const website = $('#website').value.trim() || undefined;
+  const inspiration = $('#inspiration').value.trim() || undefined;
+  const btn = $('#buildBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span><span>Generating…</span>';
+  resetBuildPane('Generating…');
+  $('#steps').hidden = false;
+  showTab('progress');
+  const t0 = performance.now();
+  let ok = false;
+  etaStart();
+  try {
+    let t = performance.now();
+    const job = await postJson('/api/studio/jobs', isOpen() ? { google: state.placeId, website } : { google: state.placeId || q, website });
+    const brief = await waitJob(`/api/studio/jobs/${job.id}`, 'Business brief', t);
+    const ref = { businessKey: brief.businessKey, revision: brief.revision };
+
+    t = performance.now();
+    if (!website && !inspiration) logStep({ step: 'Design references', status: 'done', note: 'No website: designed from the Google listing (no reference research)', ms: 0 });
+    else try {
+      const rj = await postJson('/api/studio/references', { ...ref, referenceUrl: inspiration });
+      await waitJob(`/api/studio/reference-jobs/${rj.id}`, inspiration ? 'Design references (with your inspiration site)' : 'Design references', t);
+    } catch (e) {
+      // the design still goes ahead without references; say so
+      logStep({ step: 'Design references', status: 'error', note: `${e.message} (continuing without them)` });
+    }
+
+    t = performance.now();
+    const cj = await postJson('/api/studio/concepts', { ...ref, planner: 'open' });
+    const concepts = await waitJob(`/api/studio/concept-jobs/${cj.id}`, 'Open design', t);
+    const fellBack = (concepts.stages || []).some((s) => (s.notes || []).some((n) => /open planner gave no valid spec/.test(n)));
+    if (fellBack) logStep({ step: 'Open design', status: 'error', note: 'The open planner gave no valid design; this used the fallback directions' });
+
+    t = performance.now();
+    const sj = await postJson(`/api/studio/concept-sets/${encodeURIComponent(concepts.setId)}/site`, { conceptId: 'a' });
+    const site = await waitJob(`/api/studio/site-jobs/${sj.id}`, 'Website', t);
+    ok = true;
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    const checks = (site.review?.checks || []).filter((c) => c.level === 'block' || c.level === 'review');
+    $('#stepsLabel').textContent = `Generated in ${secs}s`;
+    $('#summary').innerHTML = `<div class="sum"><div class="sum-head"><div class="sum-title"><h2>Draft ready</h2><p>Generated just now in ${esc(secs)}s · not published</p>
+      <div class="sum-actions"><a class="btn primary" href="${esc(site.siteUrl)}" target="_blank" rel="noopener">${ic('ext')}<span>Open the draft</span></a></div></div></div>
+      ${checks.length ? `<div class="callout">${ic('alert')}<ul>${checks.map((c) => `<li>${esc(c.message)}</li>`).join('')}</ul></div>` : ''}</div>`;
+  } catch (e) {
+    if (!e.logged) logStep({ step: 'Generation failed', status: 'error', note: e.message });
+    $('#stepsLabel').textContent = 'Generation failed';
+    toast('err', `Generation failed: ${esc(e.message)}`);
+  } finally { btn.disabled = false; btn.innerHTML = isOpen() ? OPEN_LABEL : BUILD_LABEL; etaStop(ok); }
+}
+
 $('#buildBtn').addEventListener('click', async () => {
+  if (isOpen()) return generateOpen();
   const q = $('#q').value.trim();
   if (!state.placeId && !q) { $('#q').focus(); toast('err', 'Find a business first (step 1).'); return; }
   if (state.themeMode === 'upload' && !state.uploaded) { $('#themeCheck').innerHTML = '<span class="err">Choose a valid theme.json first (or switch to the library).</span>'; return; }
@@ -283,7 +404,7 @@ $('#buildBtn').addEventListener('click', async () => {
     logStep({ step: 'Build failed', status: 'error', note: e.message });
     $('#stepsLabel').textContent = 'Build failed';
     toast('err', `Build failed: ${esc(e.message)}`);
-  } finally { btn.disabled = false; btn.innerHTML = BUILD_LABEL; etaStop(built); loadSites(); }
+  } finally { btn.disabled = false; btn.innerHTML = isOpen() ? OPEN_LABEL : BUILD_LABEL; etaStop(built); loadSites(); }
 });
 
 /** Live steps of a running build (server-sent events), then its result in the tabs. The job id is also the saved build's id. */
@@ -895,6 +1016,8 @@ const rogerLine = () => (eta.roger ? `<span class="say">Roger tells the owner: <
 
 async function updateEta() {
   if (eta.timer) return; // a build is running: keep showing its progress
+  // the estimate is the builder's; the open flow's stages are timed live instead
+  if (isOpen()) { $('#eta').hidden = true; return; }
   const web = $('#website').value.trim() ? 1 : 0;
   try {
     // a Studio build audits the website too; Roger's iMessage build skips that (the audit already ran in the chat)
@@ -911,7 +1034,7 @@ function etaStart() {
   const tick = () => {
     const s = Math.round((performance.now() - eta.t0) / 1000);
     $('#eta').className = 'eta running';
-    $('#eta').innerHTML = `${ic('clock')}<b>Building… ${s}s</b><span class="say">${eta.studio ? `Estimate: ${esc(eta.studio.label)}` : ''}</span>`;
+    $('#eta').innerHTML = isOpen() ? `${ic('clock')}<b>Generating… ${s}s</b><span class="say">Usually several minutes</span>` : `${ic('clock')}<b>Building… ${s}s</b><span class="say">${eta.studio ? `Estimate: ${esc(eta.studio.label)}` : ''}</span>`;
     $('#eta').hidden = false;
   };
   tick();
@@ -922,6 +1045,7 @@ function etaStop(ok) {
   clearInterval(eta.timer); eta.timer = null;
   if (!ok) { updateEta(); return; }
   const took = (performance.now() - eta.t0) / 1000;
+  if (isOpen()) { $('#eta').className = 'eta done'; $('#eta').title = ''; $('#eta').innerHTML = `${ic('check')}<b>Generated in ${took.toFixed(1)}s</b>`; return; }
   const slower = eta.studio && took > eta.studio.seconds;
   $('#eta').className = 'eta done';
   $('#eta').title = 'Future estimates include this build.';

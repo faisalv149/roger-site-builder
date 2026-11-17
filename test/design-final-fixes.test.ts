@@ -48,8 +48,8 @@ const brief = { identity: { status: 'verified' }, brand: { colors: [], fonts: []
 const L = (o: object = {}) => ({ arrangement: 'stack' as const, headingStart: 1, headingSpan: 8, contentStart: 1, contentSpan: 12, itemColumns: 1, itemStyle: 'plain' as const, density: 'regular' as const, ...o });
 /** a spec as the API returns it: every field the schema requires is present, null or empty where unused */
 const answered = (s: Spec): Spec => ({
-  ...s, hero: { backgroundPhoto: null, ...s.hero },
-  sections: s.sections.map((x) => ({ media: { placement: 'none' as const, photoIds: [] }, ...x, items: x.items.map((it) => ({ photoId: null, ...it })) })),
+  ...s, hero: { backgroundPhoto: null, ...s.hero, aside: { facts: [], ...s.hero.aside } },
+  sections: s.sections.map((x) => ({ media: { placement: 'none' as const, photoIds: [] }, facts: [], ...x, items: x.items.map((it) => ({ photoId: null, ...it })) })),
   referencesUsed: s.referencesUsed ?? [],
 });
 const sparseV1 = (): Spec => answered({
@@ -58,14 +58,14 @@ const sparseV1 = (): Spec => answered({
   grid: { maxWidth: 1100, gutter: 24, margin: 32 }, shape: { radius: 8, rule: 'hairline' },
   header: { style: 'bar', links: ['visit'], action: 'call', sticky: true },
   hero: { composition: 'c', background: 'ground', backgroundPhoto: null, minHeight: 60, verticalAlign: 'center', align: 'start', textStart: 1, textSpan: 6, headlineSize: 4, kicker: null, headline: { label: 'Corner Taqueria' }, lede: null, actions: ['call', 'dir'], aside: { kind: 'image', start: 8, span: 5, items: [], photoId: 'g1' } },
-  sections: [{ id: 'visit', purpose: 'p', kind: 'contact', heading: { label: 'Visit' }, intro: null, layout: L({ arrangement: 'side-by-side', headingSpan: 4, contentStart: 6, contentSpan: 7 }), background: 'surface', items: [{ title: { label: 'Hours' }, body: null }], actions: ['dir'] }],
+  sections: [{ id: 'visit', purpose: 'p', kind: 'contact', heading: { label: 'Visit' }, intro: null, layout: L({ arrangement: 'side-by-side', headingSpan: 4, contentStart: 6, contentSpan: 7 }), background: 'surface', items: [{ title: { label: 'Hours' }, body: null }], actions: ['dir'], facts: ['hours', 'address'] }],
   imagery: { approach: 'a', roles: [] }, mobile: { heroOrder: 'text-first', navigation: 'menu-button', stickyAction: 'call', headingScale: 0.7, itemColumns: 1 },
 });
 
 test('a Reviews band needs a real review or the verified rating; a heading and a button alone are left out', () => {
   const band = (s: Spec): Spec => ({ ...s, header: { ...s.header, links: ['visit', 'reviews'] }, sections: [...s.sections, { id: 'reviews', purpose: 'p', kind: 'statement', heading: { label: 'Reviews' }, intro: null, layout: L(), background: 'inverse', items: [], actions: ['dir'] }] });
   const withRating = renderSpec(band(sparseV1()), sparse, brief);
-  assert.match(withRating, /<section id="reviews"[\s\S]*?<p class="rating">4\.6★ from 212 Google reviews<\/p>/, 'the verified rating is real review content');
+  assert.match(withRating, /<section id="reviews"[\s\S]*?<p class="rating"[^>]*>4\.6★ from 212 Google reviews<\/p>/, 'the verified rating is real review content');
   const noRating = renderSpec(band(sparseV1()), { ...(sparse as object), rating: null } as never, brief);
   assert.ok(!noRating.includes('id="reviews"'), 'heading and button only: no band');
   assert.ok(!/href="#reviews"/.test(noRating), 'and no menu link to it');
@@ -94,9 +94,12 @@ test('a sparse business: one section is a valid page, and alternate designs are 
 
 test('within the bounded attempts, a version that stays too close is reported plainly, never retried further', async () => {
   let calls = 0;
-  const same: AiTransport = { via: 'fake', model: 'claude-sonnet-5-5', async call() { calls++; return { data: sparseV1(), usage: { via: 'fake', model: 'claude-sonnet-5-5', inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01, costBasis: 'computed' } }; } };
+  const idea = { summary: 'The storefront and the plate, side by side.', palette: { ground: 'white', surface: 'paper', ink: 'ink', accent: 'ink' }, type: { heading: 'Inter', body: 'Inter', treatment: 'Direct.' }, hero: { textSide: 'left' as const, aside: 'image', photoBehindText: false, note: 'The tacos photo beside the name.' }, sections: [{ content: 'how to visit', arrangement: 'side-by-side', itemStyle: 'plain', background: 'surface', media: 'none' }], boldElement: 'The photo.', alignment: 'left' as const };
+  const direction = { audience: 'People nearby deciding where to eat.', mainJob: { text: 'Get them to visit.', action: 'dir' }, characteristic: { text: 'Its tacos and its storefront.', evidence: [{ kind: 'photo', id: 'g1' }, { kind: 'rating', id: 'google' }] }, idea, critique: [], revised: null, changes: null };
+  const same: AiTransport = { via: 'fake', model: 'claude-sonnet-5-5', async call(req) { if (req.stage === 'design:direction') return { data: direction, usage: { via: 'fake', model: 'claude-sonnet-5-5', inputTokens: 1000, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.005, costBasis: 'computed' } }; calls++; return { data: (await import('./helpers/northline-spec.js')).answer(sparseV1()), usage: { via: 'fake', model: 'claude-sonnet-5-5', inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.01, costBasis: 'computed' } }; } };
   const r = await D.generateDesignSpec(sparse, { ...(brief as object), businessKey: 'k', revision: 1 } as never, null, { transport: same, previous: [sparseV1()], fallback: () => 'none' });
-  assert.equal(calls, 2, 'one attempt and one repair, no more');
+  assert.equal(r.direction?.attempts, 1, 'the direction was accepted first time');
+  assert.equal(calls, 2, 'one spec attempt and one repair, no more');
   assert.equal(r.spec, null);
   assert.match(D.versionFailure(r), /^no visibly different version within 2 attempt\(s\): hero: too close to version 1/);
   assert.match(D.versionFailure({ attempts: 1, rejected: [], fallback: { direction: 'x', reason: 'generation failed: API down' } }), /^no valid version within 1 attempt\(s\): generation failed/);
