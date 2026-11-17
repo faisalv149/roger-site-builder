@@ -77,7 +77,9 @@ export function newCustomRun(i: { placeId: string; name: string; website?: strin
 export const customBusy = (r: CustomRun) => r.stage === 'research' || r.versions.some((v) => v.status === 'generating' || v.status === 'review');
 export const versionInFlight = (r: CustomRun) => r.versions.find((v) => v.status === 'generating' || v.status === 'review');
 /** the customer's link to a version (served only after staff sent it: src/server.ts /v/) */
-export const customerLink = (jobId: string, slug = 'home') => `${config.publicOrigin}/v/${jobId}${slug === 'home' ? '' : `/${slug}`}`;
+/** where customer links point: the public HTTPS origin; on a local machine outside the beta (the simulator only, never a real customer) the local server */
+const linkOrigin = () => config.publicOrigin || (process.env.VERCEL || config.beta.enabled ? '' : config.publicBaseUrl);
+export const customerLink = (jobId: string, slug = 'home') => `${linkOrigin()}/v/${jobId}${slug === 'home' ? '' : `/${slug}`}`;
 
 // research spend: Claude calls made while a run's research job is running (the research job has no ledger of its own)
 const calls: { at: number; costUsd: number }[] = [];
@@ -97,6 +99,13 @@ export function advanceCustom(run: CustomRun): Promise<CustomRun> {
 async function step(run: CustomRun): Promise<CustomRun> {
   if (run.stage === 'research') await research(run);
   if (run.stage === 'versions') for (const v of run.versions.filter((x) => x.status === 'generating')) await generate(run, v);
+  // automatic delivery: a version that passed every blocking check goes to the customer at once (staff notes, such as
+  // contrast or a missing listing fact, are fixed over time and never hold the link back)
+  if (run.stage === 'versions') for (const v of run.versions.filter((x) => x.status === 'review')) {
+    const r = await staffSend(run, v.n, 'automatic');
+    const why = `not sent automatically: ${r.reason}`;
+    if (!r.sent && r.reason !== 'already sent' && !(v.note ?? '').includes(why)) v.note = `${v.note ? `${v.note}; ` : ''}${why}`.slice(-600);
+  }
   return run;
 }
 
@@ -313,7 +322,7 @@ export async function staffSend(run: CustomRun, n: number, reviewer: string, not
   if (!v) return { sent: false, reason: `no version ${n}` };
   if (v.status === 'sent') return { sent: false, reason: 'already sent', url: v.url };
   if (v.status !== 'review') return { sent: false, reason: `version ${n} is ${v.status}, not waiting for review` };
-  if (!config.publicOrigin) return { sent: false, reason: 'no public HTTPS origin is configured (ROGER_PUBLIC_ORIGIN): a customer link is never sent from localhost or an internal address' };
+  if (!linkOrigin()) return { sent: false, reason: 'no public HTTPS origin is configured (ROGER_PUBLIC_ORIGIN): a customer link is never sent from localhost or an internal address' };
   const job = await getFrontendJob(v.jobId!);
   const blocking = job ? blockingProblems(job) : ['the generation job is missing'];
   if (blocking.length) return { sent: false, reason: `it cannot be sent: ${blocking.join('; ')}` };
@@ -339,6 +348,7 @@ export async function staffRecheck(run: CustomRun, n: number): Promise<{ ok: boo
   const blocking = blockingProblems(job);
   if (blocking.length) { v.error = blocking.join('; '); return { ok: false, reason: `still blocked: ${v.error}` }; }
   v.status = 'review'; v.error = undefined; v.note = `checks re-run ${now()} after: ${v.note ?? 'a failed check'}`;
+  await staffSend(run, n, 'automatic'); // nothing blocks it now: the customer gets the link at once
   return { ok: true };
 }
 /**

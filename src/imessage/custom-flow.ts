@@ -259,9 +259,19 @@ export async function respondCustom(msg: string, s: CustomSession): Promise<Cust
     }
     const sp = await splitBusiness(whole);
     if (s.state === 'need-location') {
-      // the answer to "where is it?": the name is kept. A reply that gives the name again with the place uses the
-      // place; anything else is the location as written (a street, a neighbourhood)
-      s.location = sp.location && nameSimilarity(sp.name, s.query!) >= 0.6 ? sp.location : whole;
+      // the answer to "where is it?" that is not a place or an address. The name again with the place: the place.
+      if (sp.location && nameSimilarity(sp.name, s.query!) >= 0.6) { s.location = sp.location; return find(s); }
+      // a place with more to it ("Lahore, Pakistan 56400"): the whole reply is the location
+      if (sp.location && (ZIP_RE.test(whole) || await discovery.isPlace(sp.name).catch(() => false))) { s.location = whole; return find(s); }
+      // otherwise the customer is most likely correcting the business's name ("Clip Craft Studio By Ali" after
+      // "hair salon Paragon City"): it is looked up as the name (with its place, if it gives one)
+      const earlier = s.query;
+      s.query = sp.name; s.location = sp.location;
+      if (s.location) return find(s);
+      const list = await pickList(s);
+      if (list) return list;
+      // no listing has that name: it was the location after all (a neighbourhood, or a town Google didn't recognise)
+      s.query = earlier; s.location = whole; s.state = 'need-location';
       return find(s);
     }
     if (!sp.name || ZIP_RE.test(sp.name) && sp.name.replace(ZIP_RE, '').trim().length < 2) { s.state = 'need-business'; return [{ text: `That looks like a place, not a business name. ${ASK_BUSINESS}` }]; }

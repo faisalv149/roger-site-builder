@@ -427,3 +427,29 @@ test('a name alone with no listing like it: Roger asks where it is (nothing unre
     assert.match(texts(await say(from, 'Crescent Pharmacy')), /^Thanks! Where is Crescent Pharmacy\? Send the city and state, or the ZIP code/);
   } finally { google = undefined; }
 });
+
+test('asked where it is, the customer sends the real name instead: it is looked up as the name; a place Google does not know stays the location', async () => {
+  const SALON = P('pSalon', 'Clip Craft Studio By Ali', 'Plaza 1, Broadway Commercial, Paragon City, Lahore, 54000, Pakistan', ['barber_shop']);
+  const OTHER = P('pOther', 'Bright Locks Salon', 'Plaza 9, Paragon City, Lahore, Pakistan', ['beauty_salon']);
+  // a description ("hair salon paragon city") matches no listing's name; the real name matches one
+  google = (i) => (/clip craft/i.test(i.name ?? '') ? [SALON] : [OTHER, SALON]);
+  try {
+    const from = convo();
+    await say(from, 'Hi');
+    assert.match(texts(await say(from, 'Hair salon Paragon city')), /^Thanks! Where is Hair salon Paragon city\?/);
+    const n = asked.length;
+    const r = await say(from, 'Clip Craft Studio By Ali');
+    assert.deepEqual(asked.slice(n), [{ name: 'Clip Craft Studio By Ali' }], 'looked up as the name, not as "Hair salon Paragon city" located at it');
+    assert.match(texts(r), /^I found this listing on Google\. Is it yours\?\nClip Craft Studio By Ali\nPlaza 1, Broadway Commercial/);
+    assert.deepEqual(cardsOf(r).map((c) => c.choice), ["Yes, that's mine"]);
+    // a town Google doesn't recognise (no listing has it as a name): still the location of the name already given
+    google = () => [SALON];
+    const other = convo();
+    await say(other, 'Hi');
+    await say(other, 'Clip Craft Studio By Ali');
+    await say(other, 'None of these');
+    const m = asked.length;
+    await say(other, 'Paragn');
+    assert.deepEqual(asked.slice(m), [{ name: 'Paragn' }, { name: 'Clip Craft Studio By Ali', address: 'Paragn' }], 'tried as a name, then taken as the location');
+  } finally { google = undefined; }
+});

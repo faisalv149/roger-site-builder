@@ -102,3 +102,20 @@ test('a server restart during the homepage starts it again once; a second one is
     assert.match(r.versions[0].error ?? '', /restarted during the homepage again \(job fe_restart1\): not started again automatically/);
   } finally { Object.assign(ci.intakeDeps, saved); }
 });
+
+test('automatic delivery: a version that passes every blocking check is sent to the customer at once, with no staff step', async () => {
+  await studioDocs.put('studio-frontend-jobs', 'fe_autoautoautoauto', job('fe_autoautoautoauto'));
+  const r = run(); r.versions.push({ n: 1, requestedAt: 'x', status: 'generating', jobId: 'fe_autoautoautoauto' });
+  await ci.advanceCustom(r);
+  assert.equal(r.versions[0].status, 'sent');
+  assert.equal(r.versions[0].reviewer, 'automatic');
+  assert.match(r.versions[0].url!, /^https:\/\/beta\.example\.test\/v\/fe_autoautoautoauto$/);
+  const m = ci.customMessages(r);
+  assert.equal(m.length, 1, 'one message: the link'); assert.equal(m[0].url, r.versions[0].url);
+  // a version with a blocking problem is never sent
+  await studioDocs.put('studio-frontend-jobs', 'fe_blockblockblock1', job('fe_blockblockblock1', { site: undefined, pages: [] }));
+  const b = run(); b.versions.push({ n: 1, requestedAt: 'x', status: 'generating', jobId: 'fe_blockblockblock1' });
+  await ci.advanceCustom(b);
+  assert.equal(b.versions[0].status, 'failed');
+  assert.equal(await studioDocs.get('customer-links', 'fe_blockblockblock1'), undefined);
+});
