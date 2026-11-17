@@ -28,6 +28,9 @@ export interface FrontendJob {
   checks: { static: 'pending' | 'passed'; browser: 'pending' | 'passed' | 'failed'; copy: 'owner-review-required'; publication: 'disabled' };
   /** the pipeline revision this version was made under (rules and rendering); absent = 1, the original */
   rev?: number;
+  /** listing photos (placeId#n) whose credit is shown as a caption below the photo: the design's frame hid the corner
+   * credit (a round frame's clip, an overlay), found by the rendered review and repaired without any new generation */
+  creditsOutside?: string[];
   /** a version never sent, rendered again under a later revision's layout guards (its code and copy unchanged) */
   rerendered?: { from: number; to: number; at: string };
   /** photos kept off this version by the media gate or by staff, each with its rule and reason; never shown again */
@@ -116,10 +119,30 @@ export function deliveryOf(job: Pick<FrontendJob, 'withheldPhotos' | 'review' | 
   return { auto: !reasons.length, reasons };
 }
 /** the standard rendered-page review of a finished version, recorded on it with the delivery decision */
+/** the photos (placeId#n) whose only problem in a review is their credit (clipped, covered, outside, hidden by its frame) */
+export function creditOnlyFailures(review: SiteReview): string[] {
+  const credit = new Set<string>(), other = new Set<string>();
+  for (const p of review.pages) for (const problem of p.problems) {
+    const m = problem.match(/^photo (\S+): (.*)$/);
+    if (!m) continue;
+    (/^credit (is clipped|is covered|is outside|is hidden|has no size)/.test(m[2]) ? credit : other).add(m[1]);
+  }
+  return [...credit].filter((ref) => !other.has(ref));
+}
 export async function reviewVersion(job: FrontendJob, opts: { offline?: boolean; fill?: Parameters<typeof frontendPreview>[2] } = {}): Promise<FrontendJob> {
   const slugs = ['home', ...(job.site ? (job.pages ?? []).map((p) => p.slug) : [])];
-  const pages = await Promise.all(slugs.map(async (slug) => ({ slug, html: await frontendPreview(job, slug, opts.fill) })));
-  job.review = await reviewPages(pages, { version: job.id, offline: opts.offline, links: slugs.map((slug) => pagePath(job.id, slug)) });
+  const run = async () => {
+    const pages = await Promise.all(slugs.map(async (slug) => ({ slug, html: await frontendPreview(job, slug, opts.fill) })));
+    return reviewPages(pages, { version: job.id, offline: opts.offline, links: slugs.map((slug) => pagePath(job.id, slug)) });
+  };
+  job.review = await run();
+  // a credit the design's frame hides (a round frame cuts the corner it sits in; an overlay covers it): that photo's
+  // credit becomes a caption just below the photo, and the checks run once more. No new generation, any design.
+  const moved = job.review.ran && !job.review.pass ? creditOnlyFailures(job.review).filter((ref) => !job.creditsOutside?.includes(ref)) : [];
+  if (moved.length) {
+    job.creditsOutside = [...(job.creditsOutside ?? []), ...moved];
+    job.review = await run();
+  }
   job.checks.browser = !job.review.ran ? 'pending' : job.review.pass ? 'passed' : 'failed';
   job.delivery = deliveryOf(job);
   return job;
@@ -518,9 +541,9 @@ function runResume(job: FrontendJob, earlier: string | undefined, transport: AiT
 export async function frontendPreview(job: FrontendJob, slug = 'home', fill: Parameters<typeof fillListingPhotos>[1] = {}, /** where page links go (default: the staff preview links) */ href: (slug: string) => string = (s) => pagePath(job.id, s)): Promise<string> {
   if (!job.code || job.status !== 'needs-review') throw new Error('No compiled frontend preview for this job.');
   // a homepage-only job made before full sites keeps its single page
-  if (!job.pages?.length || !job.site) { if (slug !== 'home') throw new Error('No such page.'); return fillListingPhotos(compilePage(job.code, job.input, { rev: revOf(job) }), { ...fill, page: job.previewUrl }); }
+  if (!job.pages?.length || !job.site) { if (slug !== 'home') throw new Error('No such page.'); return fillListingPhotos(compilePage(job.code, job.input, { rev: revOf(job), creditsOutside: job.creditsOutside }), { ...fill, page: job.previewUrl }); }
   if (slug !== 'home' && !job.pages.some((p) => p.slug === slug)) throw new Error('No such page.');
-  const pages = compileSite(job.code, job.site, job.input, job.pages, { pageHref: href, edits: job.edits, version: job.id, rev: revOf(job) });
+  const pages = compileSite(job.code, job.site, job.input, job.pages, { pageHref: href, edits: job.edits, version: job.id, rev: revOf(job), creditsOutside: job.creditsOutside });
   return fillListingPhotos(pages[slug], { ...fill, page: href(slug) });
 }
 

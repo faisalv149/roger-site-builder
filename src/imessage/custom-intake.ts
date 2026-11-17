@@ -244,6 +244,7 @@ export function versionChecks(job: FrontendJob) {
     blocking: blockingProblems(job),
     staff: [
       ...presendNotes(job),
+      ...(job.creditsOutside?.length ? [`layout: the photo credit of ${job.creditsOutside.length} photo(s) is shown just below the photo (the design's frame hid the corner credit): ${job.creditsOutside.join(', ')}`] : []),
       ...(job.withheldPhotos ?? []).map((w) => `${w.action === 'review' ? 'photo needs staff review' : 'photo withheld'}: ${w.id} (${w.seen ?? 'no description'}): ${w.reason}`),
       ...(job.review?.notes ?? []).map((n) => `accessibility: ${n}`),
       ...job.input.notes.map((n) => `research note: ${n}`),

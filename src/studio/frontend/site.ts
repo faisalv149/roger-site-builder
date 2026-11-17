@@ -88,7 +88,7 @@ export async function generateSitePages(input: FrontendInput, home: FrontendCode
  * Every page of a version, compiled: the homepage and each inner page with the shared CSS, page links resolved with
  * pageHref, the owner's edits applied by key, and the version stamped on each page.
  */
-export function compileSite(home: FrontendCode, site: SiteCode | undefined, input: FrontendInput, plan: SitePage[] | undefined, opts: Pick<CompileOptions, 'pageHref' | 'edits' | 'version' | 'rev'> = {}): Record<string, string> {
+export function compileSite(home: FrontendCode, site: SiteCode | undefined, input: FrontendInput, plan: SitePage[] | undefined, opts: Pick<CompileOptions, 'pageHref' | 'edits' | 'version' | 'rev' | 'creditsOutside'> = {}): Record<string, string> {
   const pages = plan?.length ? plan : undefined;
   const out: Record<string, string> = { home: compilePage(home, input, { ...opts, ...(pages ? { pages } : {}), page: 'home' }) };
   for (const page of pages ?? []) {

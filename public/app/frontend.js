@@ -60,7 +60,7 @@
     if (r.status === 'confirmed' && r.via === 'place-id') return 'The link names this listing. Check it, then select it.';
     if (r.status === 'need-name') return `That looks like an address, not a business name. ${n} business${n === 1 ? '' : 'es'} found there: select the right one, or search by its name.`;
     if (r.status === 'confirmed') return 'One listing matches. Check the name and full address, then select it.';
-    return `${n} listings found. None is chosen for you: select the right one.`;
+    return `${n} listing${n === 1 ? "" : "s"} found. None is chosen for you: select the right one.`;
   }
   $('find-form').addEventListener('submit', async (e) => {
     e.preventDefault();

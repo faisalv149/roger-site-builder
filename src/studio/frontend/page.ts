@@ -77,6 +77,8 @@ export interface CompileOptions extends CheckOptions {
   /** this version's identity, stamped on the page */
   version?: string;
   title?: string;
+  /** listing photos (placeId#n) whose credit is a caption below the photo, outside its frame (set by the review) */
+  creditsOutside?: string[];
 }
 
 /** CSS that may not reach a page: external loads, an escape from the style element, or the old IE behavior property */
@@ -230,6 +232,8 @@ export const PHOTO_CSS_REV2 = `:where(img[data-photo]){height:auto;max-width:100
 :where(.roger-fill){display:contents}
 :where(.roger-fill)>:where(img){height:100%}
 :where(:has(> .roger-fill)){position:relative}`;
+/** a credit moved below its photo (CompileOptions.creditsOutside): in the flow, under the frame, same look as in the corner */
+export const CREDIT_BELOW_CSS = '.gcredit.gcredit--below{position:relative;right:auto;bottom:auto;left:auto;top:auto;display:block;width:fit-content;max-width:100%;margin:6px auto 0;z-index:2147483000}';
 export function compilePage(code: FrontendCode, input: FrontendInput, opts: CompileOptions = {}): string {
   const errors = [...checkCode(code, input, opts), ...(opts.extraCss ? cssProblems(opts.extraCss) : []), ...(opts.edits ? editProblems(opts.edits) : [])];
   if (errors.length) throw new Error(errors.join('; '));
@@ -256,6 +260,7 @@ export function compilePage(code: FrontendCode, input: FrontendInput, opts: Comp
     $(el).attr('src', logo.url).attr('alt', input.business.name);
     if (logo.width && logo.height) $(el).attr('width', String(logo.width)).attr('height', String(logo.height));
   });
+  let creditIds = 0;
   $('img[data-photo]').each((_, el) => {
     const img = $(el), p = input.photos.find((p) => p.id === img.attr('data-photo'))!;
     img.attr('alt', p.seen || p.alt || `Photo of ${input.business.name}`).attr('width', String(p.width)).attr('height', String(p.height));
@@ -265,8 +270,16 @@ export function compilePage(code: FrontendCode, input: FrontendInput, opts: Comp
       // revision 2: a photo alone in its frame (the frame holds nothing else) gets a wrapper that does not take part in
       // layout, so the img is sized by the frame exactly as its CSS intends and the credit is placed in that frame
       const alone = (opts.rev ?? PIPELINE_REV) >= 2 && img.siblings().length === 0 && !img.parent().contents().toArray().some((n) => n.type === 'text' && !!(n as unknown as { data: string }).data.trim());
+      const frame = img.parent();
       img.wrap(alone ? '<span class="roger-photo roger-fill"></span>' : '<span class="roger-photo"></span>');
-      img.after(`<span class="gcredit" data-gcredit="${listing.placeId}#${listing.n}"></span>`);
+      const ref = `${listing.placeId}#${listing.n}`;
+      if (opts.creditsOutside?.includes(ref)) {
+        // this credit could not be seen in the photo's corner (a round frame's clip, an overlay): it is a caption just
+        // below the photo instead, outside the frame that clipped it, linked to its photo by id
+        const cid = `gc${++creditIds}`;
+        img.attr('data-gcid', cid);
+        (alone && frame.length ? frame : img.parent()).after(`<span class="gcredit gcredit--below" data-gcredit="${ref}" data-gcredit-for="${cid}"></span>`);
+      } else img.after(`<span class="gcredit" data-gcredit="${ref}"></span>`);
     } else {
       if (!/^https:\/\//i.test(p.url)) throw new Error(`Photo ${p.id} needs a secure source URL.`);
       img.attr('src', p.url);
@@ -274,5 +287,5 @@ export function compilePage(code: FrontendCode, input: FrontendInput, opts: Comp
   });
   const rev2 = (opts.rev ?? PIPELINE_REV) >= 2;
   const fontLink = code.fonts.length ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?${code.fonts.map((f) => `family=${encodeURIComponent(f)}:wght@400;500;600;700;800`).join('&amp;')}&amp;display=swap">` : '';
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${esc(input.business.name)}${opts.title ? ` — ${esc(opts.title)}` : ''} — Design preview</title>${opts.version ? `<meta name="roger-version" content="${esc(opts.version)}">` : ''}${fontLink}<style>${rev2 ? `${PHOTO_CSS_REV2}\n` : ''}${rev4 ? `${PAGE_CLIP}\n` : ''}${homeCss.css}${extraCss ? `\n${extraCss}` : ''}\n${rev2 ? '' : '.roger-photo{position:relative;display:block}.roger-photo>img{display:block;width:100%;height:100%;object-fit:cover}'}${LISTING_CSS}\n[data-fact="hours"]{white-space:pre-line}</style></head><body>${$.html()}</body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>${esc(input.business.name)}${opts.title ? ` — ${esc(opts.title)}` : ''} — Design preview</title>${opts.version ? `<meta name="roger-version" content="${esc(opts.version)}">` : ''}${fontLink}<style>${rev2 ? `${PHOTO_CSS_REV2}\n` : ''}${rev4 ? `${PAGE_CLIP}\n` : ''}${homeCss.css}${extraCss ? `\n${extraCss}` : ''}\n${rev2 ? '' : '.roger-photo{position:relative;display:block}.roger-photo>img{display:block;width:100%;height:100%;object-fit:cover}'}${LISTING_CSS}${creditIds ? `\n${CREDIT_BELOW_CSS}` : ''}\n[data-fact="hours"]{white-space:pre-line}</style></head><body>${$.html()}</body></html>`;
 }

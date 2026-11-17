@@ -190,7 +190,9 @@ export async function fillListingPhotos(html: string, deps: { photos?: typeof li
       v = await verifyLivePhoto(listings.get(at.placeId), ref, { ...deps, uri: deps.uri ?? livePhotoUri });
       verdicts.set(key, v);
     }
-    const credit = img.siblings('[data-gcredit]');
+    // its credit: beside it in its frame, or (moved below the photo) linked to it by id
+    const cid = img.attr('data-gcid');
+    const credit = cid ? $(`[data-gcredit-for="${cid.replace(/[^a-z0-9]/gi, '')}"]`) : img.siblings('[data-gcredit]');
     if (!v.ok) {
       recordPhotoOmission(ref, v.reason, deps.page ?? 'a concept page');
       if (img.hasClass('hero-bg')) {

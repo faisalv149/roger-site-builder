@@ -27,7 +27,9 @@ export const MEASURE = async () => {
   const imgs = Array.from(document.querySelectorAll<HTMLImageElement>('img[data-gphoto]'));
   for (const img of imgs) {
     const photo = img.dataset.gphoto!;
-    const credit = img.parentElement?.querySelector<HTMLElement>(':scope > .gcredit') ?? null;
+    // its credit: in its frame, or a caption moved below the photo (linked by id) when the frame hid it
+    const linked = img.dataset.gcid ? document.querySelector<HTMLElement>(`[data-gcredit-for="${img.dataset.gcid}"]`) : null;
+    const credit = linked ?? img.parentElement?.querySelector<HTMLElement>(':scope > .gcredit') ?? null;
     if (!credit || !(credit.textContent ?? '').trim()) { out.push({ photo, problem: 'has no credit' }); continue; }
     // bring the credit to the middle of the window by scrolling the window only: scrollIntoView would also scroll a
     // clipping frame (overflow:hidden boxes scroll programmatically) and reveal the very credit the frame hides
@@ -50,7 +52,17 @@ export const MEASURE = async () => {
     box = { ...box, l: Math.max(box.l, 0), r: Math.min(box.r, innerWidth) };
     if (box.r - box.l < 2 || box.b - box.t < 2) { out.push({ photo, problem: 'the photo itself is not visible' }); continue; }
     const tol = 1.5;
-    if (c.left < box.l - tol || c.top < box.t - tol || c.right > box.r + tol || c.bottom > box.b + tol) {
+    if (linked) {
+      // a caption below the photo: right under its visible frame, beside it horizontally, and not itself cut by any box
+      let cut = '';
+      for (let a = credit.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+        if (!clips(a)) continue;
+        const r = a.getBoundingClientRect();
+        if (c.left < r.left - tol || c.top < r.top - tol || c.right > r.right + tol || c.bottom > r.bottom + tol) { cut = label(a); break; }
+      }
+      if (cut || c.left < -tol || c.right > innerWidth + tol) { out.push({ photo, problem: `credit below the photo is clipped${cut ? ` (cut by ${cut})` : ''}` }); continue; }
+      if (c.top < box.b - tol || c.top > box.b + 48 || c.right <= box.l || c.left >= box.r) { out.push({ photo, problem: 'credit below the photo is not directly under it' }); continue; }
+    } else if (c.left < box.l - tol || c.top < box.t - tol || c.right > box.r + tol || c.bottom > box.b + tol) {
       const inside = c.right > box.l && c.left < box.r && c.bottom > box.t && c.top < box.b;
       out.push({ photo, problem: inside ? `credit is clipped at the edge of the photo's visible frame${cutBy ? ` (cut by ${cutBy})` : ''}` : `credit is outside the photo's visible frame${cutBy ? ` (frame cut by ${cutBy})` : ''}` });
       continue;

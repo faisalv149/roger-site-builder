@@ -164,3 +164,55 @@ test('a version never sent is checked again under revision 4 (no new generation)
     assert.equal((await getFrontendJob('fe_layoutrev3b'))?.rev, 3);
   } finally { if (was === undefined) delete process.env.ROGER_WORKER; else process.env.ROGER_WORKER = was; }
 });
+
+// ── a photo credit the design's frame hides: moved below that photo by the review's one repair (no generation) ──
+const mirrors = (): FrontendCode => ({ idea: 'The station mirror after dark: photos in round and oval mirror frames.', fonts: [], css: `
+body{margin:0;font-family:system-ui}
+.row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2rem;padding:2rem;max-width:1100px;margin:0 auto}
+.mirror{margin:0;position:relative;padding:18px;background:#222;border-radius:999px 999px 22px 22px}
+.frame{position:relative;z-index:1;overflow:hidden;border-radius:999px 999px 10px 10px;background:#000;aspect-ratio:3/4}
+.mirror--round,.frame--round{border-radius:50%}.frame--round{aspect-ratio:1}
+.mirror--oval,.frame--oval{border-radius:50%}
+.badge-wrap{position:relative}.badge{position:absolute;inset:auto 0 0 0;height:44px;background:#d8692e;z-index:5}
+.ph img{width:100%;height:100%;object-fit:cover}`,
+  html: `<header><span data-fact="name"></span></header><main><h1>Ridge Line Roofing</h1><div class="row">
+<figure class="mirror mirror--round"><div class="frame frame--round"><img data-photo="g1"></div></figure>
+<figure class="mirror mirror--oval"><div class="frame frame--oval"><img data-photo="g2"></div></figure>
+<figure class="mirror"><div class="frame"><img data-photo="g3"></div></figure>
+<div class="badge-wrap"><div class="ph frame"><img data-photo="g4"></div><div class="badge" aria-hidden="true"></div></div>
+</div><p data-fact="address"></p><p data-fact="hours"></p><p data-fact="rating"></p><a data-action="dir">Directions</a></main>` });
+
+test('a credit a round or oval frame cuts off (or an overlay covers) fails; only that photo\'s credit moves below it, and the page passes', { skip: screenshotsAvailable() ? false : 'no browser here' }, async () => {
+  const { creditOnlyFailures } = await import('../src/studio/frontend/jobs.js');
+  const browser = await launchBrowser();
+  try {
+    // the review at both widths, as a version's checks run
+    const before = await reviewPages([{ slug: 'home', html: filled(compilePage(mirrors(), input)) }], { offline: true, browser, widths: [1440, 390] });
+    const desktop = before.pages.find((p) => p.width === 1440)!.problems.join('\n');
+    assert.match(desktop, /PLACEtest#1: credit is (covered|clipped)/, 'the round frame cuts the corner credit');
+    assert.match(desktop, /PLACEtest#4: credit is covered by div\.badge/, 'an overlay covers it');
+    assert.doesNotMatch(desktop, /PLACEtest#3:/, 'at desktop width the arched frame keeps its corner credit');
+    const refs = creditOnlyFailures(before);
+    assert.ok(refs.includes('PLACEtest#1') && refs.includes('PLACEtest#4'), refs.join());
+    // the repair: those credits only, as captions below their photos (the other credits stay in their corners)
+    const html = compilePage(mirrors(), input, { creditsOutside: refs });
+    const $ = load(html);
+    for (const ref of refs) {
+      const credit = $(`.gcredit--below[data-gcredit="${ref}"]`);
+      assert.equal(credit.length, 1, ref);
+      assert.equal($(`img[data-gcid="${credit.attr('data-gcredit-for')}"]`).attr('data-gphoto'), ref, 'linked to its photo');
+      assert.ok(credit.prev().hasClass('frame'), 'just after the frame that clipped it');
+    }
+    // a photo whose credit was never hidden keeps it in its frame
+    assert.equal(load(compilePage(mirrors(), input, { creditsOutside: ['PLACEtest#1'] }))('.gcredit:not(.gcredit--below)[data-gcredit="PLACEtest#3"]').parent().hasClass('roger-photo'), true, 'an unaffected credit stays in its frame');
+    const after = await reviewPages([{ slug: 'home', html: filled(html) }], { offline: true, browser, widths: [1440, 390] });
+    assert.deepEqual(after.problems, [], after.problems.join('\n'));
+    for (const p of after.pages) assert.equal(p.credits.visible, p.credits.required);
+  } finally { await browser.close(); }
+});
+
+test('a page with no moved credit compiles exactly as before (no caption style, no credit links)', () => {
+  const plain = compilePage(roofing(), input, { pages: plan });
+  assert.ok(!plain.includes('gcredit--below') && !plain.includes('data-gcid'));
+  assert.equal(plain, compilePage(roofing(), input, { pages: plan, creditsOutside: [] }));
+});
