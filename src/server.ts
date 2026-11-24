@@ -12,9 +12,13 @@ import { lookupCandidates } from './sources/resolve.js';
 import { confirmBusinessCard } from './imessage/cards.js';
 import { runAudit, type BuildInput } from './pipeline.js';
 import { getJob, queueDepth, startBuild, waitForJob } from './jobs.js';
-import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead, recordLeadDelivery } from './store.js';
+import { deleteBuildsForSlug, deleteFailedBuild, deletePublish, getBuild, getConversation, getPublish, listBuilds, listConversations, listLeads, saveLead, recordLeadDelivery, studioDocs } from './store.js';
+import { getFrontendJob, frontendPreview, recoverInterruptedFrontendJobs } from './studio/frontend/jobs.js';
+import { bindConversation, createInvite, inviteForToken, inviteOfConversation, isStaff, listInvites, revokeInvite } from './beta.js';
+import { advanceAllCustom } from './imessage/flow.js';
+import { launchBrowser } from './render/og.js';
 import { deliverLead, ownerEmailOf, configuredChannels } from './lead-delivery.js';
-import { handleInbound, isPending, resetSession } from './imessage/flow.js';
+import { handleInbound, isPending, pollIntake, resetSession } from './imessage/flow.js';
 import { estimateBuild } from './estimate.js';
 import { normalizeLead } from './leads.js';
 import { personaliseState, startRefinement } from './design/refine.js';
@@ -24,12 +28,14 @@ import { findDraft, putDraft } from './drafts.js';
 import { publishReadiness } from './design/content.js';
 import { deleteOut, readOut } from './files.js';
 import { remote } from './remote.js';
+import { buildInfo, versionLabel } from './version.js';
+import { pinnedPath } from './site-pins.js';
 import { ownerRoutes, studioDraftRoutes } from './owner-api.js';
 import { studioRoutes } from './studio/routes.js';
 import { resumeInterruptedJobs } from './studio/jobs.js';
 import { shareRoutes } from './studio/concepts/share.js';
 import { fillListingPhotos } from './studio/concepts/listing-photos.js';
-import { fillGoogleContent, googlePhotoRoute } from './sources/google-live.js';
+import { fillGoogleContent, googleCoverRoute, googlePhotoRoute } from './sources/google-live.js';
 import { claudeEnabled, claudeKeyStatus, claudeToolMode, claudeVia } from './content/claude.js';
 
 const app = express();
@@ -43,6 +49,19 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 
+// ── the beta (ROGER_BETA=1): only the custom flow is served. The old Studio (theme builder, concepts, owner review,
+// the normal simulator) and every API behind it are off; /app/ is the beta's staff app (reviews and invites). The normal
+// client path is unchanged everywhere the beta switch is off.
+const BETA_PATHS = /^\/$|^\/app\/?$|^\/app\/(index\.html|imessage-reviews\.(html|js|css)|frontend\.(html|js|css))$|^\/imessage\/(index\.html|imessage\.(js|css))?$|^\/v\/|^\/api\/health$|^\/api\/version$|^\/app\/version\.js$|^\/api\/staff\/me$|^\/api\/imessage\/inbound$|^\/api\/conversations\/[^/]+$|^\/api\/studio\/(imessage-reviews|beta-invites)(\/|$)|^\/api\/studio\/(jobs|resolve|businesses|frontend-jobs)$|^\/api\/studio\/jobs\/[A-Za-z0-9_-]+$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}(\/resume|\/review)?$|^\/api\/studio\/briefs\/[A-Za-z0-9_.-]+$|^\/api\/audit$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}\/preview(\/[a-z0-9-]+)?$|^\/gphoto\/|^\/cards\/|^\/api\/splash\/|^\/api\/studio\/(splash|splash-leads)(\/|$)|^\/app\/leads\.(html|js)$|^\/robots\.txt$|^\/favicon/;
+if (config.beta.enabled) app.use((req, res, next) => {
+  if (!BETA_PATHS.test(req.path)) return res.status(404).type('text/plain').send('Not part of the Roger beta.');
+  if (req.path === '/' || req.path === '/app' || req.path === '/app/' || req.path === '/app/index.html') return res.redirect(302, '/app/frontend.html');
+  // the normal (paid) builder flow is not part of the beta: only the custom intake
+  if (req.path === '/api/imessage/inbound' && req.body?.intake !== 'custom') return res.status(404).json({ error: 'Only the custom preview is part of the beta.' });
+  next();
+});
+/** the browser is opening a page (it can ask for the password); otherwise a page's own script is calling (it must not) */
+const opensPage = (req: Request) => req.headers['sec-fetch-mode'] === 'navigate' || (!req.path.startsWith('/api/') && !req.headers['sec-fetch-mode']) || /text\/html/.test(String(req.headers.accept ?? '')) && req.headers['sec-fetch-mode'] !== 'cors' && req.headers['sec-fetch-mode'] !== 'same-origin';
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 
 // ── password (STUDIO_PASSWORD) on the Studio, the API and the iMessage page. Generated sites, cards, reports and
@@ -50,45 +69,83 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 // endpoint the sites post to and the health check the host pings.
 // the owner editor (/owner) and its API (/api/owner) use the owner's own key per draft, not the Studio password
 // /p/<token>/: a client's preview link for one chosen concept (src/studio/concepts/share.ts)
-const OPEN = /^\/(sites|cards|reports|stock|demo-sites|owner|p|gphoto)\/|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/owner\/|^\/robots\.txt$/;
+// /drafts/<slug>/: the owner editor's own preview of its draft (the same build as /sites, never a pinned version)
+const OPEN = /^\/(sites|drafts|cards|reports|stock|demo-sites|owner|p|gphoto|v)\/|^\/v\/fe_[a-z0-9]{16}$|^\/api\/splash\/sp_[a-f0-9]{16}\/(quote|img\/[A-Za-z0-9_.-]+\/\d+)$|^\/api\/splash\/fonts\/[a-f0-9]{24}\.woff2$|^\/api\/splash\/lead-photos\/lp_[a-f0-9]{16}$|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/version$|^\/app\/version\.js$|^\/api\/staff\/me$|^\/api\/owner\/|^\/robots\.txt$|^\/imessage\/(imessage\.(js|css))?$/;
 // sites post their quote form here from any origin; reading leads (GET) still needs the password
 const isLeadPost = (req: Request) => /^\/api\/leads\/[^/]+$/.test(req.path) && (req.method === 'POST' || req.method === 'OPTIONS');
 const sha = (s: string) => createHash('sha256').update(s).digest();
+// an invited beta tester: the custom simulator's inbound texts and their own conversation only (checked again in the routes)
 app.use((req, res, next) => {
-  if (!config.studioPassword || OPEN.test(req.path) || isLeadPost(req)) return next();
+  void (async () => {
+    if (req.method === 'POST' && req.path === '/api/imessage/inbound' && req.body?.intake === 'custom' && typeof req.body?.invite === 'string') {
+      const inv = await inviteForToken(req.body.invite);
+      if (inv) res.locals.invite = inv;
+    } else if (req.method === 'GET' && /^\/api\/conversations\/[^/]+$/.test(req.path)) {
+      const inv = await inviteForToken(String(req.headers['x-roger-invite'] || ''));
+      if (inv && inv.froms.includes(decodeURIComponent(req.path.split('/').pop()!))) res.locals.invite = inv;
+    }
+  })().then(() => next(), next);
+});
+app.use((req, res, next) => {
+  if (OPEN.test(req.path) || isLeadPost(req) || res.locals.invite) return next();
+  // the beta never runs without staff authentication: everything but customers' links and testers' simulator is closed
+  if (!config.studioPassword && config.beta.enabled) return res.status(503).type('text/plain').send('The beta needs STUDIO_PASSWORD: staff pages and APIs are closed until it is set.');
+  if (!config.studioPassword) return next();
   const [scheme, b64] = (req.headers.authorization || '').split(' ');
   const given = scheme === 'Basic' && b64 ? Buffer.from(b64, 'base64').toString('utf8') : '';
   if (given && timingSafeEqual(sha(given), sha(`${config.studioUser}:${config.studioPassword}`))) return next();
+  // a page asks for the password. The simulator's own calls (an invited tester's messages and conversation) get a plain
+  // refusal: no browser password box for testers. Every other API call is a staff page's: it gets the challenge too,
+  // so the browser sends the staff login it already holds (a login made at /app/… is not sent to /api/… on its own).
+  const testerCall = req.path === '/api/imessage/inbound' || /^\/api\/conversations\/[^/]+$/.test(req.path);
+  if (!opensPage(req) && testerCall) return res.status(401).json({ error: 'Staff authentication is required.' });
+  if (!opensPage(req)) return res.set('WWW-Authenticate', 'Basic realm="Roger Studio", charset="UTF-8"').status(401).json({ error: 'Staff authentication is required.' });
   res.set('WWW-Authenticate', 'Basic realm="Roger Studio", charset="UTF-8"').status(401).send('Password required');
 });
 
 // ── static ──
+// staff only, whatever else is open: the review screen and every review and invite action
+const staffOnly = (req: Request, res: Response, next: NextFunction) => {
+  if (isStaff(req)) return next();
+  if (config.studioPassword) return !opensPage(req) ? res.status(401).json({ error: 'Staff authentication is required.' }) : res.set('WWW-Authenticate', 'Basic realm="Roger Studio", charset="UTF-8"').status(401).send('Password required');
+  res.status(403).json({ error: 'Staff authentication is required (STUDIO_PASSWORD).' });
+};
+app.use(['/app/imessage-reviews.html', '/app/imessage-reviews.js', '/app/imessage-reviews.css', '/api/studio/imessage-reviews', '/api/studio/beta-invites'], staffOnly);
+app.get('/api/staff/me', (req, res) => res.json({ staff: isStaff(req) }));
 app.use('/app', express.static(path.join(config.dirs.public, 'app')));
 app.use('/imessage', express.static(path.join(config.dirs.public, 'imessage'))); // stand-in iMessage UI for local demos (no gateway)
 app.use('/owner', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer', 'cache-control': 'no-store', 'content-security-policy': "frame-ancestors 'self'", 'x-frame-options': 'SAMEORIGIN' }); next(); }, express.static(path.join(config.dirs.public, 'owner')));
 app.use('/stock', express.static(path.join(config.dirs.public, 'stock'), { maxAge: '7d' }));
 // Google listing photos for the page being viewed (never stored), and the page's Google credits and reviews filled
 // per view (src/sources/google-live.ts)
+app.get('/gphoto/cover/:placeId', wrap(googleCoverRoute));
 app.get('/gphoto/:placeId/:n', wrap(googlePhotoRoute));
-app.use('/sites', async (req, res, next) => {
+// a site page with Google content filled for this view (credits, reviews, listing photos)
+const fillLive = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (!/(\.html|\/)$/.test(req.path)) return next();
   const rel = decodeURIComponent(req.path) + (req.path.endsWith('/') ? 'index.html' : '');
   if (rel.includes('..')) return next();
   const file = path.join(config.dirs.sites, rel);
   const html = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : (await readOut(`sites${rel}`).catch(() => undefined))?.toString('utf8');
-  if (!html || !html.includes('⟦g:')) return next();
-  res.set({ 'cache-control': 'private, no-store' }).type('html').send(await fillGoogleContent(html));
-});
+  if (!html || (!html.includes('⟦g:') && !html.includes('data-gphoto'))) return next();
+  res.set({ 'cache-control': 'private, no-store' }).type('html').send(await fillListingPhotos(await fillGoogleContent(html)));
+};
+// the owner editor's own preview of a draft: its current build, never a pinned public version (/drafts/<slug>/)
+app.use('/drafts', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex', 'cache-control': 'no-store' }); next(); }, fillLive, express.static(config.dirs.sites));
+// a public preview link pinned to a saved version is served from that version's copy (src/site-pins.ts)
+app.use('/sites', (req, _res, next) => { pinnedPath(req.url).then((u) => { req.url = u; next(); }, next); });
+app.use('/sites', fillLive);
 app.use('/sites', express.static(config.dirs.sites));
 app.use('/reports', express.static(config.dirs.reports));
 app.use('/cards', express.static(config.dirs.cards));
 app.use('/demo-sites', express.static(path.join(config.dirs.fixtures, 'sites'))); // the deliberately outdated demo site
 app.get('/', (_req, res) => res.redirect('/app/')); // on Vercel public/ is served by its CDN, not by Express
 // the builder's own robots.txt: tools and APIs stay out; previews and reports may be fetched so crawlers see their noindex
-app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /app/\nDisallow: /api/\nDisallow: /owner/\nDisallow: /imessage/\nAllow: /sites/\nAllow: /reports/\n'));
+app.get('/robots.txt', (_req, res) => res.type('text/plain').send('User-agent: *\nDisallow: /app/\nDisallow: /api/\nDisallow: /owner/\nDisallow: /drafts/\nDisallow: /imessage/\nAllow: /sites/\nAllow: /reports/\n'));
 // generated files, also when they were built on another server instance (src/files.ts)
-app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
-  let rel = decodeURIComponent(req.path).slice(1);
+app.get(/^\/(sites|drafts|cards|reports)\/.*/, wrap(async (req, res) => {
+  // a draft's own preview is the same stored build as its site folder (only /sites is pinned)
+  let rel = decodeURIComponent(req.path).slice(1).replace(/^drafts\//, 'sites/');
   if (rel.split('/').includes('..')) return res.status(400).end();
   if (rel.endsWith('/')) rel += 'index.html';
   else if (!path.extname(rel)) return res.redirect(301, `${req.path}/`);
@@ -105,8 +162,10 @@ app.get(/^\/(sites|cards|reports)\/.*/, wrap(async (req, res) => {
 
 // ── meta ──
 app.get('/api/health', wrap(async (_req, res) => {
-  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), claudeTools: claudeToolMode(), model: config.anthropicModel, screenshots: screenshotsAvailable(), themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', pagespeed: !config.pagespeed ? 'off' : process.env.PAGESPEED_API_KEY ? 'key' : config.pagespeedKey ? 'maps-key' : 'no-key', fonts: await textRendering(), claudeKey: claudeVia() === 'api' ? await claudeKeyStatus() : undefined });
+  res.json({ ok: true, version: versionLabel() || 'dev', mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), claudeTools: claudeToolMode(), model: config.anthropicModel, screenshots: screenshotsAvailable(), themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', pagespeed: !config.pagespeed ? 'off' : process.env.PAGESPEED_API_KEY ? 'key' : config.pagespeedKey ? 'maps-key' : 'no-key', fonts: await textRendering(), claudeKey: claudeVia() === 'api' ? await claudeKeyStatus() : undefined });
 }));
+// this deployment's version (stamped at deploy time; 'dev' locally): the staff pages' corner badge reads it
+app.get('/api/version', (_req, res) => { res.set('cache-control', 'no-store').json(buildInfo()); });
 // how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
 app.get('/api/estimate', (req, res, next) => {
   const on = (v: unknown) => v === '1' || v === 'true';
@@ -234,17 +293,161 @@ app.get('/api/leads/:slug', wrap(async (req, res) => {
   res.json({ leads: await listLeads(String(req.params.slug).replace(/[^a-z0-9-]/g, '')) });
 }));
 
+// ── a custom-site version the customer was sent (after staff review): its pages, and nothing else ──
+const escHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+async function sentVersion(id: string) {
+  const sent = /^fe_[a-z0-9]{16}$/.test(id) ? await studioDocs.get('customer-links', id) : undefined;
+  return sent ? getFrontendJob(id) : undefined;
+}
+/** a splash page sent to its customer (only those are served at /v/) */
+async function sentSplash(id: string) {
+  if (!/^sp_[a-f0-9]{16}$/.test(id) || !(await studioDocs.get('customer-links', id))) return undefined;
+  const { getSplashJob } = await import('./splash/jobs.js');
+  const job = await getSplashJob(id);
+  return job?.code ? job : undefined;
+}
+/** what a messaging app shows for a customer link: the business's name, and the page's first screen */
+function linkMeta(id: string, name: string, slug = 'home') {
+  const title = `${name} · website preview`;
+  return [`<meta property="og:title" content="${escHtml(title)}">`, `<meta property="og:description" content="${escHtml(`A preview of a new website for ${name}.`)}">`, '<meta property="og:type" content="website">',
+    ...(config.publicOrigin ? [`<meta property="og:url" content="${config.publicOrigin}/v/${id}${slug === 'home' ? '' : `/${slug}`}">`, `<meta property="og:image" content="${config.publicOrigin}/v/${id}/preview.png">`, '<meta property="og:image:width" content="1200">', '<meta property="og:image:height" content="630">', '<meta name="twitter:card" content="summary_large_image">'] : [])].join('');
+}
+// the link preview image: the version's homepage, rendered once (a sent version never changes)
+app.get('/v/:id/preview.png', wrap(async (req, res) => {
+  const id = String(req.params.id);
+  const splash = await sentSplash(id);
+  const job = splash ? undefined : await sentVersion(id);
+  if (!job && !splash) return res.status(404).type('text/plain').send('Not available.');
+  // kept in the datastore where there is one (Vercel: a function's disk does not last), else on the local disk
+  const key = `v-previews/${id}.png`;
+  const kept = remote ? await remote.getFile(key).catch(() => undefined) : undefined;
+  if (kept) return res.set({ 'cache-control': 'public, max-age=31536000, immutable', 'x-robots-tag': 'noindex' }).type('png').send(kept);
+  const file = path.join(config.dirs.out, 'v-previews', `${id}.png`);
+  if (!fs.existsSync(file)) {
+    const browser = await launchBrowser();
+    try {
+      const page = await (await browser.newContext({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 })).newPage();
+      const html = splash ? await (await import('./splash/jobs.js')).splashPage(splash) : await frontendPreview(job!, 'home', {}, (s) => `/v/${id}${s === 'home' ? '' : `/${s}`}`);
+      await page.setContent(html, { waitUntil: 'load', timeout: 45000 }).catch(() => undefined);
+      await page.waitForTimeout(1500);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      await page.screenshot({ path: file });
+    } finally { await browser.close(); }
+  }
+  const png = fs.readFileSync(file);
+  if (remote) await remote.putFile(key, png, 'image/png').catch((e) => console.warn(`[v] could not keep ${key}: ${(e as Error).message}`));
+  res.set({ 'cache-control': 'public, max-age=31536000, immutable', 'x-robots-tag': 'noindex' }).type('png').send(png);
+}));
+app.get(['/v/:id', '/v/:id/:slug'], wrap(async (req, res) => {
+  const id = String(req.params.id), slug = typeof req.params.slug === 'string' ? req.params.slug : 'home';
+  // a splash page: one page (no inner pages), its Google content filled live
+  const splash = await sentSplash(id);
+  if (splash) {
+    if (slug !== 'home') return res.status(404).type('text/plain').send('No such page.');
+    const { splashPage } = await import('./splash/jobs.js');
+    const html = (await splashPage(splash)).replace('</title>', `</title>${linkMeta(id, String(splash.plan?.fact_sheet.find((f) => f.field === 'name')?.value ?? splash.input?.business.name ?? 'Your business'))}`);
+    return res.set({ 'x-robots-tag': 'noindex', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }).type('html').send(html);
+  }
+  const job = await sentVersion(id);
+  if (!job) return res.status(404).type('text/plain').send('This preview link is not available.');
+  try {
+    let html = await frontendPreview(job, slug, {}, (s) => `/v/${id}${s === 'home' ? '' : `/${s}`}`);
+    // what a messaging app shows for the link: the business's name, and the homepage image, both from the public origin
+    const title = `${job.input.business.name} · website preview`;
+    const meta = [`<meta property="og:title" content="${escHtml(title)}">`, `<meta property="og:description" content="${escHtml(`A preview of a new website for ${job.input.business.name}.`)}">`, '<meta property="og:type" content="website">',
+      ...(config.publicOrigin ? [`<meta property="og:url" content="${config.publicOrigin}/v/${id}${slug === 'home' ? '' : `/${slug}`}">`, `<meta property="og:image" content="${config.publicOrigin}/v/${id}/preview.png">`, '<meta property="og:image:width" content="1200">', '<meta property="og:image:height" content="630">', '<meta name="twitter:card" content="summary_large_image">'] : [])].join('');
+    html = html.replace('</title>', `</title>${meta}`);
+    res.set({ 'x-robots-tag': 'noindex', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }).type('html').send(html);
+  } catch { res.status(404).type('text/plain').send('No such page.'); }
+}));
+
 // ── iMessage reference flow (your gateway posts inbound texts here) ──
 app.post('/api/imessage/inbound', wrap(async (req, res) => {
   const from = String(req.body.from || 'demo');
   const text = String(req.body.text || '');
   // async: true → "On it, about 20 seconds" now, the preview later (see handleInbound)
-  res.json(await handleInbound(from, text, { async: req.body.async === true || req.body.async === 'true' }));
+  // intake: "concepts" turns on the design-engine intake for this conversation (a test intake: the route needs the Studio login)
+  const intake = typeof req.body.intake === 'string' ? req.body.intake : undefined;
+  let inviteId: string | undefined;
+  if (intake === 'custom') {
+    // the custom intake (paid design jobs) is invite-only: an invited tester's own conversation, or staff
+    const inv = res.locals.invite as Awaited<ReturnType<typeof inviteForToken>>;
+    if (inv) {
+      if (!(await bindConversation(inv, from))) return res.status(403).json({ error: 'This conversation belongs to another invite.' });
+      inviteId = inv.id;
+    } else if (!isStaff(req)) return res.status(403).json({ error: 'The custom preview is invite-only. Open the link from your invite.' });
+    else { const owner = await inviteOfConversation(from); if (owner) inviteId = owner.id; }
+  }
+  res.json(await handleInbound(from, text, { async: req.body.async === true || req.body.async === 'true', intake, inviteId }));
 }));
+app.get('/api/studio/beta-invites', wrap(async (_req, res) => res.json({ invites: (await listInvites()).map(({ tokenHash: _h, ...i }) => i) })));
+app.post('/api/studio/beta-invites', wrap(async (req, res) => {
+  const r = await createInvite(String(req.body?.label || ''), { spendUsd: Number(req.body?.spendUsd) || undefined });
+  res.status(201).json({ id: r.invite.id, label: r.invite.label, limits: r.invite.limits, url: r.url ?? null, token: r.token, note: r.url ? undefined : 'No public HTTPS origin is configured (ROGER_PUBLIC_ORIGIN): this invite has no shareable link yet.' });
+}));
+app.post('/api/studio/beta-invites/:id/revoke', wrap(async (req, res) => { const inv = await revokeInvite(String(req.params.id)); res.status(inv ? 200 : 404).json({ ok: !!inv }); }));
 app.post('/api/imessage/reset', wrap(async (req, res) => { await resetSession(String(req.body.from || 'demo')); res.json({ ok: true }); }));
 
 // ── owner editor API (own key per draft) and the Studio's owner-link controls ──
 app.use('/api/owner', ownerRoutes);
+// a splash page's quote or appointment request (visitors of the page: public, plain form or fetch)
+const quotePhoto = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024, files: 1, fields: 10 } }).single('photo');
+app.post('/api/splash/:id/quote', (req, res, next) => quotePhoto(req, res, (err) => {
+  if (!err) return next();
+  const big = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE';
+  res.status(big ? 413 : 400).json({ error: big ? 'That photo is too big (12 MB at most).' : 'The request could not be read.' });
+}), wrap(async (req, res) => {
+  const { saveSplashLead } = await import('./splash/jobs.js');
+  const lead = await saveSplashLead(String(req.params.id), req.body ?? {}, req.file);
+  // to the owner as well as the Roger dashboard: a message in their conversation (failure is recorded, never shown)
+  if (lead) await (async () => {
+    const { getSplashJob, leadMessage } = await import('./splash/jobs.js');
+    const { minimalContact, tradeRow } = await import('./splash/playbook.js');
+    const job = await getSplashJob(lead.jobId);
+    if (!job?.owner?.from) return;
+    const { notifyOwner } = await import('./imessage/flow.js');
+    const r = await notifyOwner(job.owner.from, [leadMessage(lead, { origin: config.publicOrigin || config.publicBaseUrl, appointment: !!job.plan && minimalContact(tradeRow(job.plan.trade.row)) })]);
+    lead.owner = { from: job.owner.from, at: new Date().toISOString(), delivered: r.delivered, ...(r.note ? { note: r.note } : {}) };
+    await studioDocs.put('splash-leads', lead.id, lead);
+  })().catch((e) => console.warn(`[splash] lead ${lead.id} not sent to the owner: ${(e as Error).message}`));
+  if (/json/.test(String(req.headers.accept ?? ''))) return res.status(lead ? 201 : 400).json(lead ? { ok: true } : { error: 'Name and phone are needed.' });
+  const back = String(req.headers.referer ?? '').split('#')[0];
+  res.redirect(303, `${back || '/'}#rg-closed`);
+}));
+// a quote request's photo, for the owner (its id is random and appears only in the owner's message) and staff
+app.get('/api/splash/lead-photos/:id', wrap(async (req, res) => {
+  const id = String(req.params.id);
+  const d = /^lp_[a-f0-9]{16}$/.test(id) ? await studioDocs.get<{ data: string; type: string }>('splash-lead-photos', id) : undefined;
+  if (!d) return res.status(404).type('text/plain').send('No such photo.');
+  res.set({ 'content-type': d.type, 'cache-control': 'private, max-age=3600', 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer' }).send(Buffer.from(d.data, 'base64'));
+}));
+// a splash page's font (public, any origin: a live page is served from the owner's domain)
+app.get('/api/splash/fonts/:file', wrap(async (req, res) => {
+  const { fontFile } = await import('./splash/fonts.js');
+  const m = String(req.params.file).match(/^([a-f0-9]{24})\.woff2$/);
+  const body = m ? await fontFile(m[1]) : undefined;
+  if (!body) return res.status(404).type('text/plain').send('No such font.');
+  res.set({ 'content-type': 'font/woff2', 'cache-control': 'public, max-age=31536000, immutable', 'access-control-allow-origin': '*' }).send(body);
+}));
+// a splash page's website or owner photo at a served width (public: the page's visitors load it)
+app.get('/api/splash/:id/img/:photo/:w', wrap(async (req, res) => {
+  const { getSplashJob } = await import('./splash/jobs.js');
+  const { sizedImage, formatFor, upstreamUrl, ImageError } = await import('./splash/images.js');
+  const id = String(req.params.id);
+  const job = /^sp_[a-f0-9]{16}$/.test(id) ? await getSplashJob(id) : undefined;
+  const photo = job?.input?.photos.find((p) => p.id === String(req.params.photo) && /^https?:\/\//.test(p.url));
+  if (!photo) return res.status(404).type('text/plain').send('No such photo.');
+  try {
+    const img = await sizedImage(photo.url, Number(req.params.w), formatFor(String(req.headers.accept ?? '')));
+    res.set({ 'content-type': img.type, 'cache-control': 'public, max-age=31536000, immutable', vary: 'Accept' }).send(img.body);
+  } catch (e) {
+    // Roger could not fetch it (a host that refuses servers): the visitor's browser asks the host itself, for the
+    // host's own smaller copy where it makes one; not cached, so Roger tries again next time
+    if (e instanceof ImageError && e.status === 502) return res.set({ 'cache-control': 'no-store' }).redirect(302, upstreamUrl(photo.url));
+    if (e instanceof ImageError) return res.status(e.status).type('text/plain').send(e.message);
+    throw e;
+  }
+}));
 app.use('/api/studio', studioRoutes); // design studio: business briefs (phase 1) and concept sets (phase 2), src/studio
 // concept previews: each set's HTML, photos and screenshots (noindex; previews are never published from here)
 app.use('/studio-previews', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex' }); next(); },
@@ -361,10 +564,12 @@ app.get('/api/builds/:id', wrap(async (req, res) => {
 }));
 app.get('/api/conversations', wrap(async (_req, res) => res.json({ conversations: await listConversations() })));
 app.get('/api/conversations/:from', wrap(async (req, res) => {
+  // a concept intake moves forward on each poll (a stopped stage resumes; a finished one starts the next)
+  const intake = await pollIntake(String(req.params.from)).catch((e) => { console.warn(`[imessage] intake poll failed: ${(e as Error).message}`); return undefined; });
   const c = await getConversation(String(req.params.from));
   if (!c) return res.status(404).json({ error: 'not found' });
   const { session: _s, ...rest } = c; // flow internals stay server-side
-  res.json({ ...rest, pending: await isPending(c.from) });
+  res.json({ ...rest, pending: await isPending(c.from), ...(intake ? { intake } : {}) });
 }));
 
 app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
@@ -376,9 +581,19 @@ app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: 
 
 // Vercel runs the exported app as a function; everywhere else this is a normal server
 export default app;
-if (!process.env.VERCEL) app.listen(config.port, () => {
+if (!process.env.VERCEL && !process.env.ROGER_NO_LISTEN) void (async () => {
+  // generations stopped mid-run (a restart) continue from their saved stage exactly once, before any request is taken
+  const owner = `server-${process.pid}-${Date.now().toString(36)}`;
+  const r = await recoverInterruptedFrontendJobs(owner).catch((e) => { console.warn('[frontend] recovery failed', e); return { resumed: [], restarted: [], failed: [] }; });
+  if (r.resumed.length + r.restarted.length + r.failed.length) console.log(`[frontend] recovered: resumed ${r.resumed.join(', ') || '-'}; restarted ${r.restarted.join(', ') || '-'}; failed ${r.failed.join(', ') || '-'}`);
+  // custom-intake conversations move forward on their own (not only when the customer's page polls)
+  setInterval(() => { void advanceAllCustom().catch((e) => console.warn('[imessage custom] tick failed', e)); }, 15_000).unref();
+  // splash pages stopped mid-run (a restart: a beat silent for 2 minutes) are recovered once (see src/splash/jobs.ts)
+  setInterval(() => { void import('./splash/jobs.js').then((m) => m.recoverInterruptedSplashJobs(owner)).then((r) => { if (r.rechecked.length + r.restarted.length + r.failed.length) console.log('[splash] recovered', JSON.stringify(r)); }).catch((e) => console.warn('[splash] recovery failed', e)); }, 60_000).unref();
+  app.listen(config.port, () => {
   console.log(`Roger Site Builder on ${config.publicBaseUrl}  (mock=${config.mock}, claude=${claudeVia() ?? 'off'}, screenshots=${screenshotsAvailable()}, themes=${loadThemes().size}, password=${config.studioPassword ? 'on' : 'off'}, publish=${config.vercelToken ? 'vercel' : 'off'})`);
   // studio jobs that were running when the server stopped continue where they were
   resumeInterruptedJobs().then((ids) => { if (ids.length) console.log(`[studio] resuming ${ids.length} interrupted job(s): ${ids.join(', ')}`); }).catch((e) => console.warn('[studio] resume failed', e));
   if (!config.studioPassword && !/\/\/(localhost|127\.0\.0\.1)\b/.test(config.publicBaseUrl)) console.warn('[security] STUDIO_PASSWORD is not set: anyone who finds this URL can run builds on your API keys and read conversations.');
-});
+  });
+})();

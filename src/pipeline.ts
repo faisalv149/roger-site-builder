@@ -1,3 +1,4 @@
+import { writeStoredFile } from './google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
@@ -9,7 +10,7 @@ import { formatDuration, imageKey, nameKey } from './sources/site-content.js';
 import { fetchServiceImages, type ServiceImageRecord } from './sources/service-images.js';
 import { buildBrandProfile, dominantColors, profileColors, type BrandProfile } from './sources/brand-profile.js';
 import { extractorResult } from './content/extraction.js';
-import { featuredService, buildAssets, buildEvidenceModel, headlineRelevant, reconcileServices, reviewEvidence, serviceKey, type EvidenceModel } from './evidence.js';
+import { notAService, featuredService, buildAssets, buildEvidenceModel, headlineRelevant, reconcileServices, reviewEvidence, serviceKey, type EvidenceModel } from './evidence.js';
 import { iconFor, shorten, splitNote } from './content/facts.js';
 import { IdentityError } from './sources/website-business.js';
 import { fetchSiteImages, type ImageRecord } from './sources/site-images.js';
@@ -23,11 +24,12 @@ import type { SourceBundle } from './content/model.js';
 import sharp from 'sharp';
 import { cloneTheme, getTheme, validateTheme, type ThemeEntry } from './theme/load.js';
 import { selectTheme } from './theme/select.js';
-import { extractFacts, heuristicFacts } from './content/facts.js';
+import { extractFacts, heuristicFacts, reusedFacts, type StudioReuse } from './content/facts.js';
 import { pickServices } from './content/services.js';
 import { buildModel, type SiteModel } from './content/model.js';
 import { pickLogo } from './brand/logo.js';
-import { processPhotos } from './brand/photos.js';
+import { processPhotos, type ProcessedPhoto } from './brand/photos.js';
+import { photoFingerprint, samePhoto } from './design/fingerprint.js';
 import { resolveBrand, brandTextOnSurface } from './brand/brand.js';
 import { renderPage } from './render/page.js';
 import { screenshot, screenshotsAvailable, writeIcons, writeOgCard } from './render/og.js';
@@ -51,7 +53,9 @@ import { detectCategory, profileFor } from './design/categories.js';
 import { offeringsFrom, type Offering } from './design/offerings.js';
 import { toMeta, type PhotoInfo } from './design/photos.js';
 import type { Appearance } from './design/schema.js';
-import { withLiveReviews } from './sources/google-live.js';
+import { withLivePhotos, withLiveReviews } from './sources/google-live.js';
+import { forStorage } from './google-names.js';
+import { phoneKey, reviewLike } from './sources/site-content.js';
 import { composeModel, findDraft, newDraftId, putDraft, tokensFor, type DraftBase, type DraftRecord } from './drafts.js';
 
 export interface BuildInput {
@@ -79,6 +83,8 @@ export interface BuildInput {
    * Lighthouse / Google PageSpeed), for a before-and-after comparison. Adds about 20-30 s; the Studio turns it on.
    */
   scoreNew?: boolean;
+  /** completed Studio work for this business and brief revision (the open-design handoff): used instead of asking Claude again */
+  reuse?: StudioReuse;
   /** Personalisation pilot (plumbing): the owner's answers, a request for an alternative design, the saved plan. */
   design?: {
     preferences?: DesignPreferences;
@@ -207,6 +213,37 @@ function ownPage(dest: string | undefined, home: string): string | undefined {
   } catch { return undefined; }
 }
 
+/**
+ * What each processed photo shows, from the Studio's completed checks, matched by the photo's identity: its image
+ * fingerprint (photoFingerprint, recorded when it was checked) and its size, wherever it now sits in the listing. A
+ * check made before fingerprints were recorded, or a photo that matches no check (or two equally well), is not
+ * established: its old description is never attached, and only those photos are looked at again.
+ */
+export async function reusedLabels(items: ProcessedPhoto[], b: Business, reuse: StudioReuse, ask: (items: ProcessedPhoto[]) => Promise<PhotoLabels>): Promise<PhotoLabels> {
+  const checks = reuse.photoChecks ?? [];
+  const listing = checks.filter((c) => c.url.startsWith(`google-listing:${b.placeId}#`));
+  const website = checks.filter((c) => !c.url.startsWith('google-listing:'));
+  const found = await Promise.all(items.map(async (it) => {
+    const pool = (it.photo.source === 'website' ? website : listing).filter((c) => c.fp && c.width === it.photo.width && c.height === it.photo.height);
+    if (!pool.length) return undefined;
+    const fp = await photoFingerprint(it.raw).catch(() => undefined);
+    return fp ? samePhoto(fp, pool) : undefined;
+  }));
+  const missing = items.filter((_, i) => !found[i]);
+  const asked = missing.length ? await ask(missing) : undefined;
+  let k = 0;
+  const KINDS = ['team', 'work', 'vehicle', 'storefront', 'other'];
+  const kinds: PhotoLabels['kinds'] = [], seen: PhotoLabels['seen'] = [];
+  items.forEach((_, i) => {
+    const c = found[i];
+    if (c) { kinds.push((KINDS.includes(c.kind) ? c.kind : 'unknown') as PhotoLabels['kinds'][number]); seen.push(c.seen); return; }
+    kinds.push(asked?.kinds[k] ?? 'unknown'); seen.push(asked?.seen[k]); k++;
+  });
+  const reused = found.filter(Boolean).length;
+  const unprinted = checks.filter((c) => !c.fp).length;
+  return { kinds, seen, source: 'vision', reused, note: missing.length ? `${missing.length} photo(s) whose identity could not be established (${unprinted ? `${unprinted} saved check(s) predate fingerprints; ` : ''}no single saved check with the same image) were ${asked?.source === 'vision' ? 'looked at again by Claude' : `not labelled (${asked?.note ?? asked?.source ?? 'no answer'})`}; no old description was attached to them` : `all ${reused} reused from ${reuse.from}, each matched by its image fingerprint` };
+}
+
 export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promise<BuildResult> {
   const started = Date.now();
   const steps: Step[] = [];
@@ -235,6 +272,12 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     if (!b.primaryTypeLabel && content.identity.typeHint) { b.primaryTypeLabel = content.identity.typeHint.label; b.primaryType ||= content.identity.typeHint.googleType; b.types = [...new Set([...(b.types || []), content.identity.typeHint.googleType])]; recovered.push(`business type "${b.primaryTypeLabel}" from the website`); }
   }
   if (recovered.length) warnings.push(`Filled in from the website: ${recovered.join('; ')}.`);
+  // the website and Google disagree on the phone or the address: neither is chosen for visitors (no call or directions
+  // button, no number or map shown) until the owner settles it; the conflict stays in the review, the request form stays
+  const google = { phone: b.phone, phoneE164: b.phoneE164, formattedAddress: b.formattedAddress, street: b.street, lat: b.lat, lng: b.lng };
+  const held = content && b.source !== 'mock' ? heldContacts(b, content) : {};
+  if (held.phone) { b.phone = undefined; b.phoneE164 = undefined; b.phoneHeld = true; warnings.push(`Phone held for the owner: Google lists ${held.phone.google}, the website ${held.phone.website}.`); }
+  if (held.address) { b.formattedAddress = undefined; b.street = undefined; b.lat = undefined; b.lng = undefined; warnings.push(`Address held for the owner: Google lists ${held.address.google}, the website ${held.address.website}.`); }
   // the website's own photographs (fetched at full size, measured, de-duplicated; failures recorded)
   let siteImages: Awaited<ReturnType<typeof fetchSiteImages>> | undefined;
   if (content && scan && b.source !== 'mock') {
@@ -281,15 +324,16 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   const doAudit = input.audit !== false && !!scan;
   const photosP = timed(steps, emit, 'Process photos', () => processPhotos(b, theme, { outDir: assetDir, publicPrefix: 'assets' }), (r) => `${r.usable} usable · ${r.rejected.length} rejected`);
   // design builds: what each photo shows (vision / sample labels), while Claude reads the facts
+  const ask = (items: ProcessedPhoto[]) => labelPhotos(items, { name: b.name, category: b.primaryTypeLabel || b.primaryType }).catch((e): PhotoLabels => ({ kinds: items.map(() => 'unknown' as const), seen: items.map(() => undefined), source: 'none', note: `labelling failed: ${(e as Error).message}` }));
   const labelsP = designOn
-    ? photosP.then((p) => timed(steps, emit, 'Read photos', () => labelPhotos(p.items, { name: b.name, category: b.primaryTypeLabel || b.primaryType }).catch((e): PhotoLabels => ({ kinds: p.items.map(() => 'unknown' as const), seen: p.items.map(() => undefined), source: 'none', note: `labelling failed: ${(e as Error).message}` })),
-        (r) => (r.source === 'vision' ? `${r.kinds.filter((k) => k !== 'unknown').length} labelled by Claude` : r.source === 'fixture' ? 'sample-data labels' : 'no labels: ranking by quality only')))
+    ? photosP.then((p) => timed(steps, emit, 'Read photos', () => (input.reuse?.photoChecks ? reusedLabels(p.items, b, input.reuse, ask) : ask(p.items)),
+        (r) => (r.reused !== undefined ? `${r.reused} reused from ${input.reuse!.from}${r.kinds.length - r.reused ? `; ${r.note ?? ''}` : '; none asked of Claude again'}` : r.source === 'vision' ? `${r.kinds.filter((k) => k !== 'unknown').length} labelled by Claude` : r.source === 'fixture' ? 'sample-data labels' : 'no labels: ranking by quality only')))
     : Promise.resolve(undefined);
   const designAsk = designOn ? { design: { style: prefs?.style, service: prefs?.service, goal: prefs?.goal } } : {};
   const [photos, logoRes, factsRes, audit, labels] = await Promise.all([
     photosP,
     timed(steps, emit, 'Find logo', () => pickLogo(scan, { outDir: assetDir, publicPrefix: 'assets', band: theme.palette.surface, maxHeightPx: theme.logo.maxHeight.desktop, minChroma: theme.brandColor.minChroma }), (r) => (r.logo ? `from ${r.logo.sourceUrl.split('/').pop()}` : 'none, using wordmark')),
-    timed(steps, emit, claudeEnabled() ? 'Extract facts (Claude)' : 'Extract facts', () => extractFacts(b, theme, scan, designAsk), (r) => `${r.claude.ran ? (r.claude.validated ? `Claude read the page (${r.claude.ms} ms)${r.claude.dropped.length ? `, dropped ${r.claude.dropped.length} unsupported` : ''}` : `Claude ${r.claude.error ? 'failed' : 'was rejected'}: ${r.claude.fallbackReason}`) : `Claude did not run: ${r.claude.fallbackReason}`} · ${[r.facts.years && `${r.facts.years} yrs`, r.facts.licensed && 'licensed', r.facts.insured && 'insured', r.facts.emergency && 'emergency', r.facts.open24h && '24h'].filter(Boolean).join(', ') || 'no stated facts (unknown, not absent)'} · ${r.services.length} services`),
+    timed(steps, emit, input.reuse?.facts ? 'Extract facts (reused brief)' : claudeEnabled() ? 'Extract facts (Claude)' : 'Extract facts', () => (input.reuse?.facts ? Promise.resolve(reusedFacts(b, scan, input.reuse.facts, input.reuse.from)) : extractFacts(b, theme, scan, designAsk)), (r) => `${r.claude.ran ? (r.claude.validated ? `Claude read the page (${r.claude.ms} ms)${r.claude.dropped.length ? `, dropped ${r.claude.dropped.length} unsupported` : ''}` : `Claude ${r.claude.error ? 'failed' : 'was rejected'}: ${r.claude.fallbackReason}`) : `Claude did not run: ${r.claude.fallbackReason}`} · ${[r.facts.years && `${r.facts.years} yrs`, r.facts.licensed && 'licensed', r.facts.insured && 'insured', r.facts.emergency && 'emergency', r.facts.open24h && '24h'].filter(Boolean).join(', ') || 'no stated facts (unknown, not absent)'} · ${r.services.length} services`),
     doAudit ? timed(steps, emit, 'Audit existing website', () => auditWebsite(scan!, b), (r) => `score ${r.score}/100 · ${r.issues.length} issues`) : Promise.resolve(undefined),
     labelsP,
   ]);
@@ -301,7 +345,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   // the picture on each service's own card, kept with that service
   let serviceImgs: Awaited<ReturnType<typeof fetchServiceImages>> | undefined;
   if (content && b.source !== 'mock' && content.services.some((x) => x.image)) {
-    serviceImgs = await timed(steps, emit, 'Fetch service pictures', () => fetchServiceImages(content.services, { outDir: assetDir, publicPrefix: 'assets' }), (r) => `${r.byService.size} of ${r.records.length} cropped to 16:10`);
+    serviceImgs = await timed(steps, emit, 'Fetch service pictures', () => fetchServiceImages(content.services.map((x) => (x.image && !serviceImageFits(x.name, x.image, b.name) ? { ...x, image: undefined } : x)), { outDir: assetDir, publicPrefix: 'assets' }), (r) => `${r.byService.size} of ${r.records.length} cropped to 16:10`);
     for (const s of factsRes.services) { const im = serviceImgs.byService.get(nameKey(s.name)); if (im) s.image = im; }
     for (const r of serviceImgs.records.filter((x) => !x.ok)) warnings.push(`Service picture not used: ${r.service} (${r.skipped ?? r.error})`);
   }
@@ -330,7 +374,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       factsRes.services = verified.map((r) => {
         const src = content.services.find((x) => serviceKey(x.name) === serviceKey(r.canonicalName));
         const { description, note } = splitNote(r.description?.value);
-        const contact = src?.booking ? { kind: src.booking.kind, url: src.booking.url, label: src.booking.kind === 'phone' ? 'Call to book' : src.booking.label } : null;
+        const contact = src?.booking && !(src.booking.kind === 'phone' && held.phone) ? { kind: src.booking.kind, url: src.booking.url, label: src.booking.kind === 'phone' ? 'Call to book' : src.booking.kind === 'online' ? src.booking.label : requestLabel(src.booking.label) } : null;
         return { name: r.canonicalName, description: shorten(description ?? '', 150), icon: iconFor(r.canonicalName), note, contact, image: serviceImgs?.byService.get(nameKey(r.canonicalName)) ?? null, fromWebsite: true, secondary: !r.isPrimary, page: ownPage(r.destination, scan.finalUrl), price: factsRes.services.find((x) => serviceKey(x.name) === serviceKey(r.canonicalName))?.price ?? undefined };
       });
     }
@@ -338,6 +382,9 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   }
 
   // 5) Services (before the design plan, which leads with one of them)
+  // categories, places, vague words and symptoms are not services: the site's lists and the owner's review agree on this
+  const places = [...new Set([...(content?.areas?.places ?? []), b.city ?? ''].filter(Boolean))];
+  factsRes.services = factsRes.services.filter((x) => !notAService(x.name, places));
   const services = pickServices(theme, b, scan, factsRes.servicesMentioned, factsRes.serviceBlurbs, { emergencyOk: factsRes.facts.emergency || factsRes.facts.open24h, own: factsRes.services, ownFromWebsite: factsRes.services.some((x) => x.fromWebsite) });
   emit({ type: 'step', step: 'Services', status: 'done', note: services.source === 'business' ? `${services.items.length} from the business's own website` : services.hidden ? 'none verified, section hidden' : `theme's standard list (${factsRes.services.length} own services found, need ${(theme.sectionRules.services as any)?.min ?? 3})` });
   const evidence = evidenceFor(theme, b, factsRes.facts, content?.areas?.places);
@@ -361,7 +408,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       ? fs.readFileSync(src)
       : await fetch(`${config.publicBaseUrl}${stock.url}`, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.arrayBuffer() : undefined)).then((b) => (b ? Buffer.from(b) : undefined)).catch(() => undefined);
     if (data) {
-      fs.writeFileSync(path.join(assetDir, path.basename(src)), data);
+      writeStoredFile(path.join(assetDir, path.basename(src)), data);
       hero = { publicPath: `assets/${path.basename(src)}`, width: stock.width || 1920, height: stock.height || 1080, alt: stock.alt || '', source: 'stock' };
     }
   }
@@ -380,20 +427,25 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
         try {
           const out = await sharp(buf).rotate().resize({ width: 960, withoutEnlargement: true }).webp({ quality: 78 }).toBuffer({ resolveWithObject: true });
           const file = `video-${++posterN}.webp`;
-          fs.writeFileSync(path.join(assetDir, file), out.data);
+          writeStoredFile(path.join(assetDir, file), out.data);
           poster = { publicPath: `assets/${file}`, width: out.info.width, height: out.info.height };
         } catch { /* the poster picture is optional: the video still shows as a titled link */ }
       }
       videos.push({ title: v.title, duration: formatDuration(v.duration), kind: v.kind, url: v.url, pageUrl: v.pageUrl, poster, note: v.note });
     }
     const primary = content.booking.primary;
+    // the About story is the business's own words: one that repeats a customer's review is dropped, never rewritten as the story
+    if (content.story && storyFromReview(content.story.text, [...content.testimonials.map((t) => t.text), ...b.reviews.map((r) => r.text)])) {
+      warnings.push(`About text left out: the website's "${content.story.heading}" text repeats a customer review.`);
+      content.story = undefined;
+    }
     storyEdit = content.story ? await editStory({ name: b.name, heading: content.story.heading, text: content.story.text }) : undefined;
     const heroCta = content.hero?.primary;
     const second = content.hero?.secondary;
     const projects = !!evModel?.projectsVerified;
     sourceBundle = {
       cta: heroCta || second ? {
-        primary: heroCta ? { label: heroCta.label, to: heroCta.kind === 'phone' ? 'phone' : heroCta.kind === 'form' || heroCta.kind === 'anchor' ? 'form' : primary && heroCta.href === primary.url ? 'booking' : 'url', href: heroCta.kind === 'external' || heroCta.kind === 'page' ? heroCta.href : undefined, terms: heroCta.terms, eligibleServices: (evModel?.offers[0]?.eligible ?? []).map((e) => serviceKey(e.service)), featuredService: featuredService(evModel?.offers[0], evModel?.services ?? []) } : undefined,
+        primary: heroCta ? { ...ctaFor(heroCta, !!primary && heroCta.href === primary.url, !!held.phone), terms: heroCta.terms, eligibleServices: (evModel?.offers[0]?.eligible ?? []).map((e) => serviceKey(e.service)), featuredService: featuredService(evModel?.offers[0], evModel?.services ?? []) } : undefined,
         // "See our work" goes to the photo section of this site when the work is shown there; a link to a page that exists only on the old site would be dead
         secondary: second && (projects || /work|project|gallery|photo/i.test(second.label)) ? { label: second.label, to: 'gallery' } : undefined,
       } : undefined,
@@ -448,13 +500,15 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     // the headline: the website's own, when it says what the business does; otherwise what it is, its main services and where
     if (evModel?.hero && content?.hero) {
       const ctx = { typeLabel: b.primaryTypeLabel, services: evModel.services.filter((s) => s.isPrimary).map((s) => s.canonicalName) };
-      const own = content.hero.headline.replace(/\s+/g, ' ').trim();
+      const own = tidyHeadline(content.hero.headline);
       const subOk = content.hero.subline && content.hero.subline.length >= 40;
       const where = content.areas?.region || b.city;
       const composed = `${b.primaryTypeLabel ? b.primaryTypeLabel.replace(/ contractor$/i, '') : 'Local'} ${ctx.services.slice(0, 3).map((x) => x.toLowerCase()).join(', ')}${where ? ` in ${where}` : ''}`.replace(/\s+/g, ' ').trim();
       const headline = own.length >= 8 && own.length <= 90 && headlineRelevant(own, ctx) ? own : composed.slice(0, 90);
       plan.copy = { headline, subline: subOk ? content.hero.subline!.slice(0, 220) : plan.copy.subline, source: 'source' };
     }
+    // a held phone: the hero never tells visitors to call ("… - Just Call Radiant" → "For Plumbing, HVAC & Electrical Services")
+    if (b.phoneHeld) plan.copy = { ...plan.copy, headline: withoutCallWording(plan.copy.headline) || plan.copy.headline, subline: withoutCallWording(plan.copy.subline) || plan.copy.subline };
     themeReason = `${themeReason}. Page layout, type and spacing come from the design plan (${DIRECTION_LABEL[plan.direction]}, ${profileFor(category).label.toLowerCase()}); the theme supplies copy patterns and services`;
     warnings.push(...planOut.warnings);
     personalise.recommended = { style: planOut.recommended.direction, goal: planOut.recommended.goal, service: planOut.recommended.service };
@@ -520,7 +574,8 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
       ink: brand.brandInk,
     });
     const { theme: _t, ...dump } = model;
-    fs.writeFileSync(path.join(siteDir, 'site.json'), JSON.stringify({ ...dump, themeName: entry.name }, null, 2));
+    // (Google's photo resource names and authors are not written: the photos are live references, withLivePhotos)
+    writeStoredFile(path.join(siteDir, 'site.json'), JSON.stringify(forStorage({ ...dump, business: withLivePhotos(dump.business), themeName: entry.name }, `${slug}/site.json`), null, 2));
     return html.length;
   }, (n) => `${Math.round(n / 1024)} KB html`);
 
@@ -528,7 +583,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
   const claude: ClaudeRun = factsRes.claude ?? claudeNotRun(false, null, 'not run');
   const websitePhotoCount = photos.items.filter((p) => p.photo.source === 'website').length;
   const review0 = checkBuild({
-    business: b, scan,
+    business: { ...b, ...google }, scan,
     servicesKept: model.services.items.map((x) => x.label),
     photos: { discovered: siteImages ? siteImages.records.filter((r) => r.role === 'content' || r.role === 'team').length : 0, kept: websitePhotoCount, failures: siteImages ? siteImages.records.filter((r) => !r.ok).length : 0 },
     videos: { discovered: content?.videos.length ?? 0, kept: sourceBundle?.videos.length ?? 0 },
@@ -549,7 +604,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     serviceImages: serviceImgs?.byService.size,
   });
   const evFindings = evModel ? reviewEvidence(evModel, {
-    servicesShown: offerings.length ? offerings.map((o) => o.name) : model.services.items.map((x) => x.label),
+    servicesShown: offerings.length ? offerings.map((o) => o.name) : model.services.items.map((x) => x.label), places,
     headline: model.copy.hero, typeLabel: b.primaryTypeLabel,
     primaryCtaLabel: model.design ? (sourceBundle?.cta?.primary?.label ? sourceBundle.cta.primary.label : undefined) : undefined,
     galleryTitle: sourceBundle?.galleryTitle, storyChars: storyEdit?.method === "edited" ? 0 : model.design?.intro?.length,
@@ -627,7 +682,7 @@ export async function buildSite(input: BuildInput, emit: Emit = () => {}): Promi
     // For preview links sent to the owner, show the real design in the iMessage rich card.
     for (const p of sitePlan?.pages.map((x) => `${x.route}index.html`) ?? ['index.html']) {
       const f = path.join(siteDir, p);
-      fs.writeFileSync(f, fs.readFileSync(f, 'utf8').split(`content="${model.urls.og}"`).join(`content="${model.urls.site}preview.jpg"`).split(`content="${previewContext(slug).base}/og.jpg"`).join(`content="${model.urls.site}preview.jpg"`));
+      writeStoredFile(f, fs.readFileSync(f, 'utf8').split(`content="${model.urls.og}"`).join(`content="${model.urls.site}preview.jpg"`).split(`content="${previewContext(slug).base}/og.jpg"`).join(`content="${model.urls.site}preview.jpg"`));
     }
   }
 
@@ -686,4 +741,77 @@ export async function runAudit(input: { website: string; google?: string; placeI
   const slug = slugify(`${b?.name || new URL(scan.finalUrl || scan.url).host} audit`);
   const rep = await writeReport(slug, audit, { businessName: b?.name });
   return { audit, reportUrl: rep.url, image: rep.image, card: auditCard(audit, rep.url, rep.image) };
+}
+
+/**
+ * A website's own headline as a heading: its words unchanged, without the separators a page layout leaves at the ends
+ * ("- Just Call Radiant -" → "Just Call Radiant"), which read as a typo once the words stand alone.
+ */
+export const tidyHeadline = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/^[\s\-–—|:•·~*]+|[\s\-–—|:•·~*]+$/g, '').trim();
+
+/**
+ * Text without the parts that tell visitors to phone: for a site whose phone is held for the owner.
+ * Whole clauses go ("… - Just Call Radiant", "Call us today!"); empty when nothing else is left.
+ */
+export function withoutCallWording(s: string): string {
+  const CALL = /\b(?:call|calls|calling|phone|ring|dial|give us a call)\b/i;
+  const parts = s.split(/(\s+[-–—|•·:]\s+|[.!?]+\s*)/);
+  const kept: string[] = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const clause = parts[i] ?? '';
+    if (!clause.trim() || CALL.test(clause)) continue;
+    kept.push(clause.trim() + (/^[.!?]/.test((parts[i + 1] ?? '').trim()) ? (parts[i + 1] ?? '').trim() : ''));
+  }
+  return tidyHeadline(kept.join(kept.some((k) => /[.!?]$/.test(k)) ? ' ' : ' - '));
+}
+
+/** A story whose text is a customer's review: it shares a run of eight words with one, or reads as a customer's account. */
+export function storyFromReview(story: string, reviews: string[]): boolean {
+  if (reviewLike(story)) return true;
+  const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9'\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const runs = (w: string[]) => { const out = new Set<string>(); for (let i = 0; i + 8 <= w.length; i++) out.add(w.slice(i, i + 8).join(' ')); return out; };
+  const mine = runs(words(story));
+  return mine.size > 0 && reviews.some((r) => [...runs(words(r))].some((x) => mine.has(x)));
+}
+
+/** The website and Google disagree: the phone (by number) or the address (by ZIP). Both values, for the owner. */
+export function heldContacts(b: Pick<Business, 'phone' | 'formattedAddress'>, c: { phones: { primary?: string }; address?: { zip: string; formatted: string } }): { phone?: { google: string; website: string }; address?: { google: string; website: string } } {
+  const out: ReturnType<typeof heldContacts> = {};
+  if (c.phones.primary && b.phone && phoneKey(c.phones.primary) !== phoneKey(b.phone)) out.phone = { google: b.phone, website: c.phones.primary };
+  if (c.address && b.formattedAddress && !b.formattedAddress.includes(c.address.zip)) out.address = { google: b.formattedAddress, website: c.address.formatted };
+  return out;
+}
+
+const SCHEDULING = /\b(schedul\w*|book\w*|appointments?|reserv\w*)\b/i;
+/** A button that opens the request form says so: scheduling words promise a booking flow it doesn't have. */
+export const requestLabel = (label: string) => (SCHEDULING.test(label) ? 'Request an appointment' : label);
+
+/** The website's main action on this site: its own words, unless they promise what the button can't do here. */
+export function ctaFor(c: { label: string; kind: string; href: string }, verifiedBooking: boolean, phoneHeld: boolean): { label: string; to: 'phone' | 'form' | 'booking' | 'url'; href?: string } {
+  if (c.kind === 'phone') return phoneHeld ? { label: 'Send a request', to: 'form' } : { label: c.label, to: 'phone' };
+  if (verifiedBooking) return { label: c.label, to: 'booking' };
+  if (c.kind === 'form' || c.kind === 'anchor') return { label: requestLabel(c.label), to: 'form' };
+  // a link to a page on the old site that promises scheduling: the request form instead
+  if (SCHEDULING.test(c.label)) return { label: 'Request an appointment', to: 'form' };
+  return { label: c.label, to: 'url', href: c.kind === 'external' || c.kind === 'page' ? c.href : undefined };
+}
+
+export { vagueService } from './evidence.js';
+
+/** A service's picture fits when its own words (alt text, file name) name what the service is about.
+ *  The business's own name is not evidence: "Radiant Plumbing van" says nothing about plumbing work. */
+export function serviceImageFits(service: string, image: { alt?: string; url: string }, business = ''): boolean {
+  const generic = new Set(['service', 'services', 'repair', 'repairs', 'installation', 'replacement', 'maintenance', 'and', 'the', 'for', 'your']);
+  const words = (t: string) => t.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 3 && !generic.has(w));
+  const want = words(service);
+  const brand = words(business);
+  const raw = words(`${image.alt ?? ''} ${decodeURIComponent(image.url.split('/').pop() ?? '').replace(/\.[a-z]+$/, '')}`);
+  // drop the business name wherever it appears: its first word and the name words that follow it
+  const have: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (brand.length && raw[i] === brand[0]) { while (i + 1 < raw.length && brand.includes(raw[i + 1])) i++; continue; }
+    have.push(raw[i]);
+  }
+  const near = (a: string, b: string) => a === b || (a.length >= 4 && b.length >= 4 && (a.startsWith(b.slice(0, 5)) || b.startsWith(a.slice(0, 5))));
+  return want.some((w) => have.some((h) => near(w, h)));
 }

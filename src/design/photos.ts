@@ -91,6 +91,8 @@ export interface PhotoLabels {
   seen: (string | undefined)[];
   source: 'fixture' | 'vision' | 'none';
   ms?: number;
+  /** how many of the labels are a completed earlier check reused (the Studio's), not asked for again */
+  reused?: number;
   /** why no labels: no Claude, or the call failed */
   note?: string;
 }

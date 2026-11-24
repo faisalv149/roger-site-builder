@@ -1,9 +1,12 @@
+import { writeStoredFile } from './google-names.js';
 import fs from 'node:fs';
+import { forStorage } from './google-names.js';
 import path from 'node:path';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { config } from './config.js';
 import { configuredChannels, ownerEmailOf } from './lead-delivery.js';
 import type { Business, Facts, ServiceItem, WebsiteScan } from './types.js';
+import { withLivePhotos } from './sources/google-live.js';
 import type { Theme } from './theme/schema.js';
 import type { SiteImage } from './brand/photos.js';
 import type { LogoPick } from './brand/logo.js';
@@ -77,6 +80,8 @@ export interface DraftBase {
 }
 
 export interface DraftRecord {
+  /** the Phase 2 concept this draft's design comes from: "Try another design" switches among its set's concepts */
+  concept?: { setId: string; conceptId: string; /** the chosen design has a verified story section: the site keeps an About page */ about?: boolean; /** what the handoff left out of the site, and why (an undated seasonal promotion) */ omitted?: { what: string; reason: string }[] };
   v: number;
   id: string;
   slug: string;
@@ -125,7 +130,8 @@ export function upgradeDraft(raw: unknown): DraftRecord | undefined {
 }
 
 export const getDraft = async (id: string) => upgradeDraft(await draftDocs.get('drafts', id));
-export const putDraft = (d: DraftRecord) => draftDocs.put('drafts', d.id, d);
+/** a draft as it is stored: Google's photo resource names and authors are never kept (withLivePhotos) */
+export const putDraft = (d: DraftRecord) => draftDocs.put('drafts', d.id, d.base?.business ? { ...d, base: { ...d.base, business: withLivePhotos(d.base.business) } } : d);
 export async function findDraft(q: { slug?: string; businessKey?: string }): Promise<DraftRecord | undefined> {
   const all = (await draftDocs.list<DraftRecord>('drafts')).filter((d) => (q.slug ? d.slug === q.slug : true) && (q.businessKey ? d.businessKey === q.businessKey : true));
   all.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
@@ -170,7 +176,7 @@ export async function ensureLocalSite(slug: string): Promise<void> {
   for (const f of await listOut(`sites/${slug}`)) {
     const abs = path.join(dir, f.file);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, f.data);
+    writeStoredFile(abs, f.data);
   }
   fs.mkdirSync(path.join(dir, 'assets'), { recursive: true });
 }
@@ -260,7 +266,7 @@ export async function writeSite(base: DraftBase, model: SiteModel, opts: { persi
   writeSiteFiles(dir, files, opts.previousSitePlan);
   const out = files.find((f) => f.file === 'index.html')!.content;
   const { theme: _t, ...dump } = model;
-  fs.writeFileSync(path.join(dir, 'site.json'), JSON.stringify({ ...dump, themeName: base.themeName }, null, 2));
+  writeStoredFile(path.join(dir, 'site.json'), JSON.stringify(forStorage({ ...dump, business: withLivePhotos(dump.business), themeName: base.themeName }, `${path.basename(dir)}/site.json`), null, 2));
   if (opts.persist !== false) await persistDir(dir);
   return out;
 }
@@ -315,15 +321,16 @@ export function readEdits(body: Record<string, unknown>, d: DraftRecord): { appe
  */
 export function forEditor(html: string, slug: string, route = ''): string {
   // asset paths are also made absolute: the browser can start fetching images before it has read the <base>
-  const abs = html.replace(/(["'(])(?:\.\.\/)*assets\//g, `$1/sites/${slug}/assets/`);
-  return abs.replace(/<head>/i, `<head><base href="/sites/${slug}/${route}">`);
+  // the owner's own preview address (/drafts/<slug>/): the current build, never a public link pinned to a saved version
+  const abs = html.replace(/(["'(])(?:\.\.\/)*assets\//g, `$1/drafts/${slug}/assets/`);
+  return abs.replace(/<head>/i, `<head><base href="/drafts/${slug}/${route}">`);
 }
 
 /** The pages for a model and the owner's choices, from what the content supports. */
 function sitePlanOf(d: DraftRecord, model: SiteModel, body: Record<string, unknown>): SitePlan | undefined {
   if (!isFamilyV2(model)) return undefined;
   const mode = body.siteMode === 'single' || body.siteMode === 'multi' ? body.siteMode : undefined;
-  const sp = sitePlanFor(model, { previous: d.sitePlan, mode });
+  const sp = sitePlanFor(model, { previous: d.sitePlan, mode, aboutWanted: body.aboutPage === true || !!d.concept?.about });
   const seo = body.seo as Record<string, unknown> | undefined;
   if (seo && typeof seo === 'object') {
     for (const [pageId, v] of Object.entries(seo)) {
@@ -382,6 +389,8 @@ export async function saveDraft(d: DraftRecord, body: Record<string, unknown>) {
   const model = await composeModel(d.base, plan, { appearance, offerings, content: d.content });
   const sp = sitePlanOf(d, model, body);
   await writeSite(d.base, model, { sitePlan: sp, previousSitePlan: d.sitePlan });
+  // a site made from a concept: its homepage stays the concept (src/studio/concepts/site.ts)
+  if (d.concept) await (await import("./studio/concepts/site.js")).writeConceptHome({ ...d, sitePlan: sp, appearance, offerings });
   d.sitePlan = sp;
   const now = new Date().toISOString();
   if (plan.id !== d.plan.id) d.history = [d.plan, ...d.history.filter((p) => p.id !== d.plan.id && p.id !== plan.id)].slice(0, 5);
@@ -403,8 +412,9 @@ export async function saveDraft(d: DraftRecord, body: Record<string, unknown>) {
 export async function refreshSavedSite(d: DraftRecord): Promise<void> {
   await ensureLocalSite(d.slug);
   const model = await composeModel(d.base, d.plan, { appearance: d.appearance, offerings: d.offerings, content: d.content });
-  const sp = isFamilyV2(model) ? sitePlanFor(model, { previous: d.sitePlan }) : undefined;
+  const sp = isFamilyV2(model) ? sitePlanFor(model, { previous: d.sitePlan, aboutWanted: !!d.concept?.about }) : undefined;
   await writeSite(d.base, model, { sitePlan: sp, previousSitePlan: d.sitePlan });
+  if (d.concept) await (await import("./studio/concepts/site.js")).writeConceptHome({ ...d, sitePlan: sp });
   d.sitePlan = sp;
 }
 
@@ -418,7 +428,7 @@ export function contentView(d: DraftRecord) {
   }));
   return {
     revision: c.revision, facts,
-    media: c.media.slice().sort((a, b) => a.order - b.order).map((m) => ({ ...m, url: `/sites/${d.slug}/${m.publicPath}` })),
+    media: c.media.slice().sort((a, b) => a.order - b.order).map((m) => ({ ...m, url: `/drafts/${d.slug}/${m.publicPath}` })),
     readiness: publishReadiness(c, d.offerings, { checks: d.base.source?.review?.checks, leadTested: !!d.base.leadTestedAt, leadNotified: configuredChannels(ownerEmailOf(d.content)).length > 0 }),
   };
 }
@@ -436,7 +446,7 @@ export function previewTokens(d: DraftRecord, body: Record<string, unknown>, pla
 export function ownerState(d: DraftRecord, plan: DesignPlan = d.plan) {
   const p = profileFor(d.category);
   return {
-    draft: { id: d.id, revision: d.revision, savedAt: d.savedAt, siteUrl: `${config.publicBaseUrl}/sites/${d.slug}/`, slug: d.slug },
+    draft: { id: d.id, revision: d.revision, savedAt: d.savedAt, siteUrl: `${config.publicBaseUrl}/drafts/${d.slug}/`, slug: d.slug },
     business: { name: d.businessName, category: d.category, categoryLabel: p.label, city: d.base.facts.city, phone: d.base.business.phone, hasPhone: !!d.base.business.phone, currency: d.base.currency },
     plan: summarisePlan(plan),
     appearance: d.appearance,

@@ -6,6 +6,7 @@ import type { Theme } from '../theme/schema.js';
 import type { Business, Photo } from '../types.js';
 import { downloadPhoto } from '../sources/places.js';
 import { livePhotoPath, photoCreditMarker } from '../sources/google-live.js';
+import { photoFingerprint, samePhoto } from '../design/fingerprint.js';
 
 export interface SiteImage {
   publicPath: string;
@@ -104,7 +105,11 @@ export async function processPhotos(
     // image for each view, and its credit is filled in when the page is served (src/sources/google-live.ts)
     const listingN = g.p.source !== 'website' && b.source === 'places' ? googleOnly.indexOf(g.p) : -1;
     if (listingN >= 0) {
-      const img: SiteImage = { publicPath: livePhotoPath(b.placeId, listingN, g.p.width, g.p.height), width: g.p.width, height: g.p.height, alt: `Photo of ${b.name}`, credit: photoCreditMarker(b.placeId, listingN, g.p.width, g.p.height), source: 'google' };
+      // the picture's fingerprint (from the copy downloaded here, kept only in memory) goes with its link and credit, so a
+      // view shows it only while Google still has this very picture at that place (verifyLivePhoto)
+      const fp = await photoFingerprint(g.raw).catch(() => undefined);
+      if (!fp || !samePhoto(fp, [{ fp }])) { rejected.push({ ref: `google-listing:${b.placeId}#${listingN}`, reason: 'photo identity could not be fingerprinted reliably' }); continue; }
+      const img: SiteImage = { publicPath: livePhotoPath(b.placeId, listingN, g.p.width, g.p.height, undefined, fp), width: g.p.width, height: g.p.height, alt: `Photo of ${b.name}`, credit: photoCreditMarker(b.placeId, listingN, g.p.width, g.p.height, fp), source: 'google' };
       if (isHero) hero = img; else images.push(img);
       items.push({ image: img, photo: g.p, raw: g.raw });
       continue;
@@ -128,7 +133,7 @@ export async function processPhotos(
   // If the gallery would fall short of its minimum, let the hero photo appear there too.
   const minPhotos = ((theme.sectionRules.gallery || {}) as { minPhotos?: number }).minPhotos ?? 3;
   if (hero && images.length < minPhotos && images.length + 1 >= minPhotos) images.unshift({ ...hero, alt: `Photo of ${b.name}` });
-  return { hero, gallery: images.slice(0, rules.maxGallery), rejected, skipped, usable: good.length, items };
+  return { hero, gallery: images.slice(0, rules.maxGallery), rejected, skipped, usable: items.length, items };
 }
 
 /** A kept photo with its downloaded original, for the design planner's ranking and art-directed crops (src/design/photos.ts). */

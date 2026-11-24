@@ -1,0 +1,11 @@
+# The beta's background worker (a Vercel Daemon, see vercel.beta.json; Dockerfile.worker): runs custom-site generations, their rendered
+# checks (Chromium) and the custom-intake conversations, outside the request lifecycle. src/worker.ts.
+FROM node:24-slim
+RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-dejavu-core fonts-liberation ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts || npm ci --ignore-scripts
+COPY . .
+ENV CHROMIUM_PATH=/usr/bin/chromium NODE_ENV=production ROGER_ROLE=worker
+CMD ["node", "--import", "tsx", "src/worker.ts"]

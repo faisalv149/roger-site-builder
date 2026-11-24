@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { largestFromSrcset } from './site-content.js';
+import { completeExcerpt } from '../util/text.js';
 import type { AnyNode, Element } from 'domhandler';
 
 /**
@@ -109,7 +110,7 @@ export function cardServices($: $, base: string): CardService[] {
     desc = clean(desc.replace(/\bRead More\b|\bLearn More\b|\bView More\b/gi, ' '));
     let href: string | undefined;
     if (c.link) { try { href = new URL(c.link, base).toString(); } catch { /* none */ } }
-    return { name, description: desc.length >= 12 ? desc.slice(0, 240) : undefined, href, image: cardPhoto($, c.h, others, base), locator: `${(c.box.tagName)}.${String((c.box.attribs?.class || '').split(/\s+/)[0]).slice(0, 24)} > ${c.h.tagName.toLowerCase()} "${name}"` };
+    return { name, description: desc.length >= 12 ? completeExcerpt(desc, 400) : undefined, href, image: cardPhoto($, c.h, others, base), locator: `${(c.box.tagName)}.${String((c.box.attribs?.class || '').split(/\s+/)[0]).slice(0, 24)} > ${c.h.tagName.toLowerCase()} "${name}"` };
   });
 }
 

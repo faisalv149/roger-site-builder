@@ -307,6 +307,7 @@ body.has-bar{padding-bottom:64px}
 @media (max-width:${DESK - 1}px){.has-bar .bubble{display:none}}
 .credit{opacity:.75}
 img[src^="/gphoto/"]{object-fit:cover}
+figcaption a,.d-credit a,.lb-fig figcaption a{color:inherit;text-decoration:underline}
 ${WIDGETS_CSS(DESK)}
 ${m.design ? designCss(m, DESK) : ''}
 

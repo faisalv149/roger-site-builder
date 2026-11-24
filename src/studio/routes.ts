@@ -1,3 +1,6 @@
+import { startFrontendJob, getFrontendJob, frontendPreview, editedVersion, versionText, resumeFrontendJob, reviewVersion, pagePath } from './frontend/jobs.js';
+import { customConversations, staffDecision } from '../imessage/flow.js';
+import { versionChecks, blockingProblems } from '../imessage/custom-intake.js';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { getBrief, getStudioJob, listStudioJobs, resumeIfStale, resumeStudioJob, startStudioJob } from './jobs.js';
 import { getSnapshot } from './snapshot.js';
@@ -9,12 +12,19 @@ import type { ConceptSet } from './concepts/types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { getConceptJob, getConceptSet, resumeConceptIfStale, startConceptJob } from './concepts/jobs.js';
+import { getConceptJob, getConceptSet, resumeConceptIfStale, resumeConceptJob, startConceptJob, type ConceptJob } from './concepts/jobs.js';
 import { createShare, shareUrl } from './concepts/share.js';
+import { getSiteJob, resumeSiteIfStale, startSiteJob } from './concepts/site.js';
 import { IdentityError } from '../sources/website-business.js';
+import { resolveBusiness } from './resolve-business.js';
+import { isSiteOnly } from '../splash/collect.js';
+import { getSplashJob, leadPhotoPath, recheckSplashJob, splashBlocking, splashOutput, splashPage, startSplashJob, type SplashLead } from '../splash/jobs.js';
+import { getReferenceJob, ReferenceInputError, resumeReferenceIfStale, resumeReferenceJob, startReferenceJob } from './concepts/references.js';
 
 /**
  * The design studio's API (Phase 1: business brief).
+ *   POST /api/studio/resolve               { text } or { name, address } or { placeId } → the confirmed Google place ID, or the
+ *                                          businesses to choose from (a ZIP, street or town alone is never a business)
  *   POST /api/studio/jobs                  { website } or { google } → 202 { id }: the job runs in the background
  *   GET  /api/studio/jobs                  recent jobs
  *   GET  /api/studio/jobs/:id              the job: each stage's status, progress, notes and errors
@@ -26,6 +36,60 @@ import { IdentityError } from '../sources/website-business.js';
 export const studioRoutes = express.Router();
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
 
+// ── splash pages (one-page homepages): start for a Google place, poll, preview ──
+studioRoutes.post('/splash', wrap(async (req, res) => {
+  // a Google listing (its Place ID), or a business known from its website alone (its research record, "site-<host>")
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const site = str(req.body?.businessKey);
+  const placeId = site && isSiteOnly(site) && site.length <= 200 ? site : str(req.body?.placeId);
+  if (!isSiteOnly(placeId) && !/^[A-Za-z0-9_-]{10,200}$/.test(placeId)) return res.status(400).json({ error: 'Give the Google place ID of the business, or research its website first.' });
+  const job = await startSplashJob(placeId, { instruction: typeof req.body?.instruction === 'string' ? req.body.instruction : undefined });
+  res.status(202).json({ id: job.id, status: job.status, url: `/api/studio/splash/${job.id}` });
+}));
+studioRoutes.get('/splash/:id', wrap(async (req, res) => {
+  const job = await getSplashJob(String(req.params.id));
+  if (!job) return res.status(404).json({ error: 'No such splash job.' });
+  const { input, code, ...summary } = job;
+  res.json({ ...summary, idea: code?.idea, design_tokens: code?.design_tokens, previewUrl: code ? `/api/studio/splash/${job.id}/preview` : undefined, blocking: job.status === 'ready' ? splashBlocking(job) : [] });
+}));
+studioRoutes.get('/splash/:id/preview', wrap(async (req, res) => {
+  const job = await getSplashJob(String(req.params.id));
+  if (!job?.code) return res.status(404).type('text/plain').send('No splash page for this id yet.');
+  res.set({ 'cache-control': 'no-store', 'x-robots-tag': 'noindex' }).type('html').send(await splashPage(job));
+}));
+
+// the checks again on a splash page as it is (no AI): the page keeps its id, its checks are replaced
+studioRoutes.post('/splash/:id/recheck', wrap(async (req, res) => {
+  const job = await recheckSplashJob(String(req.params.id));
+  if (!job) return res.status(409).json({ error: 'There is no finished page to check (or its checks are already running).' });
+  res.status(202).json({ id: job.id, status: job.status });
+}));
+
+// the Roger dashboard of quote and appointment requests from splash pages, newest first
+studioRoutes.get('/splash-leads', wrap(async (_req, res) => {
+  const leads = (await studioDocs.list<SplashLead>('splash-leads')).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 500);
+  const jobs = new Map<string, Awaited<ReturnType<typeof getSplashJob>>>();
+  for (const id of new Set(leads.map((l) => l.jobId))) jobs.set(id, await getSplashJob(id));
+  res.set({ 'cache-control': 'no-store' }).json({ leads: leads.map((l) => {
+    const j = jobs.get(l.jobId);
+    return { ...l, business: String(j?.plan?.fact_sheet.find((f) => f.field === 'name')?.value ?? j?.input?.business.name ?? l.placeId), trade: j?.plan?.trade.row ?? null, previewUrl: `/api/studio/splash/${l.jobId}/preview`, photoUrl: l.photoId ? leadPhotoPath(l.photoId) : null };
+  }) });
+}));
+
+// the spec's output: {trade, fact_sheet, open_questions, screen_plan, design_tokens, html, jsonld, qa}
+studioRoutes.get('/splash/:id/output', wrap(async (req, res) => {
+  const job = await getSplashJob(String(req.params.id));
+  if (!job?.code || !job.plan) return res.status(404).json({ error: 'No splash page for this id yet.' });
+  res.set({ 'cache-control': 'no-store' }).json(await splashOutput(job));
+}));
+
+studioRoutes.post('/resolve', wrap(async (req, res) => {
+  const b = (req.body || {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 300) : undefined);
+  const input = { text: str(b.text), name: str(b.name), address: str(b.address), placeId: str(b.placeId) };
+  if (!input.text && !input.name && !input.address && !input.placeId) return res.status(400).json({ error: 'Give the business name, or its name and address, or a Google Maps link.' });
+  res.json(await resolveBusiness(input));
+}));
 studioRoutes.post('/jobs', wrap(async (req, res) => {
   const b = (req.body || {}) as { website?: string; google?: string };
   try {
@@ -73,7 +137,7 @@ studioRoutes.get('/snapshots/:id', wrap(async (req, res) => {
  *   GET  /api/studio/businesses                 every business with a brief: its latest revision, name and hash
  *   POST /api/studio/reviews                    an owner review of one pinned brief revision → 201 { id }; 409 if the brief has moved on
  *   GET  /api/studio/reviews/:id
- *   POST /api/studio/concepts                   { businessKey, revision?, briefHash?, reviewId? } → 202 { id, setId }: three homepage concepts (preview)
+ *   POST /api/studio/concepts                   { businessKey, revision?, briefHash?, reviewId? } → 202 { id, setId }: up to STUDIO_MAX_DIRECTIONS ranked homepage concepts (preview)
  *   GET  /api/studio/concept-jobs/:id           the concept job: its stages, notes and errors
  *   GET  /api/studio/concept-sets/:id           the concept set: concepts, checks, distinctness, cost, publication gate
  *   Previews (HTML and screenshots): /studio-previews/<setId>/...
@@ -98,15 +162,29 @@ studioRoutes.get('/reviews/:id', wrap(async (req, res) => {
   res.json(r);
 }));
 studioRoutes.post('/concepts', wrap(async (req, res) => {
-  const b = (req.body || {}) as { businessKey?: string; revision?: number; briefHash?: string; reviewId?: string };
+  const b = (req.body || {}) as { businessKey?: string; revision?: number; briefHash?: string; reviewId?: string; planner?: string };
   if (!b.businessKey) return res.status(400).json({ error: 'businessKey is required' });
   try {
-    const job = await startConceptJob({ businessKey: b.businessKey, revision: b.revision, briefHash: b.briefHash, reviewId: b.reviewId });
+    const job = await startConceptJob({ businessKey: b.businessKey, revision: b.revision, briefHash: b.briefHash, reviewId: b.reviewId, ...(b.planner === 'open' ? { planner: 'open' as const } : {}) });
     res.status(202).json({ id: job.id, setId: job.setId, url: `/api/studio/concept-jobs/${job.id}` });
   } catch (e) {
     if (e instanceof StaleBrief) return res.status(409).json({ error: e.message });
     throw e;
   }
+}));
+/**
+ *   GET  /api/studio/concept-jobs?businessKey=…   the concept jobs (newest first): id, set, status, failed stage
+ *   POST /api/studio/concept-jobs/:id/resume      a failed or interrupted job continues from its first unfinished stage
+ */
+studioRoutes.get('/concept-jobs', wrap(async (req, res) => {
+  const key = typeof req.query.businessKey === 'string' ? req.query.businessKey : undefined;
+  const jobs = (await studioDocs.list<ConceptJob>('studio-concept-jobs')).filter((j) => !key || j.input.businessKey === key).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 50);
+  res.json({ jobs: jobs.map((j) => ({ id: j.id, setId: j.setId, businessKey: j.input.businessKey, status: j.status, createdAt: j.createdAt, updatedAt: j.updatedAt, resumes: j.resumes, failedStage: j.stages.find((s) => s.status === 'failed')?.name, error: j.error })) });
+}));
+studioRoutes.post('/concept-jobs/:id/resume', wrap(async (req, res) => {
+  const j = await resumeConceptJob(String(req.params.id));
+  if (!j) return res.status(404).json({ error: 'No such concept job' });
+  res.status(202).json({ id: j.id, status: j.status, url: `/api/studio/concept-jobs/${j.id}` });
 }));
 studioRoutes.get('/concept-jobs/:id', wrap(async (req, res) => {
   const found = await getConceptJob(String(req.params.id));
@@ -187,7 +265,165 @@ studioRoutes.post('/concept-sets/:id/share', wrap(async (req, res) => {
   const set = await getConceptSet(String(req.params.id));
   if (!set) return res.status(404).json({ error: 'No such concept set' });
   const conceptId = String((req.body || {}).conceptId || '');
-  if (!set.concepts.some((c) => c.id === conceptId)) return res.status(400).json({ error: 'conceptId must be a, b or c of this set' });
+  if (!set.concepts.some((c) => c.id === conceptId)) return res.status(400).json({ error: `conceptId must be one of this set's concepts (${set.concepts.map((c) => c.id).join(', ')})` });
   const share = await createShare({ setId: set.id, conceptId, businessKey: set.brief.businessKey, revision: set.brief.revision });
   res.status(201).json({ url: shareUrl(share.token), token: share.token, setId: set.id, conceptId, kind: 'homepage preview (not a published website)' });
+}));
+
+/**
+ *   POST /api/studio/concept-sets/:id/site   { conceptId } → 202 { id }: the chosen concept becomes the full site (home and
+ *        inner pages) through the builder; a business already built from this set only switches design
+ *   GET  /api/studio/site-jobs/:id           → stages as they happen, then siteUrl, ownerUrl and the review checks
+ */
+studioRoutes.post('/concept-sets/:id/site', wrap(async (req, res) => {
+  try {
+    // reuse: { businessKey, revision } names the business record whose built draft may be re-rendered (explicit, never guessed)
+    const reuse = (req.body || {}).reuse as { businessKey?: unknown; revision?: unknown } | undefined;
+    const job = await startSiteJob(String(req.params.id), String((req.body || {}).conceptId || ''), reuse ? { reuse: { businessKey: String(reuse.businessKey ?? ''), revision: Number(reuse.revision) } } : {});
+    res.status(202).json({ id: job.id, url: `/api/studio/site-jobs/${job.id}` });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+}));
+/**
+ *   POST /api/studio/references        { businessKey, revision?, referenceUrl?, keepBrand? } → 202 { id }: reference
+ *        research for a verified brief (staff may supply one reference URL; the brand is kept unless keepBrand is false)
+ *   GET  /api/studio/reference-jobs/:id → stages, the inspected references and the saved design strategy
+ */
+studioRoutes.post('/references', wrap(async (req, res) => {
+  const b = (req.body || {}) as { businessKey?: string; revision?: number; referenceUrl?: string; keepBrand?: boolean };
+  if (!b.businessKey) return res.status(400).json({ error: 'businessKey is required' });
+  try {
+    const job = await startReferenceJob({ businessKey: b.businessKey, revision: b.revision, referenceUrl: typeof b.referenceUrl === 'string' ? b.referenceUrl : undefined, keepBrand: b.keepBrand !== false });
+    res.status(202).json({ id: job.id, url: `/api/studio/reference-jobs/${job.id}` });
+  } catch (e) {
+    if (e instanceof ReferenceInputError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+}));
+studioRoutes.get('/reference-jobs/:id', wrap(async (req, res) => {
+  const found = await getReferenceJob(String(req.params.id));
+  if (!found) return res.status(404).json({ error: 'No such reference job' });
+  res.json(await resumeReferenceIfStale(found));
+}));
+/**
+ *   POST /api/studio/reference-jobs/:id/resume   { from?: 'strategy' } → 202: a failed job continues from its first
+ *        unfinished stage; from 'strategy' writes the strategy again from the references it already inspected
+ */
+studioRoutes.post('/reference-jobs/:id/resume', wrap(async (req, res) => {
+  const from = (req.body || {}).from;
+  if (from !== undefined && from !== 'strategy') return res.status(400).json({ error: 'from may only be "strategy"' });
+  try {
+    const j = await resumeReferenceJob(String(req.params.id), from ? { from } : {});
+    if (!j) return res.status(404).json({ error: 'No such reference job' });
+    res.status(202).json({ id: j.id, status: j.status, url: `/api/studio/reference-jobs/${j.id}` });
+  } catch (e) {
+    if (e instanceof ReferenceInputError) return res.status(400).json({ error: e.message });
+    throw e;
+  }
+}));
+studioRoutes.get('/site-jobs/:id', wrap(async (req, res) => {
+  const found = await getSiteJob(String(req.params.id));
+  if (!found) return res.status(404).json({ error: 'No such site job' });
+  res.json(await resumeSiteIfStale(found));
+}));
+
+// Custom frontend pilot: no theme selection, no DesignSpec renderer, no publication route.
+studioRoutes.get('/frontend-sources', wrap(async (_req, res) => {
+  const jobs = (await studioDocs.list<ConceptJob>('studio-concept-jobs')).filter((j) => j.status === 'done').sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const seen = new Set<string>();
+  const sources = [];
+  for (const j of jobs) {
+    if (seen.has(j.input.businessKey)) continue;
+    seen.add(j.input.businessKey);
+    const { brief } = await getBrief(j.input.businessKey, j.input.revision);
+    if (brief) sources.push({ jobId: j.id, name: brief.identity.name.value, businessKey: j.input.businessKey, revision: j.input.revision });
+  }
+  res.json({ sources });
+}));
+studioRoutes.post('/frontend-jobs', wrap(async (req, res) => {
+  const source = typeof req.body?.sourceJobId === 'string' && /^cj_[a-z0-9]+$/.test(req.body.sourceJobId) ? req.body.sourceJobId
+    : typeof req.body?.businessKey === 'string' && req.body.businessKey.length < 300 && Number.isInteger(req.body.revision) && req.body.revision > 0
+      ? { businessKey: req.body.businessKey, revision: req.body.revision } : null;
+  if (!source) return res.status(400).json({ error: 'Finish business research, then use its business key and revision.' });
+  try {
+    // "again": another version on purpose; otherwise a repeated start returns the job already under way or just finished
+    const job = await startFrontendJob(source, typeof req.body.instruction === 'string' ? req.body.instruction.slice(0, 2000) : '', { again: req.body?.again === true });
+    res.status(job.reused ? 200 : 202).json({ id: job.id, status: job.status, ...(job.reused ? { reused: true, note: 'The same business and direction is already generating or was just generated; that job is returned. Ask for another version to make a new one.' } : {}) });
+  } catch (e) { res.status(400).json({ error: (e as Error).message }); }
+}));
+studioRoutes.get('/frontend-jobs/:id', wrap(async (req, res) => {
+  const job = await getFrontendJob(String(req.params.id));
+  if (!job) return res.status(404).json({ error: 'No such frontend job.' });
+  const { input, code, site, ...summary } = job;
+  res.json({ ...summary, idea: code?.idea, notes: input.notes, pages: [{ slug: 'home', title: 'Home', url: job.previewUrl }, ...(job.pages ?? []).map((p) => ({ slug: p.slug, title: p.title, url: `/api/studio/frontend-jobs/${job.id}/preview/${p.slug}` }))] });
+}));
+// a version's editable text by page, and a new version from owner edits (the version edited never changes; no AI)
+studioRoutes.get('/frontend-jobs/:id/text', wrap(async (req, res) => {
+  const job = await getFrontendJob(String(req.params.id));
+  if (!job || job.status !== 'needs-review') return res.status(404).json({ error: 'No finished version.' });
+  res.json({ id: job.id, version: job.version, text: versionText(job) });
+}));
+// resume a job that failed at its inner pages, reusing its accepted homepage, brief and photo checks (explicit; never automatic)
+studioRoutes.post('/frontend-jobs/:id/resume', wrap(async (req, res) => {
+  try { const job = await resumeFrontendJob(String(req.params.id)); res.status(202).json({ id: job.id, status: job.status, stage: 'pages' }); }
+  catch (e) { res.status(400).json({ error: (e as Error).message }); }
+}));
+// ── the custom full-site intake: staff review of each version before its link reaches the customer ──
+studioRoutes.get('/imessage-reviews', wrap(async (_req, res) => {
+  const out = [];
+  for (const c of await customConversations()) {
+    const versions = [];
+    for (const v of c.run.versions) {
+      // a splash page: one page, its checks as the spec reports them (blocking findings hold it back; the rest are notes)
+      if (v.jobId?.startsWith('sp_')) {
+        const sp = await getSplashJob(v.jobId);
+        const blocking = sp ? splashBlocking(sp) : [];
+        versions.push({ ...v, job: sp ? {
+          id: sp.id, kind: 'splash', status: sp.status, stage: sp.stage ?? null, rev: 1, idea: sp.code?.idea ?? null, costUsd: sp.costUsd, attempts: sp.attempts, createdAt: sp.createdAt, updatedAt: sp.updatedAt, error: sp.error ?? null,
+          pages: sp.code ? [{ slug: 'home', staffUrl: `/api/studio/splash/${sp.id}/preview` }] : [],
+          checks: { blocking: sp.status === 'ready' ? blocking : [], staff: (sp.qa?.needs_human ?? []).filter((x) => !(sp.qa?.blocking ?? []).includes(x)) },
+          review: sp.review ? { ran: sp.review.ran, pass: sp.review.pass, pages: sp.review.pages.map((p) => ({ page: p.page, width: p.width, pass: p.pass, credits: p.credits })) } : null,
+          withheld: sp.withheld ?? [], delivery: null, qa: sp.qa ? { passed: sp.qa.passed, fixed: sp.qa.fixed, needs_human: sp.qa.needs_human } : null,
+        } : null });
+        continue;
+      }
+      const job = v.jobId ? await getFrontendJob(v.jobId) : undefined;
+      versions.push({ ...v, job: job ? {
+        id: job.id, status: job.status, stage: job.stage ?? null, rev: job.rev ?? 1, idea: job.code?.idea ?? null, costUsd: job.costUsd, attempts: job.attempts, createdAt: job.createdAt, updatedAt: job.updatedAt, error: job.error ?? null,
+        pages: job.status === 'needs-review' ? ['home', ...(job.pages ?? []).map((p) => p.slug)].map((slug) => ({ slug, staffUrl: pagePath(job.id, slug) })) : [],
+        checks: job.status === 'needs-review' ? versionChecks(job) : { blocking: blockingProblems(job), staff: [] },
+        review: job.review ? { ran: job.review.ran, pass: job.review.pass, pages: job.review.pages.map((p) => ({ page: p.page, width: p.width, pass: p.pass, credits: p.credits })) } : null,
+        withheld: job.withheldPhotos ?? [], delivery: job.delivery ?? null,
+      } : null });
+    }
+    out.push({ from: c.from, business: c.business ?? c.run.name, updatedAt: c.updatedAt, run: { ...c.run, versions: undefined }, versions, messages: c.messages });
+  }
+  res.json({ conversations: out });
+}));
+studioRoutes.post('/imessage-reviews/:from/:n/:decision', wrap(async (req, res) => {
+  const decision = String(req.params.decision);
+  if (!['send', 'reject', 'recheck', 'resume'].includes(decision)) return res.status(400).json({ error: 'decision must be send, reject, recheck or resume' });
+  const r = await staffDecision(String(req.params.from), Number(req.params.n), decision as 'send' | 'reject' | 'recheck' | 'resume', typeof req.body?.reviewer === 'string' && req.body.reviewer.trim() ? req.body.reviewer.trim().slice(0, 80) : 'staff', typeof req.body?.note === 'string' ? req.body.note.slice(0, 500) : '');
+  res.status(r.ok ? 200 : 409).json(r);
+}));
+// the standard rendered-page review, run again on demand: reported, never saved (a version is never changed)
+studioRoutes.post('/frontend-jobs/:id/review', wrap(async (req, res) => {
+  const job = await getFrontendJob(String(req.params.id));
+  if (!job || job.status !== 'needs-review') return res.status(404).json({ error: 'No finished version with this id.' });
+  try { const r = await reviewVersion(structuredClone(job)); res.json({ id: job.id, review: r.review, delivery: r.delivery }); }
+  catch (e) { res.status(400).json({ error: (e as Error).message }); }
+}));
+studioRoutes.post('/frontend-jobs/:id/versions', wrap(async (req, res) => {
+  const edits = req.body?.edits;
+  if (!edits || typeof edits !== 'object' || Array.isArray(edits) || !Object.keys(edits).length) return res.status(400).json({ error: 'Send edits as { key: text }.' });
+  try { const job = await editedVersion(String(req.params.id), edits as Record<string, string>); res.status(201).json({ id: job.id, version: job.version, previewUrl: job.previewUrl }); }
+  catch (e) { res.status(400).json({ error: (e as Error).message }); }
+}));
+studioRoutes.get(['/frontend-jobs/:id/preview', '/frontend-jobs/:id/preview/:slug'], wrap(async (req, res) => {
+  const job = await getFrontendJob(String(req.params.id));
+  const slug = typeof req.params.slug === 'string' ? req.params.slug : 'home';
+  if (job?.status === 'needs-review' && slug !== 'home' && !job.pages?.some((p) => p.slug === slug)) return res.status(404).send('No such page in this version.');
+  if (!job || job.status !== 'needs-review') return res.status(404).send('No frontend preview.');
+  res.set({ 'cache-control': 'private, no-store', 'x-robots-tag': 'noindex,nofollow',
+    'content-security-policy': "sandbox allow-popups allow-popups-to-escape-sandbox; default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src https: data: 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
+    'referrer-policy': 'no-referrer' }).type('html').send(await frontendPreview(job, slug));
 }));

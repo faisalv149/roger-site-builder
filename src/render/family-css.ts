@@ -53,6 +53,7 @@ a.f-book:hover,a.f-book:focus-visible{text-decoration:underline}
 :is(.fe-foot,.fw-foot,.fb-foot) a[href^="tel:"]{display:inline-flex;align-items:center;min-height:44px}
 .credit{opacity:.85}
 img[src^="/gphoto/"]{object-fit:cover}
+figcaption a,.d-credit a,.lb-fig figcaption a{color:inherit;text-decoration:underline}
 .f-svc-also li span{font-weight:400;color:var(--ink-muted);margin-left:6px}
 /* image-led service cards */
 .f-svc{padding-block:var(--section-y)}
@@ -63,7 +64,7 @@ img[src^="/gphoto/"]{object-fit:cover}
 .f-svc-card:hover,.f-svc-card:focus-within{transform:translateY(-2px);box-shadow:0 2px 4px rgba(15,23,42,.08),0 16px 34px -14px rgba(15,23,42,.3)}
 .f-svc-media{aspect-ratio:16/10;background:var(--surface-alt);display:grid;place-items:center;overflow:hidden}
 .f-svc-media img{display:block;width:100%;height:100%;object-fit:cover}
-.f-svc-media.is-icon{color:var(--heading,var(--brand-text))}
+.f-svc-card.is-text{border-top:4px solid var(--brand,var(--heading,var(--ink)))}
 .f-svc-body{display:flex;flex-direction:column;gap:var(--sp-3);padding:24px;flex:1}
 .f-svc-body h3{margin:0;font-size:var(--fs-xl);line-height:1.2;color:var(--heading,var(--ink))}
 .f-svc-body h3 a{color:inherit;text-decoration:none}

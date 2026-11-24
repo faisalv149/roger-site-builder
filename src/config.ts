@@ -59,13 +59,34 @@ const googleKey = process.env.GOOGLE_MAPS_API_KEY || '';
 // OUT_DIR: generated sites, cards and reports (default out/). On a host, point it and DATA_DIR at the persistent disk.
 const OUT = process.env.OUT_DIR ? path.resolve(process.env.OUT_DIR) : TMP ? path.join(TMP, 'out') : path.join(ROOT, 'out');
 // Hosts that announce their public URL: Render (RENDER_EXTERNAL_URL), Railway (RAILWAY_PUBLIC_DOMAIN, no scheme)
+// A Vercel preview serves itself (VERCEL_URL): its sites, cards and owner links must not point at the production domain
 const hostUrl = process.env.RENDER_EXTERNAL_URL
   || (process.env.RAILWAY_PUBLIC_DOMAIN && `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`)
+  || (process.env.VERCEL_ENV === 'preview' && process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`)
   || (process.env.VERCEL_PROJECT_PRODUCTION_URL && `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`);
 
 export const config = {
   port: Number(process.env.PORT || 4000),
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || hostUrl || `http://localhost:${process.env.PORT || 4000}`).replace(/\/$/, ''),
+  /**
+   * The public HTTPS origin customers' preview links are built from (ROGER_PUBLIC_ORIGIN, else PUBLIC_BASE_URL or the
+   * host's own URL when that is HTTPS). Never localhost or a private address: with none, no link is sent to a customer.
+   */
+  publicOrigin: (() => {
+    const o = (process.env.ROGER_PUBLIC_ORIGIN || process.env.PUBLIC_BASE_URL || hostUrl || '').replace(/\/$/, '');
+    try { const u = new URL(o); return u.protocol === 'https:' && !/^(localhost|127\.|10\.|192\.168\.|0\.0\.0\.0|\[?::1)/.test(u.hostname) && !u.hostname.endsWith('.local') ? u.origin : ''; } catch { return ''; }
+  })(),
+  /**
+   * The invite-only client beta of the custom iMessage flow (ROGER_BETA=1): the custom simulator only for invited
+   * testers (and staff), staff authentication required for every review action, spend and job caps per invite and per day.
+   */
+  beta: {
+    enabled: process.env.ROGER_BETA === '1',
+    inviteSpendUsd: Number(process.env.ROGER_BETA_INVITE_USD || 6),
+    inviteBusinesses: Number(process.env.ROGER_BETA_INVITE_BUSINESSES || 2),
+    versionsPerBusiness: Number(process.env.ROGER_BETA_VERSIONS || 3),
+    dailySpendUsd: Number(process.env.ROGER_BETA_DAILY_USD || 25),
+  },
   /** Password for the Studio, the API and the iMessage demo page (user STUDIO_USER, default "roger"). Unset = open (local). */
   studioPassword: process.env.STUDIO_PASSWORD || '',
   studioUser: process.env.STUDIO_USER || 'roger',

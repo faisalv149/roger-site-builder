@@ -1,4 +1,6 @@
+import { writeStoredFile } from './google-names.js';
 import fs from 'node:fs';
+import { forStorageText } from './google-names.js';
 import path from 'node:path';
 import { config } from './config.js';
 import type { SiteModel } from './content/model.js';
@@ -15,7 +17,7 @@ import { pageSeo, robotsTxt, sitemapXml, type SeoContext } from './seo.js';
 export interface SiteFile { file: string; content: string }
 
 /** The SitePlan for a composed model: deterministic from what the business actually has. */
-export function sitePlanFor(m: SiteModel, opts: { previous?: unknown; mode?: 'single' | 'multi' } = {}): SitePlan {
+export function sitePlanFor(m: SiteModel, opts: { previous?: unknown; mode?: 'single' | 'multi'; aboutWanted?: boolean } = {}): SitePlan {
   const prev = opts.previous ? validateSitePlan(opts.previous) : undefined;
   const d = m.design!;
   return buildSitePlan({
@@ -24,6 +26,7 @@ export function sitePlanFor(m: SiteModel, opts: { previous?: unknown; mode?: 'si
     about: { intro: d.intro, team: !!d.team, years: m.facts.years, trust: m.trust.length, reviews: m.proof.quotes.length },
     contact: { address: !!m.contact.address, hours: m.hours.rows.length > 0, phone: !!m.contact.phone },
     mode: opts.mode,
+    aboutWanted: opts.aboutWanted,
     previous: prev?.ok ? prev.plan : undefined,
   });
 }
@@ -60,7 +63,7 @@ export function writeSiteFiles(dir: string, files: SiteFile[], previous?: SitePl
   for (const f of files) {
     const abs = path.join(dir, f.file);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, f.content);
+    writeStoredFile(abs, forStorageText(f.content, f.file));
   }
 }
 

@@ -4,7 +4,7 @@ import type { OfferingView } from '../design/compose.js';
 import { esc } from '../util/text.js';
 import { icon } from './icons.js';
 import { reviewSlider } from './widgets.js';
-import { hoursTable, ic, leadForm, mapEmbed, ratingBadge, stars, trustRow } from './parts.js';
+import { hoursTable, ic, tileSrc, leadForm, mapEmbed, ratingBadge, stars, trustRow } from './parts.js';
 import { footer as legacyFooter, type Ctx } from './sections.js';
 
 /**
@@ -188,7 +188,7 @@ export function team({ m, l, bg }: Ctx): string {
 
 /* ───────────── gallery: grid · masonry · strip · large (photos open the full-screen viewer) ───────────── */
 export function fig(p: SiteImage, i: number, total: number, cls = '') {
-  return `<figure class="${cls}"><button type="button" class="lb-open" data-lb-i="${i}" aria-label="Open photo ${i + 1} of ${total}"><img src="${esc(p.publicPath)}" width="${p.width}" height="${p.height}" alt="${esc(p.alt)}" loading="lazy" decoding="async"></button>${p.credit ? `<figcaption>${esc(p.credit)}</figcaption>` : ''}</figure>`;
+  return `<figure class="${cls}"><button type="button" class="lb-open" data-lb-i="${i}" aria-label="Open photo ${i + 1} of ${total}"><img ${tileSrc(p.publicPath)} width="${p.width}" height="${p.height}" alt="${esc(p.alt)}" loading="lazy" decoding="async"></button>${p.credit ? `<figcaption>${esc(p.credit)}</figcaption>` : ''}</figure>`;
 }
 export function gallery({ m, l, bg }: Ctx): string {
   const ps = D(m).gallery;

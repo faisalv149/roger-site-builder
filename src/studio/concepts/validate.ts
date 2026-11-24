@@ -4,7 +4,10 @@ import { findAddresses } from '../address.js';
 import type { Catalog } from './review.js';
 import type { PageMetrics, Rendered } from './render.js';
 import { isListing } from './listing-photos.js';
+import { photoRole } from './directions.js';
+import { factValues } from './designspec.js';
 import type { Check, Concept } from './types.js';
+import { UI_DEBRIS, undatedSeasonal } from '../../util/text.js';
 
 /**
  * Checks on rendered concepts, from what Chrome actually drew:
@@ -80,6 +83,9 @@ export function rights(m: PageMetrics, cat: Catalog, concept: Concept, html = ''
 export function photosShown(m: PageMetrics, cat: Catalog, available: number): Check {
   const shown = new Set(m.images.map((i) => i.asset).filter((x): x is string => !!x && x !== 'logo')).size;
   if (!available) return { id: 'photos', level: 'review', message: 'No usable photos: neither the website nor the Google listing gave one that fits. This concept needs photos from the owner before it is finished.' };
+  // photos exist but none can be verified to show the business (undescribed, or showing something else): leaving them
+  // out is the rule, not a failure; the concept needs the owner's photos or descriptions
+  if (!shown && !cat.photos.some((p) => photoRole(p, cat).role === 'subject')) return { id: 'photos', level: 'review', message: `${available} photo(s) available, but none is verified to show the business (no description ties it to what the business does), so none is shown. The owner's photos or descriptions are needed.` };
   if (!shown) return { id: 'photos', level: 'fail', message: `${available} usable photo(s) available, but this concept shows none.` };
   return { id: 'photos', level: 'pass', message: `${shown} of ${available} usable photo(s) shown.` };
 }
@@ -140,9 +146,53 @@ export function accessibility(d: PageMetrics, mob: PageMetrics): Check {
   return { id: 'accessibility', level: out.length ? 'fail' : 'pass', message: out.length ? `${out.length} accessibility problem(s)` : `${n} text runs meet WCAG AA contrast (worst case over photos); every tap target is at least 44×44; alt text, one h1, heading order and no sideways scroll on mobile.`, ...(out.length ? { details: out.slice(0, 20) } : {}) };
 }
 
+/**
+ * Shared preview rules, read off the rendered page: an undated seasonal promotion may not lead the hero (it goes stale
+ * after the date), and no crawler debris ("map marker pin") may show as text.
+ */
+export function previewRules(r: Rendered, html: string): Check {
+  const errs: string[] = [];
+  const hero = html.match(/<section[^>]*data-kind="hero"[\s\S]*?<\/section>/)?.[0] ?? '';
+  const heroText = (tag: string) => [...hero.matchAll(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'g'))].map((m) => m[1].replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim());
+  for (const t of [...heroText('h1'), ...heroText('p')]) { const season = undatedSeasonal(t); if (season) errs.push(`the hero leads with an undated seasonal promotion ("${t.slice(0, 70)}": "${season}")`); }
+  for (const [label, m] of [['desktop', r.desktop.metrics], ['mobile', r.mobile.metrics]] as const) {
+    const debris = m.text.match(new RegExp(UI_DEBRIS.source, 'i'));
+    if (debris) errs.push(`${label}: crawler debris shows as text ("${debris[0]}")`);
+    // the rights check reads the desktop page; a photo that did not load on the phone leaves an empty frame there
+    for (const i of m.images.filter((x) => !x.ok)) errs.push(`${label}: picture ${i.asset ?? i.src.slice(0, 50)} did not load`);
+  }
+  const out = [...new Set(errs)];
+  return { id: 'preview-rules', level: out.length ? 'fail' : 'pass', message: out.length ? `${out.length} preview rule(s) broken` : 'The hero leads with something lasting, and no crawler debris shows as text.', ...(out.length ? { details: out } : {}) };
+}
+
+/**
+ * An open design's page shows what it must, read from the rendered page (not from headings): the verified hours and
+ * address, each in its facts block with its text on the page; the rating and the reviews link in one block; no hero aside
+ * drawn with nothing in it.
+ */
+export function factsShown(html: string, m: PageMetrics, cat: Catalog): Check {
+  const errs: string[] = [];
+  const values = factValues(cat);
+  const flat = (x: string) => x.replace(/\s+/g, ' ').trim().toLowerCase();
+  const text = flat(m.text);
+  for (const k of ['hours', 'address'] as const) {
+    const v = values[k];
+    if (!v) continue;
+    if (!html.includes(`data-fact="${k}"`)) errs.push(`the verified ${k} are not on the page`.replace('address are', 'address is'));
+    else if (!v.every((line) => text.includes(flat(line)))) errs.push(`the verified ${k} block does not show every line (${v.join('; ')})`);
+  }
+  const hero = html.match(/<section[^>]*data-kind="hero"[\s\S]*?<\/section>/)?.[0] ?? '';
+  for (const a of hero.matchAll(/<(div|ol|figure) class="hero-aside[^"]*"[^>]*>([\s\S]*?)<\/\1>/g)) if (!a[2].replace(/<(?!img)[^>]+>/g, '').trim()) errs.push('the hero has an empty aside box');
+  const reviewActs = cat.actions.filter((a) => a.kind === 'reviews').map((a) => a.id);
+  const blocks = [...html.matchAll(/<section id="([^"]+)"[\s\S]*?<\/section>/g)].filter((x) => x[0].includes('data-fact="rating"') || reviewActs.some((id) => x[0].includes(`data-action="${id}"`)));
+  if (blocks.length > 1) errs.push(`the rating and the reviews link are spread over ${blocks.length} sections (${blocks.map((x) => x[1]).join(', ')})`);
+  if ((html.match(/data-fact="rating"/g) ?? []).length > 1) errs.push('the rating is shown more than once');
+  return { id: 'facts', level: errs.length ? 'fail' : 'pass', message: errs.length ? `${errs.length} required fact problem(s)` : `Verified ${(['hours', 'address'] as const).filter((k) => values[k]).join(' and ') || 'facts'} shown from data; the rating at most once, with its reviews link; no empty hero box.`, ...(errs.length ? { details: errs } : {}) };
+}
+
 export function checkConcept(concept: Concept, r: Rendered, cat: Catalog, availablePhotos = cat.photos.length): Check[] {
   const html = fs.existsSync(r.html) ? fs.readFileSync(r.html, 'utf8') : '';
-  return [grounding(r.desktop.metrics, cat), grounding(r.mobile.metrics, cat), rights(r.desktop.metrics, cat, concept, html), links(r.desktop.metrics, cat), links(r.mobile.metrics, cat), imagery(r.desktop.metrics, cat), photosShown(r.desktop.metrics, cat, availablePhotos), accessibility(r.desktop.metrics, r.mobile.metrics)]
+  return [previewRules(r, html), grounding(r.desktop.metrics, cat), grounding(r.mobile.metrics, cat), rights(r.desktop.metrics, cat, concept, html), links(r.desktop.metrics, cat), links(r.mobile.metrics, cat), imagery(r.desktop.metrics, cat), photosShown(r.desktop.metrics, cat, availablePhotos), accessibility(r.desktop.metrics, r.mobile.metrics), ...(concept.designSpecId ? [factsShown(html, r.desktop.metrics, cat), factsShown(html, r.mobile.metrics, cat)] : [])]
     .reduce<Check[]>((acc, c) => { const prev = acc.find((x) => x.id === c.id); if (!prev) acc.push(c); else if (c.level === 'fail') { prev.level = 'fail'; prev.message = c.message; prev.details = [...new Set([...(prev.details ?? []), ...(c.details ?? [])])]; } return acc; }, []);
 }
 

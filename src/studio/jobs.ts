@@ -67,11 +67,11 @@ export function newJob(input: StudioJob['input']): StudioJob {
 }
 
 /** Create the job, save it, start it in the background, and return it at once. */
-export async function startStudioJob(input: StudioJob['input'], hooks: JobHooks = {}): Promise<StudioJob> {
+export async function startStudioJob(input: StudioJob['input'], hooks: JobHooks = {}, opts: { /** pages to read (default STUDIO_MAX_PAGES, 20) */ maxPages?: number } = {}): Promise<StudioJob> {
   if (!input.website?.trim() && !input.google?.trim() && !input.fromSnapshot) throw new IdentityError('Give a website address, or a Google Business Profile link or address.');
   const job = newJob({ website: input.website?.trim() || undefined, google: input.website?.trim() ? undefined : input.google?.trim() || undefined, fromSnapshot: input.fromSnapshot });
   await saveJob(job);
-  await studioDocs.put('studio-work', job.id, { jobId: job.id, input: job.input, budget: budgetFromEnv(), discovery: [], pages: {}, stylesheets: {}, assets: {} } satisfies Work);
+  await studioDocs.put('studio-work', job.id, { jobId: job.id, input: job.input, budget: { ...budgetFromEnv(), ...(opts.maxPages ? { maxPages: opts.maxPages } : {}) }, discovery: [], pages: {}, stylesheets: {}, assets: {} } satisfies Work);
   void keepAlive(runStudioJob(job.id, hooks));
   return job;
 }

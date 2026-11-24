@@ -61,6 +61,8 @@ export function rogerWidget(m: SiteModel): string {
   const name = esc(m.business.name);
   // no phone on Google: no number is invented; the call panel offers a call back instead
   const phone = m.contact.phone && m.contact.tel ? { display: m.contact.phone, tel: m.contact.tel } : undefined;
+  // a phone held for the owner (website and Google disagree): no call panel, no call button, no "call" in any label
+  const held = !phone && !!m.contact.phoneHeld;
   // the business's own online booking page (from its website), when there is one
   const booking = m.source?.booking && m.source.booking.kind === 'online' ? m.source.booking : undefined;
   const field = (id: string, label: string, type: string, auto: string) => `<label class="rw-f" for="${id}">${label}<input id="${id}" name="${type === 'tel' ? 'phone' : 'name'}" type="${type}" autocomplete="${auto}" required${type === 'tel' ? ' inputmode="tel"' : ''}></label>`;
@@ -85,7 +87,7 @@ export function rogerWidget(m: SiteModel): string {
     <div class="rw-quick" data-rw-quick></div>
     <form class="rw-say" data-rw-say><input name="t" type="text" placeholder="Type a message…" aria-label="Message" autocomplete="off"><button type="submit" aria-label="Send">${icon('send', { size: 18 })}</button></form>
   </section>
-  <section class="rw-panel" data-panel="call" role="dialog" aria-labelledby="rw-call-h" hidden>
+  ${held ? '' : `<section class="rw-panel" data-panel="call" role="dialog" aria-labelledby="rw-call-h" hidden>
     ${panelHead('rw-call-h', `Call ${name}`)}
     <div class="rw-pb rw-call">
       ${phone ? `<a class="rw-num" href="${esc(phone.tel)}" data-ev="call">${icon('phone-call', { size: 22 })}${esc(phone.display)}</a>
@@ -97,14 +99,14 @@ export function rogerWidget(m: SiteModel): string {
         <div class="rw-ok" data-rw-ok hidden>${icon('circle-check', { size: 36 })}<b>Got it</b><span>${name} will call you back shortly.</span></div>
       </details>
     </div>
-  </section>
+  </section>`}
   <div class="rw-dock" role="toolbar" aria-label="Contact ${name}">
     ${booking ? `<button type="button" class="rw-btn" data-open="book" aria-expanded="false">${icon('calendar-days', { size: 24 })}<span>Book</span></button>` : ''}
     <button type="button" class="rw-btn" data-open="chat" aria-expanded="false">${icon('message-circle-more', { size: 24 })}<span>Chat</span><i class="rw-dot" aria-hidden="true"></i></button>
-    <button type="button" class="rw-btn" data-open="call" aria-expanded="false">${icon('phone-call', { size: 24 })}<span>${phone ? 'Call' : 'Call back'}</span></button>
+    ${held ? '' : `<button type="button" class="rw-btn" data-open="call" aria-expanded="false">${icon('phone-call', { size: 24 })}<span>${phone ? 'Call' : 'Call back'}</span></button>`}
     <button type="button" class="rw-min" data-rw-min aria-label="Minimize">${icon('minus', { size: 16 })}</button>
   </div>
-  <button type="button" class="rw-launch" data-rw-max aria-label="${booking ? 'Book, chat or call' : 'Chat with or call'} ${name}">${icon('message-circle-more', { size: 26 })}<i class="rw-dot" aria-hidden="true"></i></button>
+  <button type="button" class="rw-launch" data-rw-max aria-label="${held ? (booking ? 'Book or chat with' : 'Chat with') : booking ? 'Book, chat or call' : 'Chat with or call'} ${name}">${icon('message-circle-more', { size: 26 })}<i class="rw-dot" aria-hidden="true"></i></button>
 </div>`;
 }
 
@@ -187,6 +189,8 @@ html.lb-lock{overflow:hidden}
 .rw-launch{display:none;position:relative;width:62px;height:62px;place-items:center;border:0;border-radius:50%;background:var(--rw-bg);color:#fff;cursor:pointer;box-shadow:0 14px 32px rgba(0,0,0,.3)}
 .rw-launch .rw-dot{top:10px;right:10px}
 .rw[data-state=min] .rw-dock{display:none}
+/* the closed widget never sits on top of a form field or a button: it steps aside while one is underneath */
+.rw.is-tucked:not([data-state=open]){visibility:hidden;pointer-events:none}
 .rw[data-state=min] .rw-launch{display:grid;animation:rw-pop .35s cubic-bezier(.2,.9,.3,1.2) both}
 .rw-panel{position:absolute;right:0;bottom:calc(100% + 14px);width:min(370px,calc(100vw - 32px));max-height:min(580px,calc(100vh - 150px));display:flex;flex-direction:column;overflow:hidden;border-radius:20px;background:var(--surface);color:var(--ink);box-shadow:0 28px 70px rgba(0,0,0,.28);transform-origin:bottom right;animation:rw-pop .28s cubic-bezier(.2,.9,.3,1.1) both}
 .rw-panel[hidden]{display:none}
@@ -256,6 +260,8 @@ export const WIDGETS_JS = (m: SiteModel) => {
     name: m.business.name,
     phone,
     endpoint: m.urls.leadEndpoint,
+    // the phone is held for the owner: the chat never offers or mentions calls
+    held: !!m.contact.phoneHeld,
     hours: m.hours.compact.map((h) => `${h.days}: ${h.time}`),
     services: m.services.items.slice(0, 4).map((s) => s.label),
     // appointments are offered only when the business takes bookings online (its own booking page)
@@ -338,6 +344,17 @@ export const WIDGETS_JS = (m: SiteModel) => {
   var rw=$('[data-rw]'); if(!rw) return;
   var C=${JSON.stringify(cfg).replace(/</g, '\\u003c')}, KEY='roger-widget:'+location.pathname, opened=null, trigger=null;
   try{ if(localStorage.getItem(KEY)==='open') rw.setAttribute('data-state','closed') }catch(e){}
+  /* keep the closed widget clear of the page's own fields and buttons (not those in other fixed bars) */
+  var tuckList=null, tuckQueued=false;
+  function inFixed(e){for(var p=e.parentElement;p&&p!==document.body;p=p.parentElement){if(getComputedStyle(p).position==='fixed') return true}return false}
+  function tuckTargets(){tuckList=[].slice.call(document.querySelectorAll('input,select,textarea,button,a.btn,[role=button]')).filter(function(e){return !rw.contains(e)&&!inFixed(e)})}
+  function tuck(){tuckQueued=false; if(rw.getAttribute('data-state')==='open'){rw.classList.remove('is-tucked');return}
+    if(!tuckList) tuckTargets(); var r=rw.getBoundingClientRect(), hit=false;
+    for(var i=0;i<tuckList.length&&!hit;i++){var b=tuckList[i].getBoundingClientRect(); hit=b.width>0&&b.height>0&&b.bottom>r.top-8&&b.top<r.bottom+8&&b.right>r.left-8&&b.left<r.right+8}
+    rw.classList.toggle('is-tucked',hit)}
+  function tuckSoon(){if(!tuckQueued){tuckQueued=true;requestAnimationFrame(tuck)}}
+  addEventListener('scroll',tuckSoon,{passive:true}); addEventListener('resize',function(){tuckList=null;tuckSoon()}); document.addEventListener('focusin',tuckSoon); setTimeout(tuck,0);
+  if(window.MutationObserver) new MutationObserver(tuckSoon).observe(rw,{attributes:true,attributeFilter:['data-state']});
   function remember(v){try{localStorage.setItem(KEY,v)}catch(e){}}
   function panel(n){return $('[data-panel="'+n+'"]',rw)}
   function open(n,from){ /* a booking panel needs no setup */ if(opened===n){close();return} close(true); opened=n; trigger=from||null; var p=panel(n); p.hidden=false;
@@ -384,14 +401,14 @@ export const WIDGETS_JS = (m: SiteModel) => {
       msgs.appendChild(f);msgs.scrollTop=1e9;f.querySelector('input').focus();
       wire(f,'Chat',function(){return talk.join('\\n')},function(n){f.remove();bubble('Sent','u');roger('Thanks '+String(n).split(' ')[0]+'! '+C.name+' has your message and will reach out soon.')})})}
   function userSays(t){bubble(t,'u');var s=t.toLowerCase();
-    if(/hour|open|close/.test(s)) roger(C.hours.length?'The hours listed are:\\n'+C.hours.join('\\n'):C.phone?'No hours are listed here. Call '+C.phone+' to ask.':'No hours are listed here. Leave your number and the business will tell you.',function(){chips(C.book?['Request an appointment','Send a message','Call me back']:['Send a message','Call me back'])});
+    if(/hour|open|close/.test(s)) roger(C.hours.length?'The hours listed are:\\n'+C.hours.join('\\n'):C.phone?'No hours are listed here. Call '+C.phone+' to ask.':'No hours are listed here. Leave your number and the business will tell you.',function(){chips((C.book?['Request an appointment','Send a message']:['Send a message']).concat(C.held?[]:['Call me back']))});
     else if(C.book&&/book|visit|appoint|schedul/.test(s)) roger('I can open the appointment request. The business confirms the time with you.',function(){setTimeout(function(){open('book')},500)});
     else if(/quote|price|cost|estimate/.test(s)&&!asked) roger('Happy to help. What do you need?',function(){chips(C.services.concat(['Something else']))});
-    else if(/call|phone|ring/.test(s)) roger(C.phone?'You can call us at '+C.phone+', or I can have someone call you back.':'Leave your number and someone will call you back.',askContact);
+    else if(/call|phone|ring/.test(s)) roger(C.phone?'You can call us at '+C.phone+', or I can have someone call you back.':C.held?'Leave your name and number and '+C.name+' will get back to you.':'Leave your number and someone will call you back.',askContact);
     else askContact();
   }
   function chatStart(){ if(chatReady) return; chatReady=true;
-    roger("Hi, I'm Roger, an assistant on "+C.name+"'s website. I can pass a message to the business, show the hours it has listed"+(C.book?", or send an appointment request":"")+". What would you like?",function(){chips(C.book?['Send a message','Request an appointment','Hours','Call me back']:['Send a message','Hours','Call me back'])}) }
+    roger("Hi, I'm Roger, an assistant on "+C.name+"'s website. I can pass a message to the business, show the hours it has listed"+(C.book?", or send an appointment request":"")+". What would you like?",function(){chips((C.book?['Send a message','Request an appointment','Hours']:['Send a message','Hours']).concat(C.held?[]:['Call me back']))}) }
   $('[data-rw-say]',rw).addEventListener('submit',function(e){e.preventDefault();var i=$('input',e.currentTarget),t=i.value.trim();if(!t) return;i.value='';userSays(t)});
 })();`;
 };

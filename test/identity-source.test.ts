@@ -47,11 +47,13 @@ images.set('/img/logo.png', await sharp({ create: { width: 735, height: 226, cha
 let base = '';
 const server = http.createServer((req, res) => {
   const u = new URL(req.url!, 'http://x');
-  const variant = u.pathname.startsWith('/broken/') ? 'broken' : u.pathname.startsWith('/nophone/') ? 'nophone' : 'main';
-  const p = u.pathname.replace(/^\/(broken|nophone)/, '') || '/';
+  const variant = u.pathname.startsWith('/broken/') ? 'broken' : u.pathname.startsWith('/nophone/') ? 'nophone' : u.pathname.startsWith('/offsubject/') ? 'offsubject' : 'main';
+  const p = u.pathname.replace(/^\/(broken|nophone|offsubject)/, '') || '/';
   if (p === '/' || p === '/index.html') {
     let html = template.replaceAll('{{BASE}}', `${base}${variant === 'main' ? '' : `/${variant}`}`);
     // a page whose pictures are gone, and one without any phone number
+    // a service picture whose own words show something else
+    if (variant === 'offsubject') html = html.replace('alt="Skincare treatment room"', 'alt="Our front desk team"');
     if (variant === 'broken') html = html.replace(/\/img\/(photo|poster|svc)-/g, '/gone/$1-');
     if (variant === 'nophone') html = html.replace(/<a href="tel:512-296-3519">512-296-3519<\/a>/g, '').replace(/\| 512-296-3519/g, '').replace(/<span>512-296-3519<\/span>/g, '').replace(/<a href="tel:1-512-630-3723">/g, '<a href="https://example.test/massage">');
     res.writeHead(200, { 'content-type': 'text/html' }); return res.end(html);
@@ -280,9 +282,12 @@ test('service pictures stay with their services, cropped to one shape, with a fo
   const byName = (n: string) => cards.find((c) => c.includes(n))!;
   for (const n of SERVICES) {
     const c = byName(n.replace('&', '&amp;'));
-    assert.match(c, /<div class="f-svc-media"><img src="assets\/svc-\d\.webp" width="900" height="562" alt=""/, `${n}: a 16:10 picture of its own, marked decorative because the heading names it`);
+    assert.match(c, /<div class="f-svc-media"><img src="assets\/svc-\d\.webp" width="900" height="562" alt="[^"]*"/, `${n}: a 16:10 picture of its own`);
     assert.match(c, /object-position:\d+% \d+%/, `${n}: its focal point`);
   }
+  // an alt that only restates the heading is decorative; one that adds something stays
+  assert.match(byName('Massage Chair Session'), /alt="" loading/);
+  assert.match(byName('Decompression Therapy'), /alt="Spinal decompression therapy table"/);
   // each card's own booking destination
   assert.match(byName('Massage Therapy'), /href="tel:1-512-630-3723"[^>]*>Call to book/);
   assert.match(byName('Chiropractic Adjustment'), /href="https:\/\/practice\.chirotouch\.com\/portal\/LakesideChiropractic"[^>]*>Book online/);
@@ -303,6 +308,17 @@ test('service pictures stay with their services, cropped to one shape, with a fo
   assert.match(html, /\.f-svc-card\{[^}]*border-radius:20px/);
   assert.match(html, /\.f-svc-grid\{[^}]*gap:24px/);
   assert.match(html, /\.f-svc-media\{aspect-ratio:16\/10/);
+});
+
+test('a service whose picture shows something else gets a clean text card, not a placeholder', async () => {
+  const r = await buildSite({ placeId: 'mock-geo-78645', website: `${base}/offsubject/`, audit: false, screenshot: false, slug: 'off-subject-picture' });
+  const html = read(r.slug);
+  const cards = html.match(/<li class="f-svc-card[^"]*">[\s\S]*?<\/li>/g) || [];
+  const skin = cards.find((c) => c.includes('Skincare &amp; Wellness'))!;
+  assert.ok(skin, 'the service is still offered');
+  assert.match(skin, /^<li class="f-svc-card is-text">/, 'a text card');
+  assert.doesNotMatch(skin, /f-svc-media|<img/, 'no picture and no placeholder block');
+  assert.equal(cards.filter((c) => /f-svc-media"><img/.test(c)).length, 4, 'the other services keep their own pictures');
 });
 
 test('a page without usable pictures keeps its services as a list, and a lost picture is a finding', async () => {

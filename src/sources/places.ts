@@ -47,7 +47,7 @@ function score(b: Business, q: string): number {
 }
 const toCandidate = (b: Business): BusinessCandidate => ({
   placeId: b.placeId, name: b.name, address: b.formattedAddress, rating: b.rating, reviewCount: b.reviewCount,
-  primaryTypeLabel: b.primaryTypeLabel, primaryType: b.primaryType, types: b.types, phone: b.phone, googleWebsite: b.website, website: b.website, mapsUrl: b.mapsUrl, photoRef: b.photos[0]?.ref,
+  primaryTypeLabel: b.primaryTypeLabel, primaryType: b.primaryType, types: b.types, phone: b.phone, googleWebsite: b.website, website: b.website, mapsUrl: b.mapsUrl,
 });
 
 // ───────────────────────── search ─────────────────────────
@@ -111,7 +111,6 @@ export async function searchCandidates(input: string, opts: { zip?: string; limi
       googleWebsite: p.websiteUri,
       website: p.websiteUri,
       mapsUrl: p.googleMapsUri,
-      photoRef: p.photos?.[0]?.name,
     }),
   );
   return { intent, ...onlyBusinesses(all) };
@@ -255,7 +254,7 @@ export async function liveListingPhotos(placeId: string): Promise<LivePhoto[]> {
   return (p.photos || []).map((ph: any) => ({ name: ph.name, width: ph.widthPx, height: ph.heightPx, authors: (ph.authorAttributions || []).map((a: any) => ({ name: a.displayName, uri: a.uri })), mapsUri: ph.googleMapsUri }));
 }
 /** A listing's reviews as Google returns them now, for the page being served (never stored). */
-export interface LiveReview { author: string; authorUri?: string; text: string; rating: number; when?: string; mapsUri?: string }
+export interface LiveReview { author: string; authorUri?: string; /** the reviewer's profile picture (live, never stored) */ avatar?: string; text: string; rating: number; when?: string; mapsUri?: string }
 export async function liveReviews(placeId: string): Promise<{ reviews: LiveReview[]; mapsUri?: string }> {
   if (config.mock) {
     const hit = mockBusinesses().find((b) => b.placeId === placeId);
@@ -264,7 +263,7 @@ export async function liveReviews(placeId: string): Promise<{ reviews: LiveRevie
   const p = await fetchJson<any>(`${BASE}/places/${encodeURIComponent(placeId)}`, { headers: headers('reviews,googleMapsUri') });
   return {
     mapsUri: p.googleMapsUri,
-    reviews: (p.reviews || []).map((r: any) => ({ author: r.authorAttribution?.displayName || 'Google user', authorUri: r.authorAttribution?.uri, text: r.text?.text || r.originalText?.text || '', rating: r.rating, when: r.relativePublishTimeDescription, mapsUri: r.googleMapsUri })),
+    reviews: (p.reviews || []).map((r: any) => ({ author: r.authorAttribution?.displayName || 'Google user', authorUri: r.authorAttribution?.uri, avatar: r.authorAttribution?.photoUri, text: r.text?.text || r.originalText?.text || '', rating: r.rating, when: r.relativePublishTimeDescription, mapsUri: r.googleMapsUri })),
   };
 }
 

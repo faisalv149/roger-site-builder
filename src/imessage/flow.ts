@@ -11,9 +11,15 @@ import { personaliseInfo, startRefinement } from '../design/refine.js';
 import { profileFor, type Category } from '../design/categories.js';
 import { getDraft, issueOwnerKey, ownerUrl, putDraft, withDraftLock } from '../drafts.js';
 import { channelFor } from '../channels.js';
+import { applyConcept, nextConcept } from '../studio/concepts/site.js';
 import { addComparisonToReport, canScoreNewSite, scoreMessage, scoreNewSite } from '../audit/compare.js';
 import { saveBuild } from '../store.js';
 import type { Job } from '../jobs.js';
+import { advanceIntake, intakeBusy, intakeModeOf, newIntake, requestVersion, type IntakeMode, type IntakeRun } from './intake.js';
+import { resolveBusiness, type Resolution } from '../studio/resolve-business.js';
+import { respondCustom, settle } from './custom-flow.js';
+import { advanceCustom, customBusy, customMessages, staffRecheck, staffReject, staffResume, staffSend, type CustomRun } from './custom-intake.js';
+import { listConversationRecords, withSharedLock } from '../store.js';
 
 /**
  * Reference conversation for the Roger iMessage flow. Your iMessage gateway posts each
@@ -31,6 +37,8 @@ interface Session {
   candidates: BusinessCandidate[];
   idx: number;
   chosen?: BusinessCandidate;
+  /** when the owner said yes to the chosen listing ("Is this you?")  */
+  confirmedAt?: string;
   lastSiteUrl?: string;
   lastBuildId?: string;
   /** when the running build started (ms) */
@@ -45,6 +53,17 @@ interface Session {
   audit?: BuildResult['audit'];
   /** personalising the preview: which question is next and the answers so far (saved, so a restart resumes here) */
   personalise?: { step: Step; buildId: string; prefs: DesignPreferences; suggestions: string[]; phoneOk: boolean; emergencyVerified: boolean; category?: Category };
+  /** this conversation's preview comes from the design engine (brief → ranked concepts → chosen site), behind a flag */
+  /** 'open' (test-only): brief → references → open DesignSpec concept → full site */
+  intakeMode?: IntakeMode;
+  /** the running (or finished) concept intake: which stage, which job holds it, and each stage's timing */
+  intake?: IntakeRun;
+  /** the custom full-site intake (test-only): its run, and the name and location the customer gave */
+  custom?: CustomRun;
+  query?: string;
+  /** the beta invite this conversation belongs to (custom intake) */
+  inviteId?: string;
+  from?: string;
 }
 const fresh = (): Session => ({ state: 'start', candidates: [], idx: 0 });
 
@@ -67,12 +86,12 @@ async function record(from: string, add: Conversation['messages'], s: Session): 
   return c;
 }
 
-export interface Reply { text: string; url?: string; image?: string; title?: string; quickReplies?: string[] }
+export interface Reply { text: string; url?: string; image?: string; title?: string; subtitle?: string; choice?: string; quickReplies?: string[] }
 const fromCard = (c: IMessageCard): Reply => ({ text: c.text, url: c.url, image: c.image, title: c.title, quickReplies: c.quickReplies });
 const outgoing = (replies: Reply[]): Conversation['messages'] => { const at = new Date().toISOString(); return replies.map((r) => ({ dir: 'out' as const, at, ...r })); };
 
 const PERSONALISE = /\b(personali[sz]e|customi[sz]e|change (something|it|the (style|design|look|layout))|tweak|make it (more )?mine)\b/i;
-const ALTERNATIVE = /\b(different|another|other|new) (design|look|style|layout)\b|\btry (a|another) design\b/i;
+const ALTERNATIVE = /\b(different|another|other|new) (design|look|style|layout|version)\b|\btry (a|another) design\b/i;
 const YES = /^(y|yes|yep|yeah|yup|sure|correct|that'?s (me|us|it)|ok|okay|please|do it|build it|let'?s go|sounds good|go ahead|show me)\b/i;
 const NO = /^(n|no|nope|not (me|us|really|now)|wrong)\b/i;
 const URL_RE = /(https?:\/\/[^\s]+|(?:www\.)?[a-z0-9-]+\.(?:com|net|org|biz|us|co|io|pro|info|services|site)(?:\/[^\s]*)?)/i;
@@ -103,8 +122,18 @@ interface Ctx { async: boolean; s: Session; pending?: InboundResult['pending'] }
  * async: reply "On it" right away and send the preview when the build finishes
  * (saved to the conversation and POSTed to IMESSAGE_OUTBOUND_URL). Otherwise everything comes back in one go.
  */
-export async function handleInbound(from: string, text: string, opts: { async?: boolean } = {}): Promise<InboundResult> {
+export async function handleInbound(from: string, text: string, opts: { async?: boolean; intake?: string; /** a verified beta invite (the server checks it) */ inviteId?: string } = {}): Promise<InboundResult> {
+  if (opts.intake === 'custom' || (await loadSession(from)).intakeMode === 'custom') return inConversation(from, () => inbound(from, text, opts));
+  return inbound(from, text, opts);
+}
+async function inbound(from: string, text: string, opts: { async?: boolean; intake?: string; inviteId?: string }): Promise<InboundResult> {
   const ctx: Ctx = { async: !!opts.async, s: await loadSession(from) };
+  if (opts.inviteId) ctx.s.inviteId = opts.inviteId;
+  ctx.s.from = from;
+  // the concept intake: on for everyone only with ROGER_INTAKE_CONCEPTS=1; otherwise per conversation, by an authenticated test intake
+  // 'open' only by an authenticated test intake; 'concepts' by that or by ROGER_INTAKE_CONCEPTS=1
+  const mode = intakeModeOf(opts.intake);
+  if (mode) ctx.s.intakeMode = mode;
   await record(from, [{ dir: 'in', at: new Date().toISOString(), text }], ctx.s);
   const replies = await respond(from, text, ctx);
   const c = await record(from, outgoing(replies), ctx.s);
@@ -122,6 +151,8 @@ const buildLimitMs = () => Number(process.env.BUILD_LIMIT_SECONDS || 900) * 1000
  * instance may be running it: a finished build has a saved record; until then it counts as running.
  */
 async function pending(s: Session): Promise<boolean> {
+  if (s.state === 'building' && s.custom) return customBusy(s.custom);
+  if (s.state === 'building' && s.intake) return intakeBusy(s.intake);
   if (s.state !== 'building' || !s.lastBuildId) return false;
   if (getJob(s.lastBuildId)) return true;
   if (!process.env.VERCEL) return false; // single server: no job here means it restarted mid-build
@@ -131,6 +162,60 @@ async function pending(s: Session): Promise<boolean> {
 }
 export async function isPending(from: string): Promise<boolean> {
   return pending(await loadSession(from));
+}
+
+/**
+ * Move a concept intake forward (each poll of the conversation calls this): resume the stage that stopped, start the
+ * next one, and send the top-ranked preview once the site is built. Safe to call often: it starts nothing twice.
+ */
+export async function pollIntake(from: string): Promise<IntakeRun | undefined> {
+  const s0 = await loadSession(from);
+  if (s0.intakeMode === 'custom') { await pollCustom(from); return undefined; }
+  const s = s0;
+  if (s.state !== 'building' || !s.intake || !intakeBusy(s.intake)) return s.intake;
+  const run = await advanceIntake(s.intake);
+  // another poll may have delivered meanwhile: only the one that sees it still building delivers
+  const latest = await loadSession(from);
+  if (latest.state !== 'building' || latest.intake?.id !== run.id) return latest.intake;
+  latest.intake = run;
+  const replies = intakeReplies(latest);
+  await record(from, outgoing(replies), latest);
+  if (replies.length) await channelFor(from).deliver(from, replies);
+  return run;
+}
+/** what the client gets when the intake ends: the top-ranked preview with its two choices, or an apology */
+function intakeReplies(s: Session): Reply[] {
+  const run = s.intake!;
+  if (run.next) {
+    const v = run.next;
+    const made = v.stage === 'done' ? run.versions?.find((x) => x.id === v.versionId) : undefined;
+    if (made) {
+      s.state = 'done';
+      s.lastSiteUrl = made.siteUrl;
+      run.shownVersion = made.id;
+      return [{ text: `Here's another version of your site.`, url: made.siteUrl, quickReplies: DONE_CHOICES }];
+    }
+    if (v.stage === 'failed') {
+      console.error(`[imessage] version ${v.id} failed at ${v.failedStage}: ${v.error}`);
+      s.state = 'done';
+      const notDifferent = /different|distinct/i.test(`${v.failedStage} ${v.error}`);
+      return [{ text: notDifferent ? 'I couldn\'t make a version that looks different enough from the one you\'ve seen. Your current preview is still here.' : 'Sorry, I couldn\'t make another version just now. Your current preview is still here.', url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
+    }
+    return [];
+  }
+  if (run.stage === 'done' && run.siteUrl) {
+    run.shownVersion = run.versions?.[0]?.id ?? run.shownVersion;
+    s.state = 'done';
+    s.lastSiteUrl = run.siteUrl;
+    const checks = run.checks ?? [];
+    return [{ text: `Here's a preview of a new site for ${s.chosen?.name ?? 'your business'}.${checks.length ? ` A few things need your check before it goes live: ${checks.slice(0, 2).join('; ')}.` : ''}`, url: run.siteUrl, quickReplies: DONE_CHOICES }];
+  }
+  if (run.stage === 'failed') {
+    console.error(`[imessage] concept intake ${run.id} failed at ${run.failedStage}: ${run.error}`);
+    s.state = 'offer';
+    return [{ text: 'Sorry, something went wrong while building your preview. I\'ve flagged it for the team. Reply "try again" and I\'ll give it another go.', quickReplies: ['Try again'] }];
+  }
+  return [];
 }
 
 interface Finished { siteUrl?: string; ownerUrl?: string; replies: Reply[] }
@@ -174,7 +259,9 @@ async function finishedReplies(job: Job, kind: 'build' | 'update', s: Session): 
   }
   const owner = await issueOwnerLink(job.result.draftId).catch(() => undefined);
   const card = kind === 'build' ? fromCard(job.result.cards.find((c) => c.kind === 'site-preview')!) : updatedCard(job);
-  return { siteUrl: job.result.siteUrl, ownerUrl: owner, replies: [card, ...(owner ? [editorReply(owner)] : [])] };
+  // one preview and its two choices; the owner editor link is for the team, not sent to the client
+  void editorReply;
+  return { siteUrl: job.result.siteUrl, ownerUrl: owner, replies: [{ ...card, quickReplies: DONE_CHOICES }] };
 }
 
 /**
@@ -209,7 +296,8 @@ async function keepAlive(p: Promise<unknown>) {
 }
 
 const host = (u: string) => { try { return new URL(/^https?:/i.test(u) ? u : `https://${u}`).host.replace(/^www\./, ''); } catch { return u; } };
-const DONE_CHOICES = ['Personalize it', 'Try a different design', 'Publish it'];
+/** the client's two choices on a preview: approve it, or ask for another version (never layout controls) */
+const DONE_CHOICES = ['Approve and publish', 'Request another version'];
 
 /** The question in front of the owner, asked again after Roger answers something else. */
 function nextStep(s: Session): Reply | undefined {
@@ -223,9 +311,16 @@ const andThen = (s: Session, first: Reply): Reply[] => { const n = nextStep(s); 
 
 async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
   const msg = text.trim();
-  if (/^(restart|reset|start over)$/i.test(msg)) { ctx.s = fresh(); return respond(from, 'hi', ctx); }
+  if (/^(restart|reset|start over)$/i.test(msg)) { ctx.s = { ...fresh(), ...(ctx.s.intakeMode ? { intakeMode: ctx.s.intakeMode } : {}), ...(ctx.s.inviteId ? { inviteId: ctx.s.inviteId } : {}), from }; return respond(from, 'hi', ctx); }
   const s = ctx.s;
+  // the custom full-site intake (test-only) has its own conversation (custom-flow.ts)
+  if (s.intakeMode === 'custom') { const r = await respondCustom(msg, s as never); if (s.state === 'building') ctx.pending = { jobId: s.custom?.id ?? 'custom' }; return r; }
 
+  if (s.state === 'building' && s.intake) {
+    s.intake = await advanceIntake(s.intake);
+    const done = intakeReplies(s);
+    return done.length ? done : [{ text: 'Still building your preview. I\'ll text you the link as soon as it\'s ready.' }];
+  }
   if (s.state === 'building') {
     if (await pending(s)) return [{ text: 'Still building your preview. I\'ll text you the link as soon as it\'s ready.' }];
     // the build finished but its delivery didn't reach this conversation: send it now
@@ -282,6 +377,7 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
     if (searching && !YES.test(msg)) return findBusiness(msg, s); // they sent a different business instead of yes or no
     if (!YES.test(msg)) return [{ text: 'Is this your business? Just reply yes or no.', quickReplies: ['Yes, that\'s me', 'No, not us'] }];
     s.chosen = s.candidates[s.idx];
+    s.confirmedAt = new Date().toISOString();
     s.state = 'offer';
     const site = s.website || s.chosen.website;
     if (site) {
@@ -302,16 +398,30 @@ async function respond(from: string, text: string, ctx: Ctx): Promise<Reply[]> {
     return build(from, ctx);
   }
 
-  if (s.state === 'done' && s.lastBuildId && s.lastSiteUrl) {
-    if (ALTERNATIVE.test(msg) || RETRY.test(msg)) return refine(from, ctx, s.lastBuildId, {}, true);
-    if (PERSONALISE.test(msg)) return startPersonalise(s);
-    if (PUBLISH.test(msg)) return goLive(s);
+  if (s.state === 'done' && (s.lastBuildId || s.intake?.draftId) && s.lastSiteUrl) {
+    if ((ALTERNATIVE.test(msg) || RETRY.test(msg)) && s.intake?.mode === 'open') return anotherVersion(ctx);
+    if (ALTERNATIVE.test(msg) || RETRY.test(msg)) {
+      // a site made from a concept set: the next of its saved concepts in rank order, never a new one
+      const rec = s.intake?.draftId ? undefined : await getBuild(s.lastBuildId!);
+      const draftId = s.intake?.draftId ?? rec?.result?.draftId;
+      const d = draftId ? await getDraft(draftId) : undefined;
+      const next = d?.concept ? await nextConcept(d.concept) : undefined;
+      if (d?.concept && next) {
+        await applyConcept(d.id, d.concept.setId, next);
+        return [{ text: `Here's design ${next.id.toUpperCase()}, "${next.name}": ${s.lastSiteUrl}`, url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
+      }
+      if (!s.lastBuildId) return [{ text: `Your preview is here: ${s.lastSiteUrl}`, url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
+      return refine(from, ctx, s.lastBuildId, {}, true);
+    }
+    // no design controls for the client: a change request is a request for another version
+    if (PERSONALISE.test(msg)) return respond(from, 'Request another version', ctx);
+    if (PUBLISH.test(msg) || /\bapprove/i.test(msg)) return goLive(s);
     if (CHECK.test(msg)) return checkDetails(s);
     if (THANKS.test(msg)) return [{ text: `${/thank|thx|^ty\b/i.test(msg) ? 'You\'re welcome!' : 'Sounds good!'} Text me anytime if you'd like changes.`, quickReplies: DONE_CHOICES }];
   }
 
   if (s.chosen && (/build|preview/i.test(msg) || RETRY.test(msg))) { s.state = 'offer'; return respond(from, 'yes', ctx); }
-  if (s.lastSiteUrl) return [{ text: `Here's your preview again: ${s.lastSiteUrl}\n\nI can personalize it, try a different design, or help you put it live. Text "restart" to start over with a different business.`, quickReplies: DONE_CHOICES }];
+  if (s.lastSiteUrl) return [{ text: `Here's your preview again: ${s.lastSiteUrl}\n\nReply "Approve and publish" if you're happy with it, or "Request another version" for a different design. Text "restart" to start over with a different business.`, quickReplies: DONE_CHOICES }];
   return [{ text: 'Sorry, I didn\'t catch that. Send me your website, or your business name and ZIP code, and I\'ll find you on Google. Text "restart" anytime to start over.' }];
 }
 
@@ -330,6 +440,8 @@ async function findBusiness(msg: string, s: Session): Promise<Reply[]> {
     s.state = 'need-business';
     return [{ text: 'What\'s your business name and ZIP code? I\'ll use them to find your Google listing.' }];
   }
+  // the open intake with no website: the name and/or address resolve to one Google listing the owner confirms
+  if (s.intakeMode === 'open' && !s.website) return findOpen(query, s);
   let candidates: BusinessCandidate[];
   try {
     ({ candidates } = await lookupCandidates(query, { website: s.website, limit: 5 }));
@@ -351,9 +463,38 @@ async function findBusiness(msg: string, s: Session): Promise<Reply[]> {
   return [fromCard(await confirmBusinessCard(candidates[0]))];
 }
 
+/**
+ * The open intake's lookup (resolveBusiness, on Roger's Google search): one business that matches the name (and the
+ * address, if given) is offered to confirm; when several match, the owner chooses among them, one at a time; a ZIP,
+ * street or town alone is never taken as the business: the businesses there are offered, or the name is asked for.
+ * The listing the owner says yes to is the place ID the intake designs from.
+ */
+async function findOpen(query: string, s: Session): Promise<Reply[]> {
+  let r: Resolution;
+  try { r = await resolveBusiness({ text: query }); } catch (e) {
+    console.warn(`[imessage] open lookup of "${query}" failed: ${(e as Error).message}`);
+    s.state = 'need-business';
+    return [{ text: 'Sorry, I couldn\'t reach Google just now. Could you send that again in a minute?' }];
+  }
+  const offered = r.status === 'confirmed' ? [r.candidate] : r.candidates;
+  if (!offered.length) {
+    s.state = 'need-business';
+    return [{ text: r.status === 'need-name'
+      ? 'That looks like an address, not a business name. What\'s the business called? Send the name and ZIP code and I\'ll find you on Google.'
+      : 'I couldn\'t find that on Google. Could you send the business name and ZIP code exactly as they appear on Google? A Google Maps link to your listing works too.' }];
+  }
+  s.candidates = offered;
+  s.idx = 0;
+  s.state = 'confirm';
+  const intro = r.status === 'choose' ? `I found ${offered.length} businesses that match. Let's find yours.` : r.status === 'need-name' ? `That's an address, so I looked for the businesses there${offered.length > 1 ? ` and found ${offered.length}` : ''}.` : '';
+  const card = fromCard(await confirmBusinessCard(offered[0]));
+  return intro ? [{ text: intro }, card] : [card];
+}
+
 /** "Yes, build it": start the build and send the preview when it is ready. */
 async function build(from: string, ctx: Ctx): Promise<Reply[]> {
   const s = ctx.s;
+  if (s.intakeMode === 'concepts' || s.intakeMode === 'open') return buildConcepts(from, ctx);
   const job = startBuild({ placeId: s.chosen!.placeId, website: s.website, audit: false }, { source: 'imessage', from, audit: s.audit }); // the audit already ran
   s.lastBuildId = job.id;
   s.state = 'building';
@@ -361,6 +502,42 @@ async function build(from: string, ctx: Ctx): Promise<Reply[]> {
   s.buildEta = undefined;
   const ack: Reply = { text: 'On it! I\'m building your preview now. I\'ll text you the link as soon as it\'s ready.' };
   return deliver(from, ctx, job, 'build', ack);
+}
+
+/**
+ * The concept intake's first step: research (or the saved brief) → ranked concepts → the top-ranked site. "On it" now;
+ * the preview follows when the poll that finds the site built delivers it (pollIntake).
+ */
+async function buildConcepts(from: string, ctx: Ctx): Promise<Reply[]> {
+  const s = ctx.s;
+  // the owner said "yes, that's me" to this listing (s.chosen is set only by that answer): recorded as their confirmation
+  s.intake = await advanceIntake(newIntake({ placeId: s.chosen!.placeId, website: s.website, confirmed: { by: 'owner', placeId: s.chosen!.placeId, at: s.confirmedAt ?? new Date().toISOString() } }, s.intakeMode));
+  s.state = 'building';
+  s.buildStartedAt = Date.now();
+  s.lastBuildId = undefined;
+  ctx.pending = { jobId: s.intake.id };
+  const ack: Reply = { text: 'On it! I\'m building your preview now. I\'ll text you the link as soon as it\'s ready.' };
+  const done = intakeReplies(s);
+  return done.length ? [ack, ...done] : [ack];
+}
+
+/**
+ * "Request another version" on the open intake: one request makes one new version (a new DesignSpec, meaningfully
+ * different from those shown, built and given its own link). "On it" now; the link follows when it is ready.
+ */
+async function anotherVersion(ctx: Ctx): Promise<Reply[]> {
+  const s = ctx.s;
+  const run = s.intake!;
+  const r = await requestVersion(run);
+  if (r === 'busy') return [{ text: 'Still making your other version. I\'ll text you the link as soon as it\'s ready.' }];
+  if (r === 'unavailable') return [{ text: `Your preview is here: ${s.lastSiteUrl}`, url: s.lastSiteUrl, quickReplies: DONE_CHOICES }];
+  s.state = 'building';
+  s.buildStartedAt = Date.now();
+  ctx.pending = { jobId: run.next!.id };
+  s.intake = await advanceIntake(run);
+  const ack: Reply = { text: 'On it! I\'m making another version of your site. I\'ll text you the link as soon as it\'s ready.' };
+  const done = intakeReplies(s);
+  return done.length ? [ack, ...done] : [ack];
 }
 
 /** Wait for a build (or send "On it" now and the result later) and hand over what it produced. */
@@ -389,25 +566,29 @@ async function editorLink(s: Session, rec: BuildRecord | undefined): Promise<str
   return s.ownerUrl;
 }
 
+/**
+ * "Approve and publish": the approval goes to the team, who publish once the publication gates are clear (facts,
+ * photo rights, lead delivery). The client gets no editor and no layout controls: one preview, approve or ask again.
+ */
 async function goLive(s: Session): Promise<Reply[]> {
-  const rec = await getBuild(s.lastBuildId!);
-  const link = await editorLink(s, rec);
-  const checks = openChecks(rec);
-  if (!link) {
-    s.followUp = { at: new Date().toISOString(), reason: 'publish' };
-    return [{ text: 'Glad you like it! I\'ve asked someone from the team to get in touch and help you put it live.' }];
+  const run = s.intake;
+  if (run?.mode === 'open') {
+    const v = run.versions?.find((x) => x.id === run.shownVersion) ?? run.versions?.[run.versions.length - 1];
+    run.approved = v
+      ? { versionId: v.id, n: v.n, designSpecId: v.designSpecId, siteUrl: v.siteUrl, at: new Date().toISOString() }
+      : { versionId: `${run.id}-v1`, n: 1, designSpecId: run.designSpecId ?? '', siteUrl: run.siteUrl ?? s.lastSiteUrl ?? '', at: new Date().toISOString() };
   }
+  const checks = s.intake?.checks ?? openChecks(s.lastBuildId ? await getBuild(s.lastBuildId) : undefined);
+  s.followUp = { at: new Date().toISOString(), reason: 'publish' };
   if (checks.length) {
-    return [{ text: `Glad you like it! Before it goes live, ${checks.length === 1 ? 'one thing needs' : 'a few things need'} your OK:\n${checks.slice(0, 4).map((c) => `• ${c}`).join('\n')}\n\nYou can sort ${checks.length === 1 ? 'it' : 'them'} out in your private editor, then tap "Buy this website" to choose your web address: ${link}`, url: link, title: 'Your website editor' }];
+    return [{ text: `Thanks, approved! Before it can go live, ${checks.length === 1 ? 'one thing needs' : 'a few things need'} confirming:\n${checks.slice(0, 4).map((c) => `• ${c}`).join('\n')}\n\nSomeone from the team will be in touch to sort ${checks.length === 1 ? 'it' : 'them'} out and publish it.` }];
   }
-  return [{ text: `Glad you like it! To put it live, open your private editor and tap "Buy this website". You'll choose your web address there: ${link}`, url: link, title: 'Your website editor' }];
+  return [{ text: 'Thanks, approved! Someone from the team will be in touch to choose your web address and publish it.' }];
 }
 
 async function checkDetails(s: Session): Promise<Reply[]> {
-  const rec = await getBuild(s.lastBuildId!);
-  const checks = openChecks(rec);
-  const link = await editorLink(s, rec);
-  const where = link ? ` You can change any of it in your private editor: ${link}` : '';
+  const checks = s.intake?.checks ?? openChecks(s.lastBuildId ? await getBuild(s.lastBuildId) : undefined);
+  const where = '';
   if (!checks.length) return [{ text: `Everything on your preview checked out, so there's nothing waiting on you.${where}`, quickReplies: DONE_CHOICES }];
   return [{ text: `Here's what I'd like you to check before it goes live:\n${checks.slice(0, 6).map((c) => `• ${c}`).join('\n')}\n${where}`.trim(), quickReplies: DONE_CHOICES }];
 }
@@ -494,7 +675,7 @@ function updatedCard(job: Job): Reply {
   return {
     ...fromCard(card),
     text: p ? `Here's your updated preview: ${DIRECTION_LABEL[p.direction]}, leading with ${p.service.label.toLowerCase()}, main button "${profileFor(p.category).actions[p.goal]}".` : card.text,
-    quickReplies: ['Looks great, publish it', 'Try a different design', 'Personalize it'],
+    quickReplies: DONE_CHOICES,
   };
 }
 
@@ -502,4 +683,79 @@ function updatedCard(job: Job): Reply {
 export async function resetSession(from: string) {
   const c = await getConversation(from);
   if (c) { c.session = undefined; c.updatedAt = new Date().toISOString(); await saveConversation(c); }
+}
+
+// ───────────────────────── the custom full-site intake: polls and staff decisions ─────────────────────────
+/** one change at a time per conversation (a message, a poll, a staff decision), so none overwrites another */
+const conversationLocks = new Map<string, Promise<unknown>>();
+function inConversation<T>(from: string, fn: () => Promise<T>): Promise<T> {
+  const before = conversationLocks.get(from) ?? Promise.resolve();
+  // in this process one at a time, and across processes (web functions and the worker) by a shared lock
+  const p = before.catch(() => undefined).then(() => withSharedLock(`conv-${from}`, fn));
+  const tail = p.catch(() => undefined);
+  conversationLocks.set(from, tail);
+  void tail.then(() => { if (conversationLocks.get(from) === tail) conversationLocks.delete(from); });
+  return p;
+}
+
+/** each poll moves the run forward and sends what the customer has not had yet (once) */
+async function pollCustom(from: string): Promise<void> {
+  await inConversation(from, async () => {
+    const s = await loadSession(from);
+    if (!s.custom || !customBusy(s.custom)) return;
+    s.custom = await advanceCustom(s.custom);
+    const replies = customMessages(s.custom);
+    settle(s as never);
+    await record(from, outgoing(replies), s);
+    if (replies.length) await channelFor(from).deliver(from, replies);
+  });
+}
+
+/** staff: send a reviewed version's link to the customer (once), or reject it (the customer keeps any earlier preview) */
+export async function staffDecision(from: string, n: number, decision: 'send' | 'reject' | 'recheck' | 'resume', reviewer: string, note = ''): Promise<{ ok: boolean; reason?: string; url?: string }> {
+  return inConversation(from, async () => {
+    const s = await loadSession(from);
+    if (!s.custom) return { ok: false, reason: 'this conversation has no custom intake' };
+    let result: { ok: boolean; reason?: string; url?: string };
+    if (decision === 'send') { const r = await staffSend(s.custom, n, reviewer, note || undefined); result = { ok: r.sent, reason: r.reason, url: r.url }; }
+    else if (decision === 'recheck') result = await staffRecheck(s.custom, n);
+    else if (decision === 'resume') result = await staffResume(s.custom, n);
+    else result = staffReject(s.custom, n, reviewer, note || 'rejected by staff');
+    if (!result.ok) return result;
+    const replies = customMessages(s.custom);
+    settle(s as never);
+    await record(from, outgoing(replies), s);
+    if (replies.length) await channelFor(from).deliver(from, replies);
+    return result;
+  });
+}
+
+/**
+ * A message to an owner that answers nothing they sent (a quote request from their page): saved in their conversation,
+ * then sent through their channel (one at a time with everything else in the conversation).
+ */
+export async function notifyOwner(from: string, replies: Reply[]): Promise<{ delivered: boolean; note?: string }> {
+  return inConversation(from, async () => {
+    const s = await loadSession(from);
+    await record(from, outgoing(replies), s);
+    return channelFor(from).deliver(from, replies);
+  });
+}
+
+/** every conversation on the custom intake, newest first, for the staff review screen */
+export async function customConversations(): Promise<{ from: string; updatedAt: string; business?: string; run: CustomRun; messages: Conversation['messages'] }[]> {
+  return (await listConversationRecords())
+    .filter((c) => (c.session as Session | undefined)?.custom)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map((c) => ({ from: c.from, updatedAt: c.updatedAt, business: c.business, run: (c.session as Session).custom!, messages: c.messages }));
+}
+
+/** every custom-intake conversation with work in flight, moved forward once (the server's timer; polls do the same) */
+export async function advanceAllCustom(): Promise<number> {
+  let n = 0;
+  for (const c of await listConversationRecords()) {
+    const s = c.session as Session | undefined;
+    if (s?.intakeMode === 'custom' && s.custom && customBusy(s.custom)) { await pollCustom(c.from); n++; }
+  }
+  return n;
 }

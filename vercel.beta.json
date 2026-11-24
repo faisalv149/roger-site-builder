@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "roger-site-builder": { "root": ".", "buildCommand": "npm ci", "entrypoint": "src/server.ts" }
+  },
+  "rewrites": [ { "source": "/(.*)", "destination": { "type": "service", "service": "roger-site-builder" } } ],
+  "daemons": {
+    "worker": {
+      "root": ".",
+      "entrypoint": "Dockerfile.worker",
+      "instances": { "iad1": 1 },
+      "resources": { "requests": { "memory": "2Gi" } },
+      "terminationGracePeriodSeconds": 1800,
+      "livenessProbe": { "httpGet": { "port": 1234, "path": "/health" }, "initialDelaySeconds": 60, "periodSeconds": 30, "timeoutSeconds": 5, "failureThreshold": 4 }
+    }
+  }
+}

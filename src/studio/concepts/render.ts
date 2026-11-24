@@ -1,12 +1,14 @@
+import { writeStoredFile } from '../../google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { config } from '../../config.js';
 import { fetchWithRetry } from '../discover.js';
 import { sha256 } from '../snapshot.js';
-import { launchBrowser } from '../../render/og.js';
+import { browserGone, launchBrowser } from '../../render/og.js';
 import type { Catalog } from './review.js';
-import { RENDERERS, VARIANT_CSS, baseCss, esc, siteFooter, siteHeader, type RenderCtx } from './library.js';
+import { MENU_JS, RENDERERS, VARIANT_CSS, baseCss, esc, shellCss, siteFooter, siteHeader, type RenderCtx } from './library.js';
+import { shellOf } from './directions.js';
 import type { Concept } from './types.js';
 import { LISTING_CSS, isListing, placeholderSrc } from './listing-photos.js';
 
@@ -21,51 +23,56 @@ export const setDir = (setId: string) => path.join(config.dirs.out, 'studio-conc
 const MAX_PHOTOS = () => Number(process.env.STUDIO_CONCEPT_MAX_PHOTOS ?? 24);
 
 /** Copy the catalog's photos (and logo) into the set folder; returns the ids that could be copied. */
-export async function preparePhotos(cat: Catalog, setId: string, fetchImage: (url: string) => Promise<Buffer | null> = defaultFetch): Promise<{ ok: string[]; failed: { id: string; reason: string }[] }> {
+export async function preparePhotos(cat: Catalog, setId: string, fetchImage: (url: string) => Promise<Buffer | null> = defaultFetch, needed?: ReadonlySet<string>): Promise<{ ok: string[]; failed: { id: string; reason: string }[] }> {
   const dir = path.join(setDir(setId), 'img');
   fs.mkdirSync(dir, { recursive: true });
   const ok: string[] = [], failed: { id: string; reason: string }[] = [];
   // Google listing photos are never copied (Maps Platform terms): they are shown live at serve time (listing-photos.ts)
-  const photos = [...cat.photos].filter((p) => !isListing(p)).sort((a, b) => b.width * b.height - a.width * a.height || a.id.localeCompare(b.id)).slice(0, MAX_PHOTOS());
+  const photos = [...cat.photos].filter((p) => !isListing(p) && (!needed || needed.has(p.id))).sort((a, b) => b.width * b.height - a.width * a.height || a.id.localeCompare(b.id)).slice(0, MAX_PHOTOS());
   const jobs: { id: string; url: string; max: number }[] = [...photos.map((p) => ({ id: p.id, url: p.url, max: p.uses.includes('hero') ? 2000 : 1400 })), ...(cat.logo ? [{ id: 'logo', url: cat.logo.url, max: 600 }] : [])];
   // one copy per picture and address across every set: a later set reuses it instead of downloading again
   const cache = path.join(config.dirs.out, 'studio-concepts', '_photos');
   fs.mkdirSync(cache, { recursive: true });
-  for (const j of jobs) {
+  const load = async (j: (typeof jobs)[number]): Promise<{ id: string; reason?: string }> => {
     const ext = j.id === 'logo' ? 'png' : 'jpg';
     const file = path.join(dir, `${j.id}.${ext}`);
     // logos are trimmed (v2): an untrimmed copy from before is not reused
     const cached = path.join(cache, `${j.id === 'logo' ? 'logo-v2' : j.id}-${sha256(j.url).slice(0, 10)}-${j.max}.${ext}`);
-    if (fs.existsSync(file)) { ok.push(j.id); continue; }
-    if (fs.existsSync(cached)) { fs.copyFileSync(cached, file); ok.push(j.id); continue; }
+    if (fs.existsSync(file)) return { id: j.id };
+    if (fs.existsSync(cached)) { fs.copyFileSync(cached, file); return { id: j.id }; }
     let body: Buffer | null = null, why = 'download failed after 3 tries';
     try { body = await fetchImage(j.url); } catch (e) { why = (e as Error).message; }
-    if (!body) { failed.push({ id: j.id, reason: why }); continue; }
+    if (!body) return { id: j.id, reason: why };
     try {
       // a logo is often a square with the mark in the middle: trim the empty margin so it reads at header size
       const img = j.id === 'logo' ? sharp(await sharp(body, { failOn: 'none' }).trim({ threshold: 12 }).png().toBuffer()).resize({ width: j.max, withoutEnlargement: true }) : sharp(body, { failOn: 'none' }).rotate().resize({ width: j.max, withoutEnlargement: true });
       await (j.id === 'logo' ? img.png() : img.flatten({ background: '#ffffff' }).jpeg({ quality: 82, mozjpeg: true })).toFile(cached);
       fs.copyFileSync(cached, file);
-      ok.push(j.id);
-    } catch (e) { failed.push({ id: j.id, reason: `could not decode: ${(e as Error).message.slice(0, 60)}` }); }
+      return { id: j.id };
+    } catch (e) { return { id: j.id, reason: `could not decode: ${(e as Error).message.slice(0, 60)}` }; }
+  };
+  // Bound the total time on a new serverless instance without flooding image hosts.
+  for (let i = 0; i < jobs.length; i += 3) {
+    const results = await Promise.all(jobs.slice(i, i + 3).map(load));
+    for (const r of results) if (r.reason) failed.push({ id: r.id, reason: r.reason }); else ok.push(r.id);
   }
   return { ok, failed };
 }
 /** image hosts rate-limit bursts: up to three tries, backing off */
 async function defaultFetch(url: string): Promise<Buffer | null> {
-  const { res, attempts } = await fetchWithRetry(url, { timeoutMs: 25_000, maxBytes: 25_000_000, attempts: 3, backoffMs: 1500 });
+  const { res, attempts } = await fetchWithRetry(url, { timeoutMs: process.env.VERCEL ? 10_000 : 25_000, maxBytes: 25_000_000, attempts: process.env.VERCEL ? 2 : 3, backoffMs: 1500 });
   if (res.ok && res.body.length && !res.truncated) return res.body;
   throw new Error(`download failed after ${attempts} tries: ${res.error || `HTTP ${res.status}`}${res.truncated ? ' (too large)' : ''}`);
 }
 
-const NAV: Record<string, (cat: Catalog) => string> = { offer: (c) => (c.items.length ? 'Menu' : 'Services'), story: () => 'Story', gallery: () => 'Photos', proof: (c) => (c.rating ? 'Reviews' : 'Why us'), contact: (c) => (c.locations.length > 1 ? 'Locations' : 'Visit') };
+const NAV: Record<string, (cat: Catalog) => string> = { offer: (c) => (c.items.length ? 'Menu' : 'Services'), story: () => 'Story', gallery: () => 'Photos', proof: (c) => (c.rating ? 'Reviews' : 'Why us'), contact: (c) => (c.locations.length > 1 ? 'Locations' : c.address || c.locations.length ? 'Visit' : 'Contact') };
 
 /** The concept as one HTML document (relative image paths: img/<id>.jpg). */
-export function conceptHtml(concept: Concept, cat: Catalog, setId: string): string {
+export function conceptHtml(concept: Concept, cat: Catalog, setId: string, opts: { serviceLinks?: RenderCtx["serviceLinks"] } = {}): string {
   const dir = path.join(setDir(setId), 'img');
   const photo = new Map(cat.photos.map((p) => [p.id, p]));
   const ctx: RenderCtx = {
-    cat, concept, used: new Set(),
+    cat, concept, used: new Set(), serviceLinks: opts.serviceLinks,
     img: (id) => {
       if (id === 'logo') { const f = path.join(dir, 'logo.png'); return cat.logo && fs.existsSync(f) ? { src: 'img/logo.png', width: 200, height: 44, alt: `${cat.business.name} logo`, photo: { id: 'logo', url: cat.logo.url, width: 200, height: 44, orientation: 'landscape', uses: [], alt: '', services: [] } } : undefined; }
       const p = photo.get(id);
@@ -75,21 +82,34 @@ export function conceptHtml(concept: Concept, cat: Catalog, setId: string): stri
       return { src: `img/${id}.jpg`, width: p.width, height: p.height, alt: p.alt || `Photo from ${cat.business.name}`, photo: p };
     },
   };
-  const hero = concept.sections[0]?.variant;
-  const nav = concept.sections.filter((s) => s.kind !== 'hero').map((s) => ({ href: `#${s.id}`, label: NAV[s.kind](cat) }));
-  const body = concept.sections.map((s) => RENDERERS[`${s.kind}:${s.variant}`](ctx, s)).join('\n');
-  const css = baseCss(concept.tokens) + concept.sections.map((s) => VARIANT_CSS[`${s.kind}:${s.variant}`] ?? '').join('\n') + (cat.photos.some(isListing) ? `\n${LISTING_CSS}` : '');
+  // the direction's shell (its recipe's, or for a concept from before recipes, the one its hero belongs with)
+  const shell = shellOf(concept);
+  // each section once, in order; one that has nothing to show (a gallery whose photos don't fit its heading) is left
+  // off the page and out of the menu and the page index, never shown empty
+  const parts = concept.sections.map((s) => ({ s, html: RENDERERS[`${s.kind}:${s.variant}`](ctx, s) }));
+  const shown = new Set(parts.filter((p) => p.html.trim()).map((p) => p.s.id));
+  if (shown.size !== parts.length) {
+    // the masthead's own index lists the page's sections: render again without the empty ones
+    ctx.used.clear();
+    const kept = { ...concept, sections: concept.sections.filter((s) => shown.has(s.id)) };
+    ctx.concept = kept;
+    parts.splice(0, parts.length, ...kept.sections.map((s) => ({ s, html: RENDERERS[`${s.kind}:${s.variant}`](ctx, s) })));
+  }
+  const nav = parts.filter((p) => p.s.kind !== 'hero' && p.html.trim()).map((p) => ({ href: `#${p.s.id}`, label: NAV[p.s.kind](cat) }));
+  const body = parts.map((p) => p.html).filter((h) => h.trim()).join('\n');
+  const css = baseCss(concept.tokens) + shellCss(shell) + VARIANT_CSS['svc-go'] + concept.sections.map((s) => VARIANT_CSS[`${s.kind}:${s.variant}`] ?? '').join('\n') + (cat.photos.some(isListing) ? `\n${LISTING_CSS}` : '');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
 <title>${esc(cat.business.name)}: concept ${concept.id.toUpperCase()}, ${esc(concept.name)} (preview)</title>
 ${process.env.STUDIO_CONCEPT_FONTS === '0' ? '' : `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="${esc(concept.tokens.fonts.href)}">`}
 <style>${css}</style></head>
 <body><a class="skip" href="#main">Skip to content</a>
-${siteHeader(ctx, hero === 'full-bleed' ? 'overlay' : hero === 'split' ? 'bar' : 'center', nav)}
+${siteHeader(ctx, shell.header, nav)}
 <main id="main">
 ${body}
 </main>
-${siteFooter(ctx)}
+${siteFooter(ctx, shell.footer, nav)}
+<script>${MENU_JS}</script>
 </body></html>`;
 }
 
@@ -175,6 +195,9 @@ const MEASURE = `(() => {
   };
 })()`;
 
+/** the measuring script, for other renderers whose pages the same checks validate */
+export const MEASURE_SCRIPT = MEASURE;
+
 export interface Rendered { conceptId: string; html: string; desktop: { full: string; hero: string; metrics: PageMetrics }; mobile: { full: string; hero: string; metrics: PageMetrics } }
 
 /** Write each concept's HTML and screenshot it at desktop and mobile size. */
@@ -197,35 +220,67 @@ export async function measureFile(file: string, viewport = { width: 1440, height
   } finally { await browser.close(); }
 }
 
-export async function renderSet(concepts: Concept[], cat: Catalog, setId: string, opts: { suffix?: string } = {}): Promise<Rendered[]> {
+export async function renderSet(concepts: Concept[], cat: Catalog, setId: string, opts: { suffix?: string; onStep?: (step: string, ms: number) => void } = {}): Promise<Rendered[]> {
   const dir = setDir(setId);
   fs.mkdirSync(path.join(dir, 'shots'), { recursive: true });
-  const browser = await launchBrowser();
+  let started = Date.now();
+  const step = (label: string) => { opts.onStep?.(label, Date.now() - started); started = Date.now(); };
+  // Serverless Chromium runs with --single-process, where a browser supports one context for its whole life: a second
+  // one (the phone-size render after the desktop one) fails at newPage with "browser has been closed". There, each
+  // page gets its own browser; elsewhere one browser serves every page.
+  const perPage = singleProcessChrome();
+  const shared = perPage ? undefined : await launchBrowser();
+  if (shared) step('browser start');
+  const open = new Set<import('playwright-core').Browser>(shared ? [shared] : []);
+  // If Chrome stops responding, close it while there is still time for the job
+  // to record a named failure instead of disappearing at Vercel's 300 s limit.
+  const watchdog = process.env.VERCEL ? setTimeout(() => {
+    opts.onStep?.('browser unresponsive; closing after 180 s', 180_000);
+    for (const b of open) void b.close().catch(() => undefined);
+  }, 180_000) : undefined;
   const out: Rendered[] = [];
   try {
     for (const concept of concepts) {
       const name = `${concept.id}${opts.suffix ?? ''}`;
       const html = path.join(dir, `${name}.html`);
-      fs.writeFileSync(html, conceptHtml(concept, cat, setId));
+      writeStoredFile(html, conceptHtml(concept, cat, setId));
+      step(`${name} HTML`);
       const url = `file:///${html.replace(/\\/g, '/').replace(/^\//, '')}`;
       const shoot = async (kind: 'desktop' | 'mobile') => {
+        const browser = shared ?? await launchBrowser();
+        if (!shared) { open.add(browser); step(`${name} ${kind} browser start`); }
         const ctx = await browser.newContext(kind === 'desktop' ? { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 } : { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+        try {
         const page = await ctx.newPage();
-        await page.goto(url, { waitUntil: 'networkidle', timeout: 60_000 });
-        await page.evaluate('document.fonts.ready.then(() => true)');
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+        step(`${name} ${kind} page load`);
+        await page.evaluate('Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 8000))])');
+        step(`${name} ${kind} fonts`);
         await page.waitForTimeout(150);
         const hero = path.join(dir, 'shots', `${name}-${kind}-hero.png`);
         const full = path.join(dir, 'shots', `${name}-${kind}.jpg`);
-        await page.screenshot({ path: hero, clip: { x: 0, y: 0, width: kind === 'desktop' ? 1440 : 390, height: kind === 'desktop' ? 900 : 844 } });
-        await page.screenshot({ path: full, fullPage: true, type: 'jpeg', quality: 82 });
+        await page.screenshot({ path: hero, clip: { x: 0, y: 0, width: kind === 'desktop' ? 1440 : 390, height: kind === 'desktop' ? 900 : 844 }, timeout: 20_000 });
+        step(`${name} ${kind} first-screen screenshot`);
+        await page.screenshot({ path: full, fullPage: true, type: 'jpeg', quality: 82, timeout: 30_000 });
+        step(`${name} ${kind} full screenshot`);
         const metrics = (await page.evaluate(MEASURE)) as PageMetrics;
-        await ctx.close();
+        step(`${name} ${kind} measurements`);
         return { full, hero, metrics };
+        } catch (e) { throw new Error(`${name} ${kind} render: ${(e as Error).message}`); }
+        finally {
+          await ctx.close().catch(() => undefined);
+          if (!shared) { open.delete(browser); await browser.close().catch(() => undefined); }
+        }
       };
-      const desktop = await shoot('desktop');
-      const mobile = await shoot('mobile');
+      // a browser that crashed under the page (serverless Chromium) gets one retry with a fresh browser
+      const again = async (kind: 'desktop' | 'mobile') => { try { return await shoot(kind); } catch (e) { if (!perPage || !browserGone(e)) throw e; step(`${name} ${kind}: browser closed, one retry`); return shoot(kind); } };
+      const desktop = await again('desktop');
+      const mobile = await again('mobile');
       out.push({ conceptId: concept.id, html, desktop, mobile });
     }
-  } finally { await browser.close(); }
+  } finally { if (watchdog) clearTimeout(watchdog); for (const b of open) await b.close().catch(() => undefined); }
   return out;
 }
+
+/** Serverless Chromium (@sparticuz on Vercel) runs single-process: one browser context per browser. STUDIO_SINGLE_PROCESS=1 forces it (tests). */
+export const singleProcessChrome = () => process.env.STUDIO_SINGLE_PROCESS === '1' || (!config.chromiumPath && !!process.env.VERCEL);

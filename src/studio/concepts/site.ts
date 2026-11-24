@@ -1,0 +1,433 @@
+import { writeStoredFile } from '../../google-names.js';
+import { randomBytes } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from '../../config.js';
+import { persistDir, readOut, restoreDir } from '../../files.js';
+import { TYPE_PRESET_DEFS, fontsUrl } from '../../design/directions.js';
+import { getReview, resolveCatalog, type Catalog } from './review.js';
+import { conceptHtml } from './render.js';
+import { applyConceptShell } from './shell.js';
+import { shellOf } from './directions.js';
+import type { DesignTokens } from './types.js';
+import { setDir } from './render.js';
+import { buildSite } from '../../pipeline.js';
+import { getDraft, issueOwnerKey, ownerUrl, putDraft, saveDraft, withDraftLock, type DraftRecord } from '../../drafts.js';
+import type { Appearance, LayoutChoice } from '../../design/schema.js';
+import { studioDocs } from '../../store.js';
+import { keepAlive, STALE_MS, HEARTBEAT_MS } from '../keepalive.js';
+import { getBrief } from '../jobs.js';
+import { getConceptSet } from './jobs.js';
+import type { Concept } from './types.js';
+import { handoffSpec, type DesignResult, type DesignSpec } from './designspec.js';
+import { renderSpec, specConcept } from './spec-render.js';
+import { stripDebrisHtml, stripSeasonalHtml } from '../../util/text.js';
+import { ownContentCss } from './shell.js';
+import type { ConceptJob } from './jobs.js';
+import { applyPhotoChecks, observeCatalogPhotos, listingUrl } from './listing-photos.js';
+import { identityKnown } from './designspec.js';
+import type { StudioReuse } from '../../content/facts.js';
+import type { BusinessBrief } from '../schema.js';
+import { photoFingerprint } from '../../design/fingerprint.js';
+
+/**
+ * A chosen Phase 2 concept becomes the business's full site, through the existing builder: it researches the
+ * business as usual (facts, photos, offerings, forms, SEO, review checks, the owner's draft), then the concept's design
+ * is applied as the owner's own layout and appearance choices, so it is locked: edits refine it and keep its layout,
+ * type, colour, shapes and image direction. "Try another design" switches to the set's next concept in rank order,
+ * never a random new one. Publishing stays behind the draft's gates (facts, photo rights, lead delivery).
+ */
+const HERO: Record<string, LayoutChoice['hero']> = { 'full-bleed': 'photo-led', split: 'split', 'type-collage': 'type-led' };
+const GALLERY: Record<string, LayoutChoice['gallery']> = { mosaic: 'masonry', filmstrip: 'strip', 'feature-grid': 'large' };
+const FONT: Record<string, Appearance['font']> = { grotesk: 'compact-grotesk', humanist: 'friendly-sans', serif: 'warm-serif', slab: 'editorial', display: 'heavy-grotesk' };
+
+/** The concept's design, as the builder's layout and appearance choices. */
+export function conceptDesign(c: Concept): { layout: LayoutChoice; appearance: Appearance } {
+  const hero = c.sections.find((s) => s.kind === 'hero')?.variant;
+  const gallery = c.sections.find((s) => s.kind === 'gallery')?.variant;
+  const a = c.axes;
+  // an open design brings its own homepage, header, footer, colours and type: the builder's direction only lays out the
+  // inner pages' content, so it is a current multi-page family (Warm Local); clean-professional has no multi-page version
+  const direction: LayoutChoice['direction'] = c.designSpecId ? 'local-trusted' : a.colorStrategy === 'brand-dominant' ? 'bold-direct'
+    : a.imageryRole === 'lead' && hero === 'full-bleed' ? 'modern-premium'
+    : a.typeVoice === 'serif' || a.typeVoice === 'humanist' ? 'local-trusted' : 'clean-professional';
+  const r = c.tokens.radius;
+  const hex = /^#[0-9A-Fa-f]{6}$/.test(c.tokens.colors.action) ? c.tokens.colors.action : /^#[0-9A-Fa-f]{6}$/.test(c.tokens.colors.brand) ? c.tokens.colors.brand : undefined;
+  return {
+    layout: { direction, ...(hero && HERO[hero] ? { hero: HERO[hero] } : {}), ...(gallery && GALLERY[gallery] ? { gallery: GALLERY[gallery] } : {}) },
+    appearance: {
+      ...(hex ? { color: { mode: 'solid' as const, accent: hex } } : {}),
+      ...(FONT[a.typeVoice] ? { font: FONT[a.typeVoice] } : {}),
+      corners: r <= 4 ? 'sharp' : r <= 12 ? 'soft' : 'round',
+      buttons: r >= 20 ? 'pill' : r <= 4 ? 'square' : 'rounded',
+
+    },
+  };
+}
+
+/** Apply a concept to a built draft: saved as the owner's choices (locked), re-rendered on every page. */
+export async function applyConcept(draftId: string, setId: string, concept: Concept): Promise<DraftRecord> {
+  const { layout, appearance } = conceptDesign(concept);
+  const spec = await specOf(concept);
+  // an open design with a verified story section: the site keeps an About page for it
+  const about = !!spec && JSON.stringify(spec.sections).includes('"story":');
+  return withDraftLock(draftId, async () => {
+    const d = (await getDraft(draftId))!;
+    // a choice this business's content or the chosen style can't carry (a photo-led hero without a strong photo, a
+    // gallery the style doesn't offer) is dropped, one at a time; the rest of the concept still applies
+    const { hero, gallery, direction } = layout;
+    const tries: LayoutChoice[] = [layout, { direction, gallery }, { direction, hero }, { direction }, {}];
+    let saved: DraftRecord | undefined;
+    let last: unknown;
+    for (const t of tries) {
+      const clean = Object.fromEntries(Object.entries(t).filter(([, v]) => v !== undefined)) as LayoutChoice;
+      try { saved = await saveDraft((await getDraft(draftId))!, { revision: d.revision, layout: clean, appearance, ...(about ? { aboutPage: true } : {}) }); break; }
+      catch (e) { last = e; }
+    }
+    void hero; void gallery;
+    if (!saved) throw last;
+    saved.concept = { setId, conceptId: concept.id, ...(about ? { about: true } : {}) };
+    await writeConceptHome(saved); // records what the handoff left out (saved.concept.omitted)
+    await putDraft(saved);
+    return saved;
+  });
+}
+
+export interface SiteJob {
+  id: string; setId: string; conceptId: string; status: 'queued' | 'running' | 'done' | 'failed';
+  stages: { name: string; status: 'running' | 'done' | 'failed'; ms?: number; note?: string }[];
+  createdAt: string; updatedAt: string; startedAt?: string; finishedAt?: string; resumes: number;
+  /** what the handoff left off the site, and why (undated seasonal promotions) */
+  omitted?: { what: string; reason: string }[];
+  siteUrl?: string; ownerUrl?: string; draftId?: string; review?: { status: string; checks: { id: string; level: string; message: string }[] }; error?: string;
+  /** switched among the set's saved concepts (re-render only), rather than built */
+  switched?: boolean;
+  /** the business record whose built draft this job may re-render: given explicitly (a business key and brief revision), never guessed from a shared website */
+  reuse?: { businessKey: string; revision: number };
+  /** the owner confirmed this business (the Google listing they said yes to): the only basis on which Studio work is reused */
+  confirmed?: OwnerConfirmation;
+  /** build a new draft even when this business already has one (its own folder, so no other draft's site is overwritten) */
+  fresh?: { slug: string };
+  /** the completed Studio work the build reused instead of asking Claude again, and what was genuinely missing */
+  reused?: { from: string; services: number; photoChecks: number; missing: string[] };
+}
+const save = (j: SiteJob) => studioDocs.put('studio-site-jobs', j.id, { ...j, updatedAt: new Date().toISOString() });
+export const getSiteJob = (id: string) => studioDocs.get<SiteJob>('studio-site-jobs', id);
+
+async function ownerLink(draftId: string) {
+  return withDraftLock(draftId, async () => { const d = (await getDraft(draftId))!; const key = issueOwnerKey(d); await putDraft(d); return ownerUrl(d, key); });
+}
+
+/** Start (or switch) the site for a set's concept. A business with a draft from this set only switches design. */
+/** the owner said yes to this Google listing as their business (the conversation's "Is this you?"), and when */
+export interface OwnerConfirmation { by: 'owner'; placeId: string; at: string }
+export const isOwnerConfirmation = (c: unknown): c is OwnerConfirmation => !!c && typeof c === 'object' && (c as OwnerConfirmation).by === 'owner' && typeof (c as OwnerConfirmation).placeId === 'string' && !!(c as OwnerConfirmation).placeId && typeof (c as OwnerConfirmation).at === 'string';
+
+export async function startSiteJob(setId: string, conceptId: string, opts: { reuse?: { businessKey: string; revision: number }; fresh?: { slug: string }; confirmed?: OwnerConfirmation } = {}): Promise<SiteJob> {
+  const set = await getConceptSet(setId);
+  if (!set) throw new Error('No such concept set');
+  if (!set.concepts.some((c) => c.id === conceptId)) throw new Error(`conceptId must be one of this set's concepts (${set.concepts.map((c) => c.id).join(', ')})`);
+  const now = new Date().toISOString();
+  if (opts.reuse && (!opts.reuse.businessKey || !Number.isInteger(opts.reuse.revision))) throw new Error('reuse needs a business key and a brief revision');
+  if (opts.fresh && !/^[a-z0-9-]{3,80}$/.test(opts.fresh.slug)) throw new Error('a fresh build needs its own folder name (lowercase letters, digits and dashes), so it never overwrites another draft\'s site');
+  const job: SiteJob = { id: `sj_${randomBytes(6).toString('hex')}`, setId, conceptId, status: 'queued', stages: [], createdAt: now, updatedAt: now, resumes: 0, ...(opts.reuse ? { reuse: opts.reuse } : {}), ...(opts.fresh ? { fresh: opts.fresh } : {}), ...(isOwnerConfirmation(opts.confirmed) ? { confirmed: opts.confirmed } : {}) };
+  await save(job);
+  void keepAlive(runSiteJob(job.id));
+  return job;
+}
+
+const running = new Map<string, Promise<void>>();
+export function runSiteJob(id: string): Promise<void> {
+  if (running.has(id)) return running.get(id)!;
+  const p = run(id).finally(() => running.delete(id));
+  running.set(id, p);
+  return p;
+}
+
+async function run(id: string) {
+  const job = (await getSiteJob(id))!;
+  const set = (await getConceptSet(job.setId))!;
+  const concept = set.concepts.find((c) => c.id === job.conceptId)!;
+  job.status = 'running'; job.startedAt = new Date().toISOString(); job.stages = []; job.error = undefined;
+  await save(job);
+  const beat = setInterval(() => { void save(job); }, HEARTBEAT_MS);
+  const stage = (name: string, status: SiteJob['stages'][number]['status'], extra: { ms?: number; note?: string } = {}) => {
+    const s = job.stages.find((x) => x.name === name);
+    if (s) Object.assign(s, { status, ...extra }); else job.stages.push({ name, status, ...extra });
+    void save(job);
+  };
+  try {
+    const { brief } = await getBrief(set.brief.businessKey, set.brief.revision);
+    if (!brief) throw new Error('the brief this concept set was made from is missing');
+    const placeId = brief.identity.listing?.placeId;
+    const website = brief.identity.website.value ?? undefined;
+    // a draft this set already built: switching concepts is a re-render, not a new build
+    const done = (await studioDocs.list<SiteJob>('studio-site-jobs')).filter((j) => j.id !== job.id && j.status === 'done' && j.draftId).sort((a, b) => (a.setId === job.setId ? -1 : 0) - (b.setId === job.setId ? -1 : 0) || b.createdAt.localeCompare(a.createdAt));
+    // a draft is re-rendered (no crawl, no AI) only when it was built for exactly this business record: the set's own
+    // business key and brief revision, or the record the caller named explicitly (job.reuse). Two records that merely
+    // share a website are never mixed.
+    const target = job.reuse ?? { businessKey: set.brief.businessKey, revision: set.brief.revision };
+    let existing: SiteJob | undefined;
+    if (!job.fresh) for (const j of done) { const s2 = j.setId === job.setId ? set : await getConceptSet(j.setId); if (s2 && draftMatches(s2.brief, target)) { existing = j; break; } }
+    if (job.reuse && !existing) throw new Error(`no built site for ${job.reuse.businessKey} revision ${job.reuse.revision} to re-render`);
+    if (existing) stage('Reuse the built site', 'done', { note: `draft ${existing.draftId} (built from set ${existing.setId}): re-rendered in the new design, no new research` });
+    let draftId = existing?.draftId && (await getDraft(existing.draftId)) ? existing.draftId : undefined;
+    if (!draftId) {
+      // the confirmed brief, its verified facts and the set's completed photo checks: the build reads these instead of
+      // asking Claude again; what is genuinely missing is named, never silently researched again
+      const w = await studioReuse(set.id, brief, job.confirmed);
+      job.reused = w.summary;
+      stage('Reuse Studio work', 'done', { note: w.reuse ? `${w.summary.from}: ${w.summary.services} verified offering(s), ${w.summary.photoChecks} photo check(s)${w.summary.missing.length ? `; missing: ${w.summary.missing.join('; ')}` : ''}` : `nothing reused: ${w.summary.missing.join('; ')}` });
+      const r = await buildSite({ placeId, website, audit: false, scoreNew: false, ...(w.reuse ? { reuse: w.reuse } : {}), ...(job.fresh ? { slug: job.fresh.slug } : {}) }, (e) => { if (e.type === 'step') stage(e.step, e.status === 'start' ? 'running' : e.status === 'error' ? 'failed' : 'done', { ms: e.ms, note: e.note }); });
+      draftId = r.draftId;
+      job.review = r.review ? { status: r.review.status, checks: r.review.checks.filter((c) => c.level !== 'info').map((c) => ({ id: c.id, level: c.level, message: c.message })) } : undefined;
+      if (!draftId) throw new Error('the build made no editable draft (the design pilot is off)');
+    } else { job.switched = true; job.review = existing!.review; }
+    const t = Date.now();
+    stage(`Apply concept ${concept.id.toUpperCase()} "${concept.name}"`, 'running');
+    const d = await applyConcept(draftId, set.id, concept);
+    job.omitted = d.concept?.omitted;
+    stage(`Apply concept ${concept.id.toUpperCase()} "${concept.name}"`, 'done', { ms: Date.now() - t, note: `${concept.designSpecId ? `open design ${concept.designSpecId}` : `${d.plan.direction} · ${d.plan.hero.variant} hero`} · ${d.sitePlan?.pages.length ?? 1} page(s)${job.omitted?.length ? ` · ${job.omitted.length} undated seasonal item(s) left out` : ''}` });
+    job.draftId = draftId;
+    job.siteUrl = `${d.base.slug ? (await import('../../config.js')).config.publicBaseUrl : ''}/sites/${d.slug}/`;
+    job.ownerUrl = await ownerLink(draftId);
+    job.status = 'done'; job.finishedAt = new Date().toISOString();
+  } catch (e) {
+    job.status = 'failed'; job.error = (e as Error).message; job.finishedAt = new Date().toISOString();
+  } finally {
+    clearInterval(beat);
+    await save(job);
+  }
+}
+
+/**
+ * The completed Studio work a build may reuse for this set, only when the owner confirmed the business: their "yes" names
+ * the same Google listing as the brief (the same business key and revision), and the brief's identity is settled. Then:
+ * the brief's verified offerings, service area and emergency availability, and the image checks of its photos from the
+ * set's own concept job, each with the checked image's fingerprint (a check without one is passed on but never attached).
+ * Without the owner's confirmation nothing is reused, and the build researches the business itself.
+ */
+export async function studioReuse(setId: string, brief: BusinessBrief, confirmed?: OwnerConfirmation): Promise<{ reuse?: StudioReuse; summary: NonNullable<SiteJob['reused']> }> {
+  const missing: string[] = [];
+  const none = (why: string) => ({ summary: { from: `brief ${brief.businessKey} r${brief.revision}`, services: 0, photoChecks: 0, missing: [why] } });
+  const placeId = brief.identity.listing?.placeId;
+  if (!isOwnerConfirmation(confirmed)) return none('the owner has not confirmed this business: nothing is reused, and the build researches it itself');
+  if (!placeId || confirmed.placeId !== placeId) return none(`the owner confirmed Google listing ${confirmed.placeId}, but the brief is for ${placeId ?? 'no listing'}: nothing is reused`);
+  if (!identityKnown(brief)) return none(`the brief's identity is ${brief.identity.status}, not settled: nothing is reused`);
+  const job = (await studioDocs.list<ConceptJob>('studio-concept-jobs')).find((j) => j.setId === setId && j.input.businessKey === brief.businessKey && j.input.revision === brief.revision);
+  const services = (brief.services.items ?? []).filter((x) => x.status === 'verified' && x.evidence.length).map((x) => ({ name: x.name, ...(x.description?.value ? { description: x.description.value } : {}) }));
+  if (!services.length) missing.push('offerings: the brief verifies none, so none are listed (Claude is not asked to find some)');
+  const area = brief.serviceArea?.status === 'verified' ? brief.serviceArea.value?.places ?? [] : [];
+  const emergency = brief.availability?.emergency?.status === 'verified' && !!brief.availability.emergency.value;
+  const checks: NonNullable<StudioReuse['photoChecks']> = [];
+  const listing = job?.work.listing;
+  if (placeId && listing?.labelled === 'vision') for (const x of listing.items) { if (x.kind !== 'unknown') checks.push({ url: listingUrl(placeId, x.n), width: x.width, height: x.height, kind: x.kind, ...(x.seen ? { seen: x.seen } : {}), ...(x.fp ? { fp: x.fp } : {}) }); }
+  else if (placeId) missing.push(`Google listing photo checks: ${job ? `concept job ${job.id} has ${listing ? `only "${listing.labelled}" labels` : 'none'}` : 'no concept job for this set'}, so those photos are labelled by Claude`);
+  if (job?.work.seen && Object.keys(job.work.seen).length) {
+    const { inventory } = await getBrief(brief.businessKey, brief.revision);
+    const review = await getReview(job.input.reviewId);
+    if (inventory && review) {
+      const cat = resolveCatalog(brief, inventory, review);
+      // the business's own photos: the fingerprint of the very copy the image check looked at (the set's img/<id>.jpg)
+      for (const p of cat.photos) {
+        const v = job.work.seen[p.id];
+        if (!v || p.url.startsWith('google-listing:')) continue;
+        const file = path.join(setDir(setId), 'img', `${p.id}.jpg`);
+        const fp = v.fp; // only the fingerprint captured with this description, never stamp a newer image onto old text
+        checks.push({ url: p.url, width: p.width, height: p.height, kind: v.kind, ...(v.seen ? { seen: v.seen } : {}), ...(fp ? { fp } : {}) });
+      }
+    }
+  }
+  const unprinted = checks.filter((c) => !c.fp).length;
+  if (unprinted) missing.push(`${unprinted} saved photo check(s) have no image fingerprint (made before identity was recorded): those photos are looked at again, never given the old description`);
+  const from = `brief ${brief.businessKey} r${brief.revision}${job ? ` · concept job ${job.id}` : ''} · confirmed by the owner ${confirmed.at}`;
+  return { reuse: { from, facts: { services, ...(area.length ? { serviceAreas: area } : {}), ...(emergency ? { emergency } : {}) }, ...(checks.length ? { photoChecks: checks } : {}) }, summary: { from, services: services.length, photoChecks: checks.length, missing } };
+}
+
+/** A job left running nowhere (its instance stopped) is started again by the poll that notices. */
+export async function resumeSiteIfStale(j: SiteJob): Promise<SiteJob> {
+  if ((j.status === 'running' || j.status === 'queued') && Date.now() - Date.parse(j.updatedAt) > STALE_MS() && !running.has(j.id)) {
+    j.resumes++; j.status = 'queued'; await save(j);
+    void keepAlive(runSiteJob(j.id));
+  }
+  return j;
+}
+
+/** The set's next concept in rank order (a → b → … → a): "Try another design" re-renders a saved recipe, never a new crawl or a direction outside the set. */
+export async function nextConcept(current: { setId: string; conceptId: string }): Promise<Concept | undefined> {
+  const set = await getConceptSet(current.setId);
+  if (!set?.concepts.length) return undefined;
+  const i = set.concepts.findIndex((c) => c.id === current.conceptId);
+  return set.concepts[(i + 1) % set.concepts.length];
+}
+
+/**
+ * The homepage IS the chosen concept: its own rendered page from the Phase 2 renderer (same sections in the same order,
+ * hero composition, photos, type, colours and spacing), not a translation into the builder's theme. The builder keeps
+ * the inner pages, forms, SEO and owner editing; its home page lends the concept the SEO head (title, description,
+ * canonical, structured data, social cards) and the links to the inner pages. Re-applied after every owner save.
+ */
+/** The chosen concept's homepage could not be written or restored: the site job fails rather than report a site that isn't the concept. */
+export class ConceptHomeError extends Error {}
+
+export async function writeConceptHome(d: DraftRecord): Promise<boolean> {
+  if (!d.concept) return false;
+  const set = await getConceptSet(d.concept.setId);
+  const concept = set?.concepts.find((c) => c.id === d.concept!.conceptId);
+  if (!set || !concept) throw new ConceptHomeError(`the chosen concept ${d.concept.conceptId.toUpperCase()} of set ${d.concept.setId} is missing`);
+  const cdir = setDir(set.id);
+  const read = async (rel: string) => { const f = path.join(cdir, rel); return fs.existsSync(f) ? fs.readFileSync(f) : await readOut(`studio-concepts/${set.id}/${rel}`).catch(() => undefined); };
+  const src = await read(`${concept.id}.html`);
+  const siteDir = path.join(config.dirs.sites, d.slug);
+  const homeFile = path.join(siteDir, 'index.html');
+  // never leave the older builder's homepage standing in for the chosen concept
+  if (!src) throw new ConceptHomeError(`concept ${concept.id.toUpperCase()}'s page could not be read or restored, so the homepage would still be the older builder's`);
+  if (!fs.existsSync(homeFile)) throw new ConceptHomeError('the site has no home page to replace');
+  // re-rendered from the concept itself (the same renderer, no AI, no research): the owner's supported design edits
+  // and the site's own service pages apply; the concept's sections, their order and its pictures stay
+  const { brief, inventory } = await getBrief(set.brief.businessKey, set.brief.revision);
+  const review = await getReview(set.reviewId);
+  if (!brief || !inventory || !review) throw new ConceptHomeError(`the brief or owner review behind concept ${concept.id.toUpperCase()} is missing, so its homepage can't be rendered`);
+  if (!fs.existsSync(path.join(cdir, 'img'))) await restoreDir(path.relative(config.dirs.out, cdir).split(path.sep).join('/')).catch(() => undefined);
+  const cat = resolveCatalog(brief, inventory, review);
+  const spec = await specOf(concept);
+  // an open design's tokens come from its saved spec (fonts, colours, corners), so the inner pages can't drift from it
+  const tokens = spec ? specConcept(spec, concept.designSpecId!, cat, brief).tokens : conceptTokens(concept, d.appearance);
+  const inner = (d.sitePlan?.pages ?? []).filter((p) => p.route && p.type !== 'home' && !p.offeringId);
+  const pageLabel = (p: (typeof inner)[number]) => (p.navLabel ?? p.route.replace(/\/$/, '')).replace(/[<>&"]/g, '');
+  if (concept.designSpecId && !spec) throw new ConceptHomeError(`the DesignSpec ${concept.designSpecId} behind concept ${concept.id.toUpperCase()} is missing, so its homepage can't be rendered`);
+  let html: string;
+  let ownCss: string | undefined;
+  const omitted: { what: string; reason: string }[] = [];
+  if (spec) {
+    // an open design: the same spec, the same renderer, the same photos (with what the set's image checks saw); only
+    // undated seasonal promotions come off, and the inner pages join its menu
+    const job = (await studioDocs.list<ConceptJob>('studio-concept-jobs')).find((j) => j.setId === set.id);
+    if (job) {
+      await observeCatalogPhotos(cat.photos);
+      for (const p of cat.photos.filter((p) => !p.url.startsWith('google-listing:'))) {
+        const file = path.join(cdir, 'img', `${p.id}.jpg`);
+        if (fs.existsSync(file)) p.fp = await photoFingerprint(fs.readFileSync(file)).catch(() => undefined);
+      }
+      const unverified: { id: string; reason: string }[] = [];
+      applyPhotoChecks(cat.photos, job.work, unverified);
+      omitted.push(...unverified.map((p) => ({ what: p.id, reason: p.reason })));
+      cat.photos = cat.photos.filter((p) => !p.url.startsWith('google-listing:') || !!p.fp);
+    }
+    const live = handoffSpec(spec, cat);
+    omitted.push(...live.omitted);
+    html = renderSpec(live.spec, cat, brief, { photoSrc: (id) => `img/${id}.jpg`, pages: inner.map((p) => ({ label: pageLabel(p), href: p.route })), designId: concept.designSpecId });
+    ownCss = html.match(/<style>([\s\S]*?)<\/style>/)?.[1];
+  } else html = conceptHtml({ ...concept, tokens }, cat, set.id, { serviceLinks: serviceLinksOf(d, cat) });
+  void src;
+  const legacy = fs.readFileSync(homeFile, 'utf8');
+  // the concept's own pictures, copied into the site (Google listing photos stay live stand-ins, never copied)
+  const dest = path.join(siteDir, 'assets', 'concept');
+  fs.mkdirSync(dest, { recursive: true });
+  for (const file of new Set([...html.matchAll(/(?:src|href)="img\/([A-Za-z0-9_.-]+)"/g)].map((m) => m[1]))) {
+    const data = await read(`img/${file}`);
+    if (data) writeStoredFile(path.join(dest, file), data);
+  }
+  html = html.replace(/((?:src|href)=")img\//g, '$1assets/concept/');
+  // the SEO head from the builder's home page
+  const pick = (re: RegExp) => [...legacy.matchAll(re)].map((m) => m[0]).join('\n');
+  const title = legacy.match(/<title>[\s\S]*?<\/title>/)?.[0];
+  const seo = [
+    pick(/<meta name="(?:description|robots)"[^>]*>/g), pick(/<link rel="(?:canonical|icon|apple-touch-icon|manifest)"[^>]*>/g),
+    pick(/<meta (?:property="og:|name="twitter:)[^>]*>/g), pick(/<script type="application\/ld\+json">[\s\S]*?<\/script>/g),
+  ].filter(Boolean).join('\n');
+  html = html.replace(/<meta name="robots"[^>]*>/, '');
+  if (title) html = html.replace(/<title>[\s\S]*?<\/title>/, title);
+  html = html.replace('</head>', `${seo}\n</head>`);
+  // the inner pages, after the concept's own section links (an open design has them in its menu already)
+  // a section link with the same name as an inner page ("Services") goes to that page instead of appearing twice
+  const add: string[] = [];
+  for (const p of spec ? [] : inner) {
+    const label = pageLabel(p);
+    const same = new RegExp(`<li><a href="#[a-z0-9-]+">${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</a></li>`);
+    if (same.test(html)) html = html.replace(same, `<li><a href="${p.route}">${label}</a></li>`);
+    else add.push(`<li><a href="${p.route}">${label}</a></li>`);
+  }
+  if (add.length) html = html.replace(/(<nav id="site-menu" aria-label="Sections"><ul>[\s\S]*?)(<\/ul><\/nav>)/, `$1${add.join('')}$2`);
+  writeStoredFile(homeFile, html);
+  // inner pages in the concept's design: its header, menu and footer, its tokens (colour, type, corners, spacing)
+  applyConceptShell(siteDir, homeFile, html, tokens, shellOf(concept), ownCss, spec ? { contentCss: ownContentCss(tokens, { tracking: spec.type.tracking, headingColor: tokens.colors.ink }) } : undefined);
+  for (const file of htmlFiles(siteDir)) {
+    const page = path.relative(siteDir, path.dirname(file)).split(path.sep).join('/') || 'home';
+    let pageHtml = fs.readFileSync(file, 'utf8');
+    // no crawler debris on any page ("map marker pin")
+    pageHtml = stripDebrisHtml(pageHtml).html;
+    // an inner page shows only pictures whose files exist; a tile or gallery left empty goes
+    if (file !== homeFile) pageHtml = dropMissingImages(pageHtml, path.dirname(file)).html;
+    // no undated seasonal promotion on any page: the builder's inner pages are checked too
+    const r = file === homeFile ? { html: pageHtml, removed: [] as string[] } : stripSeasonalHtml(pageHtml);
+    writeStoredFile(file, r.html);
+    for (const t of r.removed) omitted.push({ what: `${page} page: "${t}"`, reason: 'an undated seasonal promotion — it may be out of date, so it is left off the site until the owner gives a date' });
+  }
+  if (omitted.length) d.concept.omitted = omitted; else delete d.concept.omitted; // a site with nothing left out keeps its record as before
+  await persistDir(siteDir);
+  return true;
+}
+
+/** a built draft may be re-rendered for this business record only: the same business key and brief revision */
+export function draftMatches(built: { businessKey: string; revision: number }, target: { businessKey: string; revision: number }): boolean {
+  return built.businessKey === target.businessKey && built.revision === target.revision;
+}
+
+/**
+ * Pictures whose files are missing come off a built page: the picture with its tile (a figure or a gallery link), and a
+ * gallery section left with no picture. Remote pictures (http, data) and live stand-ins are not files and stay.
+ */
+export function dropMissingImages(html: string, pageDir: string): { html: string; dropped: string[] } {
+  const dropped: string[] = [];
+  const missing = (src: string) => { if (!src || /^(https?:|data:|\/\/)/.test(src)) return false; const clean = src.split(/[?#]/)[0]; const file = clean.startsWith('/') ? null : path.resolve(pageDir, decodeURIComponent(clean)); return !!file && !fs.existsSync(file); };
+  let out = html.replace(/<figure\b[^>]*>(?:(?!<\/?figure\b)[\s\S])*?<\/figure>/g, (fig) => {
+    const srcs = [...fig.matchAll(/<img\b[^>]*\ssrc="([^"]*)"/g)].map((m) => m[1]);
+    if (!srcs.length || !srcs.every(missing)) return fig;
+    dropped.push(...srcs);
+    return '';
+  });
+  out = out.replace(/<img\b[^>]*\ssrc="([^"]*)"[^>]*>/g, (img, src: string) => { if (!missing(src)) return img; dropped.push(src); return ''; });
+  // a gallery section with no picture left
+  out = out.replace(/<section\b[^>]*class="[^"]*gallery[^"]*"[^>]*>(?:(?!<\/?section\b)[\s\S])*?<\/section>/g, (sec) => (/<img\b/.test(sec) ? sec : ''));
+  return { html: out, dropped };
+}
+
+/** an open concept's saved DesignSpec (none for a direction's concept) */
+async function specOf(concept: Concept): Promise<DesignSpec | undefined> {
+  return concept.designSpecId ? (await studioDocs.get<DesignResult>('studio-design-specs', concept.designSpecId))?.spec ?? undefined : undefined;
+}
+const htmlFiles = (dir: string): string[] => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === 'assets' ? [] : htmlFiles(path.join(dir, e.name))) : e.name.endsWith('.html') ? [path.join(dir, e.name)] : []));
+
+/**
+ * The concept's design tokens with the owner's supported design edits applied: accent colour, typeface, corners and
+ * spacing. One set of tokens drives the homepage and every inner page, so they can't drift apart.
+ */
+export function conceptTokens(concept: Concept, a?: Appearance): DesignTokens {
+  const t: DesignTokens = structuredClone(concept.tokens);
+  if (!a) return t;
+  const base = conceptDesign(concept).appearance;
+  const accent = a.color?.accent;
+  if (accent && accent.toLowerCase() !== base.color?.accent?.toLowerCase()) { t.colors.action = accent; t.colors.onAction = readableOn(accent); }
+  if (a.font && a.font !== base.font) {
+    const p = TYPE_PRESET_DEFS[a.font];
+    t.fonts = { heading: { family: p.heading.family, weight: t.fonts.heading.weight, css: `'${p.heading.family}', ${p.heading.fallback}` }, body: { family: p.body.family, css: `'${p.body.family}', ${p.body.fallback}` }, href: fontsUrl(p) };
+  }
+  if (a.corners && a.corners !== base.corners) t.radius = { sharp: 2, soft: 10, round: 18 }[a.corners];
+  if (a.spacing) t.space = { compact: 0.85, comfortable: 1, spacious: 1.2 }[a.spacing];
+  return t;
+}
+const readableOn = (hex: string) => { const n = parseInt(hex.slice(1), 16); const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; return lum > 0.6 ? '#111316' : '#FFFFFF'; };
+
+/** The site's own page for each service the concept lists, matched by name (only pages the builder made). */
+function serviceLinksOf(d: DraftRecord, cat: Catalog): Record<string, { href: string; label: string }> {
+  const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const out: Record<string, { href: string; label: string }> = {};
+  for (const p of d.sitePlan?.pages ?? []) {
+    const o = p.offeringId ? d.offerings.find((x) => x.id === p.offeringId) : undefined;
+    const svc = o ? cat.services.find((s) => key(s.name) === key(o.name)) : undefined;
+    if (svc) out[svc.id] = { href: p.route, label: `More about ${svc.name}` };
+  }
+  return out;
+}
+

@@ -1,4 +1,6 @@
+import { writeStoredFile } from './google-names.js';
 import { createHash } from 'node:crypto';
+import { forStorageText } from './google-names.js';
 import { config } from './config.js';
 import { configuredChannels, ownerEmailOf } from './lead-delivery.js';
 import { deletePublish, getPublish, savePublish, type PublishRecord } from './store.js';
@@ -179,7 +181,7 @@ export async function publishSite(slug: string): Promise<PublishRecord> {
   const host = origin.replace(/^https:\/\//, '');
   const dir = path.join(config.dirs.out, 'publish', slug, `r${d.revision}`);
   fs.rmSync(dir, { recursive: true, force: true });
-  for (const f of files) { const abs = path.join(dir, f.file); fs.mkdirSync(path.dirname(abs), { recursive: true }); fs.writeFileSync(abs, f.data); }
+  for (const f of files) { if (/\.(html|json|xml|txt|css|js|webmanifest)$/.test(f.file)) f.data = Buffer.from(forStorageText(f.data.toString('utf8'), `publish ${f.file}`), 'utf8'); const abs = path.join(dir, f.file); fs.mkdirSync(path.dirname(abs), { recursive: true }); writeStoredFile(abs, f.data); }
   const out: PublishRecord = {
     ...(rec || {}), slug, project: name, domain: host, url: `${origin}/`, deploymentId: dep.id, publishedAt: new Date().toISOString(),
     draftRevision: d.revision, contentRevision: d.content?.revision, files: `publish/${slug}/r${d.revision}`, pages: files.filter((f) => f.file.endsWith('index.html')).length,

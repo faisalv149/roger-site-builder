@@ -27,7 +27,7 @@ const { resolveCatalog, emptyReview, saveReview, withId, publicationGate, StaleB
 const { checkCopy } = await import('../src/studio/concepts/copy.js');
 const { fallbackPlans, validatePlans, compose, fromAnswer } = await import('../src/studio/concepts/plan.js');
 const { aiJson, CostLedger, CostCapExceeded } = await import('../src/studio/concepts/ai.js');
-const { startConceptJob, waitForConceptJob, getConceptSet, getConceptJob } = await import('../src/studio/concepts/jobs.js');
+const { startConceptJob, runConceptJob, resumeConceptJob, waitForConceptJob, getConceptSet, getConceptJob } = await import('../src/studio/concepts/jobs.js');
 const { renderSet, preparePhotos, setDir } = await import('../src/studio/concepts/render.js');
 const { grounding, rights, links, imagery, accessibility, similarity, THRESHOLDS } = await import('../src/studio/concepts/validate.js');
 const { studioRoutes } = await import('../src/studio/routes.js');
@@ -97,6 +97,75 @@ async function getBriefs() {
 }
 const refOf = (b: BusinessBrief) => ({ businessKey: b.businessKey, revision: b.revision, briefHash: b.briefHash });
 
+test('a render restores only the concept pictures it needs', async () => {
+  const { agreed, inventory } = await getBriefs();
+  const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
+  const own = cat.photos.filter((p) => !p.url.startsWith('listing-photo:'));
+  assert.ok(own.length > 2);
+  const id = `cs_subset_${Date.now()}`;
+  const wanted = new Set([own[0].id]);
+  const result = await preparePhotos(cat, id, async () => IMGS.values().next().value!, wanted);
+  assert.ok(result.ok.includes(own[0].id));
+  assert.ok(!result.ok.includes(own[1].id));
+  assert.ok(fs.existsSync(path.join(setDir(id), 'img', `${own[0].id}.jpg`)));
+  assert.ok(!fs.existsSync(path.join(setDir(id), 'img', `${own[1].id}.jpg`)));
+});
+
+test('single-process Chromium (as on Vercel): a concept renders at desktop and phone size, one browser per page', { skip: !chrome && 'no Chrome here' }, async () => {
+  const { agreed, inventory } = await getBriefs();
+  const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
+  const setId = 'cs_single_process';
+  const ok = await preparePhotos(cat, setId);
+  cat.photos = cat.photos.filter((p) => ok.ok.includes(p.id));
+  const [A] = fallbackPlans(cat, agreed).map((p, i) => compose(p, (['a', 'b', 'c'] as const)[i], 'fallback', cat, agreed, i === 0));
+  const steps: string[] = [];
+  process.env.STUDIO_SINGLE_PROCESS = '1';
+  try {
+    const [r] = await renderSet([A], cat, setId, { onStep: (s) => steps.push(s) });
+    assert.ok(r.desktop.metrics.height > 0 && r.mobile.metrics.height > 0, 'both sizes rendered');
+    assert.ok(fs.existsSync(r.mobile.full) && fs.existsSync(r.desktop.full));
+    assert.deepEqual(steps.filter((s) => /browser start/.test(s)), ['a desktop browser start', 'a mobile browser start'], 'a fresh browser for each page');
+  } finally { delete process.env.STUDIO_SINGLE_PROCESS; }
+});
+
+test('a bounded render checkpoints one concept and resumes with the next', async () => {
+  const { agreed } = await getBriefs();
+  const batches: string[] = [];
+  let failB = true;
+  const hooks: import('../src/studio/concepts/jobs.js').ConceptHooks = {
+    transport: null, chunkRender: true,
+    fetchImage: async () => IMGS.values().next().value!,
+    render: async (concepts, _cat, setId) => {
+      assert.equal(concepts.length, 1);
+      const id = concepts[0].id;
+      batches.push(id);
+      if (id === 'b' && failB) { failB = false; throw new Error('browser closed'); }
+      const dir = setDir(setId);
+      fs.mkdirSync(path.join(dir, 'shots'), { recursive: true });
+      const html = path.join(dir, `${id}.html`);
+      const hero = path.join(dir, 'shots', `${id}-hero.png`);
+      fs.writeFileSync(html, `<h1>${id}</h1>`);
+      fs.writeFileSync(hero, await photo(1, 32, 32));
+      const page = { full: hero, hero, metrics: { height: 900 } as PageMetrics };
+      return [{ conceptId: id, html, desktop: page, mobile: page }];
+    },
+  };
+  const started = await startConceptJob({ businessKey: agreed.businessKey, revision: agreed.revision }, hooks);
+  const first = await runConceptJob(started.id, hooks);
+  assert.equal(first.status, 'queued');
+  assert.equal(first.stages.find((s) => s.name === 'render')?.status, 'pending');
+  assert.deepEqual(first.work.rendered?.map((r) => r.conceptId), ['a']);
+  const interrupted = await runConceptJob(started.id, hooks);
+  assert.equal(interrupted.status, 'failed');
+  assert.deepEqual(interrupted.work.rendered?.map((r) => r.conceptId), ['a']);
+  await resumeConceptJob(started.id, hooks);
+  const second = await runConceptJob(started.id, hooks);
+  assert.equal(second.status, 'queued');
+  assert.deepEqual(second.work.rendered?.map((r) => r.conceptId), ['a', 'b']);
+  assert.deepEqual(batches, ['a', 'b', 'b']);
+  assert.equal(await getConceptSet(second.setId), undefined, 'no incomplete set is published');
+});
+
 // ───────────────────────── facts, review and the publication gate ─────────────────────────
 test('a disputed phone number is left out of previews with every call button; the owner\'s answer brings it back; publishing is a separate gate', async () => {
   const { agreed, disputed, inventory } = await getBriefs();
@@ -147,12 +216,13 @@ test('written copy frames the facts and adds none: invented numbers, names and c
 });
 
 // ───────────────────────── plans and distinctness rules ─────────────────────────
-test('three directions must differ in hero, offer layout, structure, voice and colour: the fallback planner passes; colour swaps and reordered copies do not', async () => {
+test('directions must differ in hero, offer layout, structure and enough else: the ranked planner passes; colour swaps and reordered copies do not', async () => {
   const { agreed, inventory } = await getBriefs();
   const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
   const plans = fallbackPlans(cat, agreed);
   assert.deepEqual(validatePlans(plans, cat), []);
-  assert.equal(new Set(plans.map((p) => p.sections[0].variant)).size, 3);
+  assert.ok(plans.length >= 3 && plans.length <= 5, `${plans.length} directions`);
+  assert.equal(new Set(plans.map((p) => p.sections[0].variant)).size, plans.length, 'a hero each');
   const colourSwaps: DirectionPlan[] = (['brand-dominant', 'brand-accent', 'neutral-with-brand-action'] as const).map((c, i) => ({ ...plans[0], name: `copy ${i}`, axes: { ...plans[0].axes, colorStrategy: c, typeVoice: (['grotesk', 'serif', 'display'] as const)[i] } }));
   const errs = validatePlans(colourSwaps, cat);
   assert.ok(errs.some((e) => /same hero variant/.test(e)) && errs.some((e) => /same offer variant/.test(e)) && errs.some((e) => /same structure/.test(e)), errs.join('\n'));
@@ -243,23 +313,48 @@ test('the in-page measuring itself: a word broken across lines, text unreadable 
 /** the answer a planner would give: the fallback plans, with written copy */
 const answerOf = (plans: DirectionPlan[]) => ({ concepts: plans.map((p, i) => ({
   name: p.name, thesis: p.thesis, evidence: p.evidence, structure: p.axes.structure, density: p.axes.density, imageryRole: p.axes.imageryRole, typeVoice: p.axes.typeVoice, colorStrategy: p.axes.colorStrategy,
-  sections: p.sections, hero: { ...p.hero, headline: ['Plumbing repairs for Austin homes','Water heaters and drains, done tidy', 'Leaks found without tearing up walls'][i], subline: 'Drain cleaning, water heater repair and leak detection.' },
+  sections: p.sections, hero: { ...p.hero, headline: ['Plumbing repairs for Austin homes', 'Water heaters and drains, done tidy', 'Leaks found without tearing up walls', 'Drains cleared and water heaters fixed', 'Plumbing work for homes in Austin'][i], subline: 'Drain cleaning, water heater repair and leak detection.' },
   titles: [{ kind: 'offer', title: 'What we fix', intro: 'Drains, water heaters and hidden leaks.' }], primaryAction: p.primaryAction ?? '', secondaryAction: p.secondaryAction ?? '', featureIds: p.featureIds, galleryImageIds: p.galleryImageIds, storyImageId: p.storyImageId ?? '', storyText: '',
 })) });
 
-test('a concept set end to end: three rendered concepts that pass every check, are distinct on screen, and say what the preview left out', { skip: !chrome && 'no Chrome here' }, async () => {
+test('the open planner never falls back to the fixed directions: no valid DesignSpec fails its stage, with the reason', async () => {
+  const { agreed, inventory } = await getBriefs();
+  const asked: string[] = [];
+  // a sound direction for this brief (its brand colour and fonts, one of its services), then a spec that is not one
+  const { brandColors, brandFonts } = await import('../src/studio/concepts/designspec.js');
+  const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
+  const font = brandFonts(agreed)[0] ?? 'Inter';
+  const idea = { summary: 'Its services first, plainly.', palette: { ground: 'white', surface: 'paper', ink: 'ink', accent: brandColors(agreed)[0] ?? 'ink' }, type: { heading: font, body: font, treatment: 'Plain.' }, hero: { textSide: 'left', aside: 'service-index', photoBehindText: false, note: 'Its services as an index.' }, sections: [{ content: 'the services', arrangement: 'stack', itemStyle: 'ruled', background: 'surface', media: 'none' }], boldElement: 'The services index.', alignment: 'left' };
+  const direction = { audience: 'Homeowners with a plumbing problem.', mainJob: { text: 'Get them to call.', action: null }, characteristic: { text: 'Its services.', evidence: [{ kind: 'service', id: cat.services[0].id }] }, idea, critique: [], revised: null, changes: null };
+  const t: AiTransport = { via: 'fake', model: 'claude-sonnet-5-5', async call(r) { asked.push(r.stage); return { data: r.stage === 'design:spec' ? { thesis: 'only a thesis' } : r.stage === 'design:direction' ? direction : {}, usage: { via: 'fake', model: 'claude-sonnet-5-5', inputTokens: 6000, outputTokens: 3000, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.05, costBasis: 'computed' } }; } };
+  const job = await startConceptJob({ businessKey: agreed.businessKey, revision: agreed.revision, briefHash: agreed.briefHash, planner: 'open' }, { transport: t });
+  const done = await waitForConceptJob(job.id);
+  assert.equal(done.status, 'failed');
+  assert.match(done.error ?? '', /^directions: open planner: no valid DesignSpec after 2 attempt\(s\): no valid spec after 2 attempt\(s\): \$: "palette" is missing/);
+  assert.equal(asked.filter((s) => s === 'design:direction').length, 1, 'the direction came first, accepted once');
+  assert.equal(asked.filter((s) => s === 'design:spec').length, 2, 'one attempt and one repair');
+  assert.ok(!asked.includes('directions'), 'the fixed directions were never asked for');
+  assert.ok(done.stages.filter((s) => ['compose', 'render', 'validate'].includes(s.name)).every((s) => s.status === 'pending'), 'nothing was composed or rendered from another design');
+  assert.equal(done.setId && (await getConceptSet(done.setId))?.concepts.length ? 'a set' : 'no set', 'no set');
+});
+
+test('a concept set end to end: ranked rendered concepts that pass every check, are distinct on screen, and say what the preview left out', { skip: !chrome && 'no Chrome here' }, async () => {
   const { agreed, inventory } = await getBriefs();
   const cat = resolveCatalog(agreed, inventory, emptyReview(refOf(agreed)));
-  const t = fakeTransport([answerOf(fallbackPlans(cat, agreed))], 0.06);
+  const planned = fallbackPlans(cat, agreed);
+  const t = fakeTransport([answerOf(planned)], 0.06);
   const job = await startConceptJob({ businessKey: agreed.businessKey, revision: agreed.revision, briefHash: agreed.briefHash }, { transport: t });
   const done = await waitForConceptJob(job.id);
   assert.equal(done.status, 'done', done.error ?? '');
   const set = (await getConceptSet(done.setId))!;
-  assert.equal(set.concepts.length, 3);
+  assert.ok(set.concepts.length >= 3 && set.concepts.length <= planned.length, `${set.concepts.length} concepts`);
+  assert.deepEqual(set.concepts.map((c) => c.id), set.concepts.map((_, i) => String.fromCharCode(97 + i)), 'a, b, c, … in rank order');
+  assert.ok(set.ranking && set.ranking.considered.filter((x) => x.status === 'kept').length === set.concepts.length, 'the ranking is saved with the set');
+  for (const c of set.concepts) assert.ok(c.recipe?.directionId && c.recipe.reasons.length, `${c.id}: its recipe and evidence are saved`);
   assert.ok(set.concepts.every((c) => c.planSource === 'ai'));
   for (const c of set.concepts) for (const k of c.checks) assert.equal(k.level, 'pass', `${c.id} ${k.id}: ${k.message} ${(k.details ?? []).join('; ')}`);
   assert.ok(set.distinctness.pairs.every((p) => p.pass), JSON.stringify(set.distinctness.pairs));
-  assert.equal(new Set(set.concepts.map((c) => c.axes.heroComposition)).size, 3);
+  assert.equal(new Set(set.concepts.map((c) => c.axes.heroComposition)).size, set.concepts.length);
   assert.deepEqual([set.cost.calls.length, set.cost.spentUsd, set.cost.capUsd], [1, 0.06, 3], done.stages.find((s) => s.name === 'directions')!.notes.join('\n'));
   for (const c of set.concepts) for (const f of [c.preview!.html, c.preview!.desktop, c.preview!.mobile]) assert.ok(fs.existsSync(path.join(setDir(set.id), f)), f);
   assert.equal(set.gate.publishable, false, 'a preview is not a publication');
@@ -343,7 +438,8 @@ test('the Veracruz C case: several locations, none chosen, and a plan that picks
   // the plan does what Claude did for Veracruz C: its primary action is directions to one of the locations
   const first = cat.locations[0];
   const plans = fallbackPlans(cat, b).map((p) => ({ ...p, primaryAction: first.directions }));
-  const concept = compose(plans[2], 'c', 'ai', cat, b, false);
+  // the reputation direction ("Every location") when this business's photos support it; the strongest one otherwise
+  const concept = compose(plans.find((p) => p.sections[0].variant === 'type-collage') ?? plans[0], 'c', 'ai', cat, b, false);
   assert.deepEqual(concept.actions.find((a) => a.slot === 'primary'), { slot: 'primary', actionId: 'find-location', label: 'Find a location', href: '#visit', factId: 'locations' });
   assert.match(concept.notes!.join(), /no main location is chosen/);
   const [r] = await renderSet([concept], cat, setId);

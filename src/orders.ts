@@ -1,3 +1,4 @@
+import { writeStoredFile } from './google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -91,7 +92,7 @@ export async function createDemoOrder(d: DraftRecord, body: unknown): Promise<{ 
   const dir = path.join(config.dirs.orders, id);
   fs.mkdirSync(dir, { recursive: true });
   const html = fs.existsSync(path.join(siteDir, 'index.html')) ? fs.readFileSync(path.join(siteDir, 'index.html')) : await readOut(`sites/${d.slug}/index.html`);
-  if (html) fs.writeFileSync(path.join(dir, 'index.html'), html);
+  if (html) writeStoredFile(path.join(dir, 'index.html'), html);
   const shot = await screenshot(path.join(siteDir, 'index.html'), path.join(dir, 'thumb.jpg'), { width: 1200, height: 750 }).catch(() => false);
   if (!shot && fs.existsSync(path.join(siteDir, 'preview.jpg'))) fs.copyFileSync(path.join(siteDir, 'preview.jpg'), path.join(dir, 'thumb.jpg'));
   await persistDir(dir);

@@ -1,3 +1,4 @@
+import { writeStoredFile, storedBytes } from './google-names.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
@@ -30,7 +31,7 @@ export async function persistDir(absDir: string): Promise<void> {
   const keep = new Set<string>();
   for (let i = 0; i < files.length; i += 8) {
     await Promise.all(files.slice(i, i + 8).map(async (f) => {
-      const data = fs.readFileSync(f);
+      const data = storedBytes(f, fs.readFileSync(f));
       if (remote!.name === 'redis' && data.length > MAX_BYTES) { console.warn(`[files] ${rel(f)} is ${Math.round(data.length / 1024)} KB, too big for Redis; skipped`); return; }
       keep.add(rel(f));
       await remote!.putFile(rel(f), data, TYPES[path.extname(f).toLowerCase()]);
@@ -90,7 +91,7 @@ export async function restoreDir(relDir: string): Promise<number> {
     const data = await remote.getFile(p);
     if (!data) continue;
     fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, data);
+    writeStoredFile(dest, data);
     n++;
   }
   return n;

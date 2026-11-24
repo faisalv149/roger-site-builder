@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import type { WebsiteScan } from '../types.js';
 import { fetchRaw, normalizeUrl } from '../util/http.js';
+import { completeExcerpt } from '../util/text.js';
 import { parseColor, toHex } from '../color/oklch.js';
 import { extractSiteContent, restoreName, type SiteContent } from './site-content.js';
 import { extractorResult } from '../content/extraction.js';
@@ -220,7 +221,7 @@ async function enrichServicePages(scan: WebsiteScan) {
     if (!r?.ok) return;
     const d = cheerio.load(r.body.toString('utf8'));
     const meta = (d('meta[name="description"]').attr('content') || d('meta[property="og:description"]').attr('content') || '').replace(/\s+/g, ' ').trim();
-    if (meta.length >= 30 && meta !== c.identity.description) { s.description = restoreName(meta, c.identity.name).slice(0, 240); filled++; }
+    if (meta.length >= 30 && meta !== c.identity.description) { const d = completeExcerpt(restoreName(meta, c.identity.name), 400); if (d) { s.description = d; filled++; } }
   }));
   c.report.push(extractorResult('service pages', filled === targets.length ? 'success' : filled ? 'partial' : 'failed', `${filled} of ${targets.length} service page${targets.length > 1 ? 's' : ''} gave a description`, filled, targets.length));
 }

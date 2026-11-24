@@ -86,13 +86,27 @@ async function recordPage(ctx: StageCtx, url: string, r: Awaited<ReturnType<type
 }
 
 // ───────────────────────── 1. identity ─────────────────────────
+/**
+ * The home page at the address given. A plain-http address that gets no answer at all (no HTTP status: a timeout or a
+ * refused connection) is tried once over https, since many sites serve only https while their listing still says http.
+ * Pages are keyed without the scheme, so the https result replaces the failed record.
+ */
+export async function readHome(ctx: StageCtx, home: string, fetcher: typeof fetchWithRetry = fetchWithRetry): Promise<{ page: SnapshotPage; home: string }> {
+  const page = ctx.work.pages[urlKey(home)] ?? (await recordPage(ctx, home, await fetcher(home), { allowRender: true }));
+  if (page.status !== 'failed' || page.httpStatus || !/^http:\/\//i.test(home)) return { page, home };
+  const secure = home.replace(/^http:/i, 'https:');
+  const again = await recordPage(ctx, secure, await fetcher(secure), { allowRender: true });
+  if (again.status === 'failed') { ctx.work.pages[urlKey(home)] = page; await ctx.save(); return { page, home }; }
+  ctx.note(`${home} did not answer (${page.error}); ${secure} did, so the https address is read.`);
+  return { page: again, home: secure };
+}
+
 export async function identityStage(ctx: StageCtx): Promise<void> {
   const w = ctx.work;
   const notes: string[] = [];
   const rejected: IdentitySnapshot['rejected'] = [];
   if (w.input.website) {
-    const home = normalizeUrl(w.input.website);
-    const page = w.pages[urlKey(home)] ?? (await recordPage(ctx, home, await fetchWithRetry(home), { allowRender: true }));
+    const { page, home } = await readHome(ctx, normalizeUrl(w.input.website));
     if (page.status === 'failed') throw new Error(`The website did not load (${page.error}) after ${page.attempts} attempts.`);
     const html = (await getBody(page.bodyHash))!;
     const content = extractSiteContent(html, page.finalUrl || home);
@@ -134,7 +148,9 @@ export async function identityStage(ctx: StageCtx): Promise<void> {
       let home: string | undefined;
       try { home = normalizeUrl(listing.website); } catch { notes.push(`The listing's website "${listing.website}" is not a valid address.`); }
       if (home) {
-        const page = w.pages[urlKey(home)] ?? (await recordPage(ctx, home, await fetchWithRetry(home), { allowRender: true }));
+        const read = await readHome(ctx, home);
+        const page = read.page;
+        home = read.home;
         if (page.status === 'failed') notes.push(`The listing's website (${home}) did not load: ${page.error}.`);
         else {
           const content = extractSiteContent((await getBody(page.bodyHash))!, page.finalUrl || home);
@@ -275,6 +291,14 @@ const MAX_PDFS = () => Number(process.env.STUDIO_MAX_PDFS ?? 4);
 const MAX_PDF_BYTES = () => Number(process.env.STUDIO_MAX_PDF_BYTES ?? 25_000_000);
 const MAX_PDF_PAGES = () => Number(process.env.STUDIO_MAX_PDF_PAGES ?? 12);
 const MAX_OCR_PAGES = () => Number(process.env.STUDIO_MAX_OCR_PAGES ?? 6);
+// OCR and repeated one-minute downloads can outlive a Vercel function. The text
+// layer is still read; scanned pages are explicitly recorded as unreadable there.
+export const documentLimits = (serverless: boolean) => ({
+  fetchTimeoutMs: serverless ? 15_000 : 60_000,
+  fetchAttempts: serverless ? 2 : 3,
+  maxPages: serverless ? Math.min(MAX_PDF_PAGES(), 8) : MAX_PDF_PAGES(),
+  ocrPages: serverless ? 0 : MAX_OCR_PAGES(),
+});
 
 /**
  * Linked PDFs that say what the business sells or costs (menus, price lists, service brochures), read within a budget:
@@ -283,6 +307,7 @@ const MAX_OCR_PAGES = () => Number(process.env.STUDIO_MAX_OCR_PAGES ?? 6);
  */
 export async function documentsStage(ctx: StageCtx, opts: { ocr?: Ocr } = {}): Promise<void> {
   const w = ctx.work;
+  const limits = documentLimits(!!process.env.VERCEL && !opts.ocr);
   w.documents ??= {};
   const found = w.discovery.filter((d) => d.decision === 'document');
   if (!found.length) { ctx.note('No linked PDFs.'); await ctx.save(); return; }
@@ -291,16 +316,16 @@ export async function documentsStage(ctx: StageCtx, opts: { ocr?: Ocr } = {}): P
   const chosen = ranked.filter((r) => isBusinessCritical(r.kind)).slice(0, MAX_PDFS());
   const base = (r: (typeof ranked)[number]): DocumentSnapshot => ({ url: r.d.url, kind: r.kind, anchor: r.d.anchor, linkedFrom: [...r.d.linkedFrom].sort(), status: 'skipped', attempts: 0 });
   for (const r of ranked) if (!chosen.includes(r) && !w.documents[r.d.url]) w.documents[r.d.url] = { ...base(r), reason: isBusinessCritical(r.kind) ? `over the document budget (${MAX_PDFS()} PDFs)` : 'a PDF that does not look like a menu, price list or service document' };
-  const ocrBudget = { pages: MAX_OCR_PAGES() - Object.values(w.documents).reduce((s, x) => s + (x.methods ? x.methods.ocr + x.methods.textAndOcr : 0), 0) };
+  const ocrBudget = { pages: limits.ocrPages - Object.values(w.documents).reduce((s, x) => s + (x.methods ? x.methods.ocr + x.methods.textAndOcr : 0), 0) };
   let engine: Awaited<ReturnType<typeof tesseractOcr>> | undefined;
-  const ocr: Ocr | undefined = opts.ocr ?? (process.env.STUDIO_OCR === '0' ? undefined : async (png) => { engine ??= await tesseractOcr(); return engine.ocr(png); });
+  const ocr: Ocr | undefined = opts.ocr ?? (process.env.STUDIO_OCR === '0' || limits.ocrPages === 0 ? undefined : async (png) => { engine ??= await tesseractOcr(); return engine.ocr(png); });
   try {
     let done = 0;
     for (const r of chosen) {
       ctx.progress(done, chosen.length, `reading ${decodeURIComponent(r.d.url.split('/').pop() || '')}`);
       const prev = w.documents[r.d.url];
       if (prev && prev.status !== 'skipped') { done++; continue; } // read (or failed) before a resume
-      const { res, attempts } = await fetchWithRetry(r.d.url, { timeoutMs: 60_000, maxBytes: MAX_PDF_BYTES() + 1, attempts: 3 });
+      const { res, attempts } = await fetchWithRetry(r.d.url, { timeoutMs: limits.fetchTimeoutMs, maxBytes: MAX_PDF_BYTES() + 1, attempts: limits.fetchAttempts });
       const doc: DocumentSnapshot = { ...base(r), attempts, httpStatus: res.status || undefined };
       const declared = Number(res.headers['content-length'] || 0);
       if (!res.ok) Object.assign(doc, { status: 'failed', reason: res.error || `HTTP ${res.status}` });
@@ -308,7 +333,7 @@ export async function documentsStage(ctx: StageCtx, opts: { ocr?: Ocr } = {}): P
       else if (res.body.subarray(0, 5).toString('latin1') !== '%PDF-') Object.assign(doc, { status: 'failed', reason: `not a PDF (${(res.headers['content-type'] || 'unknown type').split(';')[0]})` });
       else {
         try {
-          const x = await readPdf(new Uint8Array(res.body), { maxPages: MAX_PDF_PAGES(), ocrBudget, ocr });
+          const x = await readPdf(new Uint8Array(res.body), { maxPages: limits.maxPages, ocrBudget, ocr });
           const m = { text: 0, ocr: 0, textAndOcr: 0, unread: 0 };
           for (const p of x.pages) { if (p.method === 'text') m.text++; else if (p.method === 'ocr') m.ocr++; else if (p.method === 'text+ocr') m.textAndOcr++; else m.unread++; }
           const confs = x.pages.filter((p) => p.ocrConfidence !== undefined).map((p) => p.ocrConfidence!);

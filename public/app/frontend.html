@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Roger · New site</title><link rel="stylesheet" href="/app/frontend.css"></head>
+<body>
+<header class="top">
+  <a class="brand" href="/app/"><span class="logo" aria-hidden="true">R</span><span><b>Roger Studio</b><span class="sub">New site · custom full-site generator</span></span></a>
+  <nav aria-label="Staff"><a href="/app/frontend.html" aria-current="page">New site</a><a href="/app/imessage-reviews.html">Reviews</a><a href="/app/leads.html">Leads</a><a href="/app/imessage-reviews.html#invites">Invites</a><a href="/imessage/?intake=custom" target="_blank" rel="noopener">Custom simulator</a></nav>
+</header>
+
+<ol class="steps" aria-label="Steps">
+  <li id="step-find" data-state="current"><span class="num">1</span><span>Find business</span></li>
+  <li id="step-sources" data-state="locked"><span class="num">2</span><span>Review sources and audit</span></li>
+  <li id="step-generate" data-state="locked"><span class="num">3</span><span>Generate and preview</span></li>
+</ol>
+
+<main class="work">
+  <!-- ── 1. Find business ── -->
+  <section class="card stage" id="s-find" aria-labelledby="h-find">
+    <div class="stage-h"><span class="num">1</span><div><h2 id="h-find">Find business</h2><p class="hint">Search Google by name (add a city, ZIP or street to narrow it), or paste the listing's Google Maps link. A business with no Google listing can start from its website alone. Nothing is chosen for you: select the right listing yourself.</p></div></div>
+    <form id="find-form" novalidate>
+      <div class="row">
+        <div class="field"><label for="f-name">Business name</label><input id="f-name" type="text" maxlength="200" placeholder="e.g. Corner Taqueria" autocomplete="off"></div>
+        <div class="field"><label for="f-where">City, ZIP or street <small>optional</small></label><input id="f-where" type="text" maxlength="200" placeholder="e.g. Austin, TX or 78702" autocomplete="off"></div>
+      </div>
+      <div class="field"><label for="f-maps">or a Google Maps link</label><input id="f-maps" type="url" maxlength="600" placeholder="https://maps.app.goo.gl/… or https://www.google.com/maps/place/…" autocomplete="off"></div>
+      <div class="field"><label for="f-site">or the business's website <small>for a business without a Google listing</small></label><input id="f-site" type="url" maxlength="400" placeholder="https://example.com" autocomplete="off"></div>
+      <div class="acts"><button class="btn" id="find-btn" type="submit">Find</button><button class="btn ghost" id="find-cancel" type="button" hidden>Cancel search</button></div>
+    </form>
+    <div id="find-status" class="status-line" role="status" aria-live="polite"></div>
+    <div id="results" class="results" aria-label="Google listings found"></div>
+    <div id="selected" class="selected" hidden aria-live="polite"></div>
+  </section>
+
+  <!-- ── 2. Review sources and audit ── -->
+  <section class="card stage" id="s-sources" aria-labelledby="h-sources" data-locked>
+    <div class="stage-h"><span class="num">2</span><div><h2 id="h-sources">Review sources and audit</h2><p class="hint" id="sources-hint">Select a business in step 1 first.</p></div></div>
+    <div class="stage-body" id="sources-body" hidden>
+      <div class="block">
+        <div class="block-h"><h3>Website</h3><span class="tag current">Current website</span></div>
+        <p class="hint" id="site-origin"></p>
+        <div class="row tight">
+          <div class="field grow"><label for="site-url">Website address</label><input id="site-url" type="url" maxlength="400" placeholder="https://example.com"></div>
+          <label class="check"><input id="site-none" type="checkbox"> No website</label>
+        </div>
+        <div class="acts"><button class="btn ghost" id="audit-btn" type="button">Audit current website</button><button class="btn ghost" id="audit-cancel" type="button" hidden>Cancel audit</button><a class="btn ghost" id="site-open" target="_blank" rel="noopener" hidden>Open current website</a></div>
+        <div id="audit-status" class="status-line" role="status" aria-live="polite"></div>
+        <div id="audit-out"></div>
+      </div>
+      <div class="block">
+        <div class="block-h"><h3>Business research</h3><span class="tag">Sources</span></div>
+        <p class="hint">Research reads the Google listing (and the website, if there is one) and records only verified facts. Generation uses this brief.</p>
+        <div id="saved-brief" class="saved" hidden></div>
+        <div class="acts"><button class="btn" id="research-btn" type="button">Research this business</button><button class="btn ghost" id="research-stop" type="button" hidden>Stop watching</button></div>
+        <div id="research-status" class="status-line" role="status" aria-live="polite"></div>
+        <ol id="research-stages" class="stages-list" hidden></ol>
+        <div id="brief-out"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 3. Generate and preview ── -->
+  <section class="card stage" id="s-generate" aria-labelledby="h-generate" data-locked>
+    <div class="stage-h"><span class="num">3</span><div><h2 id="h-generate">Generate and preview</h2><p class="hint" id="generate-hint">Finish step 2 (a researched or saved brief for the selected business) first.</p></div></div>
+    <div class="stage-body" id="generate-body" hidden>
+      <fieldset class="kind"><legend>What to make</legend>
+        <label class="check"><input type="radio" name="kind" value="splash" checked> <span><b>Splash page</b> · one homepage: a scroll of the screens this business needs, with the action dock and quote form</span></label>
+        <label class="check"><input type="radio" name="kind" value="site"> <span><b>Full website</b> · a custom homepage and its inner pages</span></label>
+      </fieldset>
+      <div class="field"><label for="instruction">Creative direction <small>optional</small></label><textarea id="instruction" maxlength="2000" rows="3" placeholder="A short mood or audience note. Roger chooses layout, typography and page structure."></textarea></div>
+      <p class="hint" id="kind-hint">Plans the screens from the brief, writes and designs the page, then runs the spec's checks (first screen at 390 x 844, JavaScript off, reduced motion, links, facts, Google attribution). Usually about $0.20–0.50.</p>
+      <div class="acts"><button class="btn" id="generate-btn" type="button">Generate new website</button><button class="btn ghost" id="generate-stop" type="button" hidden>Stop watching</button></div>
+      <div id="generate-status" class="status-line" role="status" aria-live="polite"></div>
+      <dl id="generate-meter" class="meter" hidden></dl>
+      <div id="generate-error" class="alert bad" role="alert" hidden></div>
+      <p class="idea" id="fail-idea" hidden></p>
+      <div id="result" hidden>
+        <div class="block-h"><h3 id="result-title">New website preview</h3><span class="tag new" id="result-tag">New website preview</span></div>
+        <p class="idea" id="idea"></p>
+        <div class="toolbar">
+          <div class="tabs" id="page-tabs" role="tablist" aria-label="Pages"></div>
+          <div class="seg" role="group" aria-label="Preview width"><button type="button" id="w-desktop" aria-pressed="true">Desktop · 1440</button><button type="button" id="w-mobile" aria-pressed="false">Phone · 390</button></div>
+          <a class="btn ghost sm" id="page-open" target="_blank" rel="noopener">Open page</a>
+        </div>
+        <div class="viewport" id="viewport"><iframe id="frame" title="New website preview" sandbox="allow-popups allow-popups-to-escape-sandbox" width="1440" height="900"></iframe></div>
+        <div class="block">
+          <div class="block-h"><h3>QA results</h3><span id="qa-badge" class="tag"></span></div>
+          <div id="qa"></div>
+        </div>
+        <div class="block">
+          <div class="block-h"><h3>Staff actions</h3></div>
+          <p class="hint">Draft for staff review: check the desktop and phone design, copy and destinations before showing anyone. Publication is disabled.</p>
+          <div class="acts"><button class="btn ghost" id="recheck-btn" type="button">Run the checks again (no new generation)</button><button class="btn ghost" id="again-btn" type="button">Make another version</button></div>
+          <div id="action-status" class="status-line" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="/app/frontend.js" defer></script>
+<script src="/app/version.js" defer></script></body></html>

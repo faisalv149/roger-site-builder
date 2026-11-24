@@ -67,7 +67,7 @@ export interface SiteModel {
   images: { hero: SiteImage; heroIsStock: boolean; gallery: SiteImage[] };
   visible: Record<string, boolean>;
   hidden: Record<string, string>;
-  contact: { phone?: string; tel?: string; sms?: string; email?: string; address?: string; mapsUrl?: string; directionsUrl?: string };
+  contact: { phone?: string; phoneHeld?: boolean; tel?: string; sms?: string; email?: string; address?: string; mapsUrl?: string; directionsUrl?: string };
   socials: { network: string; url: string }[];
   urls: { site: string; og: string; leadEndpoint: string; base: string };
   preview: boolean;
@@ -263,6 +263,7 @@ export function buildModel(i: ModelInputs): SiteModel {
     hidden,
     contact: {
       phone: b.phone,
+      phoneHeld: b.phoneHeld || undefined,
       tel: e164 ? `tel:${e164}` : undefined,
       sms: e164 ? `sms:${e164}?&body=${encodeURIComponent(t.roger.textPrefill || '')}` : undefined,
       email: i.email,

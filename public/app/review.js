@@ -141,6 +141,27 @@
       $('mkShare').disabled = false;
       $('shareOut').innerHTML = r.ok ? `<label for="shareUrl" class="muted">Homepage preview (not a published website)</label><input id="shareUrl" readonly value="${esc(out.url)}" style="width:100%;margin:6px 0"><a class="btnx ghost" href="${esc(out.url)}" target="_blank" rel="noopener">Open the preview</a>` : `<span class="err">${esc(out.error || `Could not create the link (${r.status})`)}</span>`;
     });
+    // the chosen concept as the full site (home and inner pages, forms, SEO) through the builder; publishing stays gated
+    $('share').insertAdjacentHTML('beforeend', `<h2 style="margin-top:22px">Full site from concept ${esc(conceptId.toUpperCase())}</h2><p class="sub">Builds the home page and the inner pages the content supports, in this concept's layout, type and colour. The owner refines it in their editor; "Try another design" switches between your three concepts.</p><p class="row"><button type="button" class="btnx" id="mkSite">Build the full site</button></p><div id="siteOut" aria-live="polite"></div>`);
+    const showJob = (j) => {
+      const stages = (j.stages || []).map((s) => `<li>${s.status === 'done' ? '✓' : s.status === 'failed' ? '✗' : '…'} ${esc(s.name)}${s.ms ? ` <span class="muted">${(s.ms / 1000).toFixed(1)} s</span>` : ''}${s.note ? ` <span class="muted">· ${esc(s.note)}</span>` : ''}</li>`).join('');
+      const done = j.status === 'done' ? `<p><a class="btnx" href="${esc(j.siteUrl)}" target="_blank" rel="noopener">Open the site preview</a> <a class="btnx ghost" href="${esc(j.ownerUrl)}" target="_blank" rel="noopener">Owner editor (photos, crops, details)</a></p>${j.review && j.review.checks.length ? `<p class="sub">Still to settle before publishing:</p><ul class="gate">${j.review.checks.map((c) => `<li>${esc(c.message)}</li>`).join('')}</ul>` : ''}` : '';
+      $('siteOut').innerHTML = `<p class="muted">${j.status === 'done' ? (j.switched ? 'Switched to this concept.' : 'Built.') : j.status === 'failed' ? `Failed: ${esc(j.error || '')}` : 'Working…'}</p><ul class="stages">${stages}</ul>${done}`;
+    };
+    $('mkSite').addEventListener('click', async () => {
+      $('mkSite').disabled = true;
+      const r = await fetch(`/api/studio/concept-sets/${encodeURIComponent(setId)}/site`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conceptId }) });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) { $('mkSite').disabled = false; $('siteOut').innerHTML = `<span class="err">${esc(out.error || `Could not start (${r.status})`)}</span>`; return; }
+      for (;;) {
+        await new Promise((res) => setTimeout(res, 2000));
+        const j = await fetch(out.url).then((x) => x.json()).catch(() => null);
+        if (!j) continue;
+        showJob(j);
+        if (j.status === 'done' || j.status === 'failed') break;
+      }
+      $('mkSite').disabled = false;
+    });
   }
 
   $('make').addEventListener('click', async () => {

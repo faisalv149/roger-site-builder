@@ -22,7 +22,8 @@
     "qa:release": "tsx scripts/release-qa.ts",
     "repair:identity": "tsx scripts/repair-identity.ts",
     "qa:seo-examples": "tsx scripts/seo-examples.ts",
-    "fixtures:categories": "tsx scripts/make-category-fixtures.ts"
+    "fixtures:categories": "tsx scripts/make-category-fixtures.ts",
+    "audit:google-names": "tsx scripts/google-names-dry-run.ts"
   },
   "engines": {
     "node": ">=22.19"
@@ -37,6 +38,7 @@
     "express": "^4.22.3",
     "lighthouse": "^13.6.0",
     "lucide-static": "^1.61.0",
+    "motion": "14.14.0",
     "multer": "^2.5.0",
     "mupdf": "^1.28.1",
     "sharp": "^0.35.5",

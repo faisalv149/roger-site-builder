@@ -42,6 +42,8 @@ export interface OpeningPeriod {
 export interface Business {
   placeId: string;
   name: string;
+  /** the website and Google disagree on the phone: no number is shown, and nothing on the page asks visitors to call */
+  phoneHeld?: boolean;
   primaryType?: string;
   primaryTypeLabel?: string;
   types: string[];
@@ -98,7 +100,6 @@ export interface BusinessCandidate {
   primaryTypeLabel?: string;
   website?: string;
   mapsUrl?: string;
-  photoRef?: string;
   /** Google's place types: a postal code or a town is not a business */
   types?: string[];
   primaryType?: string;

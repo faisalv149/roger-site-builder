@@ -51,19 +51,21 @@ test('Roger never promises a time, answers questions on the way, and handles eve
   assert.match(r[0].text, /^On it!/);
   const preview = r.find((x) => /localhost:4995\/sites\//.test(x.url ?? ''));
   assert.ok(preview, 'the preview card follows');
-  const editor = r.find((x) => /\/owner\/\?d=/.test(x.url ?? ''));
-  assert.ok(editor, 'and the private editor link');
+  // one preview at a time: the client approves it or asks for another version; no editor, no layout controls
+  assert.ok(!r.some((x) => /\/owner\//.test(`${x.url ?? ''} ${x.text}`)), 'the owner editor link is not sent to the client');
+  assert.deepEqual(preview!.quickReplies, ['Approve and publish', 'Request another version']);
   assert.ok(preview!.quickReplies?.length, 'with buttons');
 
   // every button on the preview gets a real answer, not "text restart"
   for (const chip of preview!.quickReplies!) {
-    if (/personali[sz]e|change|different design/i.test(chip)) continue; // these rebuild; covered by the Studio tests
+    if (/another version/i.test(chip)) continue; // this builds the next version; covered by the Studio tests
     const a = await turn(chip);
     assert.ok(!/didn't catch that|preview again/i.test(text(a)), `"${chip}" has its own answer: ${text(a)}`);
   }
-  r = await turn('Publish it');
-  assert.match(text(r), /Buy this website/);
-  assert.equal(r[0].url, editor!.url, 'the same editor link, not a new one that cancels the first');
+  r = await turn('Approve and publish');
+  assert.match(text(r), /approved/i);
+  assert.ok(!r.some((x) => x.url), 'approval sends no editor or other link');
+  assert.equal((await getConversation(from))?.followUp?.reason, 'publish', 'the team sees the approval; publishing stays behind its gates');
 
   r = await turn('Check the details');
   assert.match(text(r), /check|nothing waiting/i);

@@ -126,6 +126,20 @@ export function mapEmbed(m: SiteModel) {
   return `<iframe class="map" title="Map showing ${esc(m.business.name)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://www.google.com/maps?q=${encodeURIComponent(`${m.business.name}, ${q}`)}&output=embed"></iframe>`;
 }
 
+/** Widths a Google listing photo is requested at for a gallery tile: the browser picks the one its tile needs. */
+export const GALLERY_WIDTHS = [400, 800, 1200];
+/** A gallery tile is at most a third of a wide page, half of a phone's. */
+export const GALLERY_SIZES = '(min-width: 1024px) 34vw, (min-width: 640px) 50vw, 50vw';
+/**
+ * src/srcset for a gallery tile. A Google listing photo (/gphoto/…) is requested at the tile's size, not at 1600px;
+ * the full-screen viewer keeps asking for the large one. Other pictures are already sized files.
+ */
+export function tileSrc(publicPath: string, sizes = GALLERY_SIZES): string {
+  if (!publicPath.startsWith('/gphoto/')) return `src="${esc(publicPath)}"`;
+  const at = (w: number) => `${publicPath}&w=${w}`;
+  return `src="${esc(at(800))}" srcset="${esc(GALLERY_WIDTHS.map((w) => `${at(w)} ${w}w`).join(', '))}" sizes="${sizes}"`;
+}
+
 export function img(i: { publicPath: string; width: number; height: number; alt: string }, opts: { eager?: boolean; cls?: string; sizes?: string } = {}) {
   return `<img src="${esc(i.publicPath)}" width="${i.width}" height="${i.height}" alt="${esc(i.alt)}"${opts.cls ? ` class="${opts.cls}"` : ''} ${opts.eager ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async"${opts.sizes ? ` sizes="${opts.sizes}"` : ''}>`;
 }

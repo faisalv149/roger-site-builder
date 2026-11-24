@@ -389,3 +389,6 @@ details.convo-in-sum .phone-ui{margin-top:12px}
 .cmp td b{font-size:17px}.cmp .na{opacity:.5}
 .cmp .up{font-size:11px;font-weight:700;color:#0C7A43;background:#E7F6EE;border-radius:6px;padding:1px 6px;margin-left:4px}
 .tag-new{background:#E7F6EE;color:#0C5A33}
+/* the open design flow and the old builder's staff flow: each shows only its own controls */
+body[data-flow="open"] [data-flow="builder"], body[data-flow="builder"] [data-flow="open"] { display: none !important; }
+.flow-seg { margin: 8px 0 6px; }

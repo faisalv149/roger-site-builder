@@ -50,6 +50,7 @@
     <a class="btn ghost sm" href="/app/concepts.html" title="Design studio, phase 2: three homepage concepts from a brief"><svg class="i" aria-hidden="true"><use href="#i-steps"/></svg><span class="hide-sm">Concepts</span></a>
     <a class="btn ghost sm" href="/app/review.html" title="Design studio: settle facts, choose a concept, approve photos"><svg class="i" aria-hidden="true"><use href="#i-steps"/></svg><span class="hide-sm">Owner review</span></a>
     <a class="btn ghost sm" href="/imessage/" target="_blank" rel="noopener" title="The iPhone-style page owners text Roger on"><svg class="i" aria-hidden="true"><use href="#i-msg"/></svg><span class="hide-sm">iMessage demo</span></a>
+    <a class="btn ghost sm" href="/imessage/?intake=custom" target="_blank" rel="noopener" title="The custom full-site flow, reviewed here before a link is sent"><svg class="i" aria-hidden="true"><use href="#i-msg"/></svg><span class="hide-sm">Custom iMessage</span></a>
     <button class="status" id="mode" type="button" popovertarget="statusPop" aria-label="System status"><span class="dot"></span><span class="status-txt">Checking…</span><svg class="i" aria-hidden="true"><use href="#i-chevron"/></svg></button>
     <div id="statusPop" class="pop" popover><h3>System status</h3><ul id="statusList"></ul></div>
   </div>
@@ -57,7 +58,16 @@
 
 <div class="shell">
   <aside class="panel" aria-label="New site">
-    <div class="panel-head"><h2>New site</h2><p>Find a business, add its website if it has one, and build.</p></div>
+    <div class="panel-head">
+      <h2>New site</h2>
+      <!-- the open design flow (test intake "open"), or the old builder's staff flow with its theme controls -->
+      <div class="seg flow-seg" role="radiogroup" aria-label="Site flow">
+        <button type="button" role="radio" aria-checked="false" data-flow-mode="open">Open design</button>
+        <button type="button" role="radio" aria-checked="false" data-flow-mode="builder">Builder (staff)</button>
+      </div>
+      <p data-flow="open">Find the business, add its website if it has one, and generate a new design.</p>
+      <p data-flow="builder">Find a business, add its website if it has one, and build.</p>
+    </div>
     <div class="panel-body">
       <section class="step">
         <h3><span class="num">1</span>Find the business</h3>
@@ -71,14 +81,21 @@
 
       <section class="step">
         <h3><span class="num">2</span>Current website <span class="opt">optional</span></h3>
-        <label class="lbl" for="website">We audit it and reuse its logo, colors and fonts</label>
+        <label class="lbl" for="website" data-flow="open">Roger preserves the verified logo and brand colors while redesigning layout and typography</label>
+        <label class="lbl" for="website" data-flow="builder">We audit it and reuse its logo, colors and fonts</label>
         <div class="row">
           <div class="field-ic"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg><input id="website" placeholder="https://example.com" autocomplete="off" inputmode="url"></div>
           <button class="btn ghost" id="auditBtn" type="button">Audit only</button>
         </div>
       </section>
 
-      <section class="step">
+      <section class="step" data-flow="open">
+        <h3><span class="num">3</span>Inspiration <span class="opt">optional</span></h3>
+        <label class="lbl" for="inspiration">A website whose look you like. Roger takes design cues from it, never its words, images or whole layout</label>
+        <div class="field-ic"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg><input id="inspiration" placeholder="https://a-site-you-like.com" autocomplete="off" inputmode="url"></div>
+      </section>
+
+      <section class="step" data-flow="builder">
         <h3><span class="num">3</span>Theme</h3>
         <div class="seg" role="radiogroup" aria-label="Theme source">
           <button type="button" class="on" role="radio" aria-checked="true" data-tmode="library">From library</button>
@@ -100,7 +117,7 @@
         </div>
       </section>
 
-      <details class="adv">
+      <details class="adv" data-flow="builder">
         <summary><svg class="i" aria-hidden="true"><use href="#i-sliders"/></svg>Advanced options<svg class="i chev" aria-hidden="true"><use href="#i-chevron"/></svg></summary>
         <label class="check"><input type="checkbox" id="optFonts"> Use the business website's Google Font for headings</label>
         <label class="check"><input type="checkbox" id="optColorOn"> Force brand color <input type="color" id="optColor" value="#1D4ED8" aria-label="Brand color"></label>
@@ -141,8 +158,10 @@
     <section class="tab" role="tabpanel" data-pane="progress">
       <div id="empty" class="empty-state">
         <span class="es-ic"><svg class="i" aria-hidden="true"><use href="#i-sparkles"/></svg></span>
-        <h2>Build a site in three steps</h2>
-        <ol><li>Find the business on Google</li><li>Optional: add its current website</li><li>Pick a theme (or let Roger choose), then <b>Build website</b></li></ol>
+        <h2 data-flow="open">Generate a site in three steps</h2>
+        <ol data-flow="open"><li>Find the business on Google</li><li>Optional: add its current website (its verified logo and brand colors are kept)</li><li>Optional: add an inspiration website, then <b>Generate website</b></li></ol>
+        <h2 data-flow="builder">Build a site in three steps</h2>
+        <ol data-flow="builder"><li>Find the business on Google</li><li>Optional: add its current website</li><li>Pick a theme (or let Roger choose), then <b>Build website</b></li></ol>
         <div id="samplesWrap"><p>Try a sample business:</p><div class="chips" id="samples"></div></div>
       </div>
       <div id="summary"></div>
@@ -209,5 +228,5 @@
 
 <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 <script src="/app/studio.js"></script>
-</body>
+<script src="/app/version.js" defer></script></body>
 </html>

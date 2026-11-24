@@ -52,7 +52,7 @@ export function checkBuild(f: BuildFacts): BuildReview {
   if (!b.phone && !b.formattedAddress) add('contact-none', 'block', 'No phone number or address for this business: visitors would have no way to reach it.');
   if (c?.phones.primary && b.phone && phoneKey(c.phones.primary) !== phoneKey(b.phone)) add('phone-differs', 'review', `Google lists ${b.phone} but the website shows ${c.phones.primary}. Confirm which one visitors should call.`);
   if (c?.phones.primary && !b.phone) add('phone-missing', 'block', `The website shows ${c.phones.primary} but the site has no phone number.`);
-  if (c?.address && b.formattedAddress && !b.formattedAddress.includes(c.address.zip) && b.source !== 'mock') add('address-differs', 'review', `The website's address (${c.address.formatted}) is not the one used (${b.formattedAddress}).`);
+  if (c?.address && b.formattedAddress && !b.formattedAddress.includes(c.address.zip) && b.source !== 'mock') add('address-differs', 'review', `Google lists ${b.formattedAddress} but the website shows ${c.address.formatted}. Confirm which address visitors should use.`);
   if (c?.address && !b.formattedAddress) add('address-missing', 'block', `The website gives an address (${c.address.formatted}) that the site does not use.`);
 
   const found = c?.services.length ?? 0;
