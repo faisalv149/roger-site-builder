@@ -53,6 +53,7 @@ export async function splashQa(job: SplashJob, html: string, opts: QaOpts = {}):
   // ── what Roger fixed on the way ──
   for (const r of job.repairs ?? []) qa.fixed.push(`The first draft was repaired: ${r.slice(0, 220)}`);
   for (const r of job.motionRepairs ?? []) qa.fixed.push(`Motion: ${r}`);
+  for (const r of job.copyRepairs ?? []) qa.fixed.push(r);
   const mo = job.code?.motion;
   if (mo?.hero) qa.passed.push(`Motion chosen: hero ${mo.hero.treatment}${mo.section ? `, #${mo.section.screen} ${mo.section.treatment}` : ''}${mo.hero.reason ? ` (${mo.hero.reason.slice(0, 160)})` : ''}.`);
   for (const m of job.plan?.screen_plan.merged ?? []) qa.fixed.push(`The ${m.screen} screen was folded into ${m.into} (${m.reason}).`);

@@ -16,7 +16,8 @@ import { reviewPages, type SiteReview } from '../studio/frontend/review.js';
 import { fillListingPhotos } from '../studio/concepts/listing-photos.js';
 import type { FrontendInput } from '../studio/frontend/page.js';
 import { collectSplash, isSiteOnly, type SplashPlan } from './collect.js';
-import { compileSplash, settleMotion, splashCodeProblems, splashInput } from './build.js';
+import { DIRECTIONS, directionText, pickDirection } from './directions.js';
+import { compileSplash, settleMotion, splashCodeProblems, splashInput, stripSeasonal } from './build.js';
 import { SPLASH_PROMPT, SPLASH_SCHEMA, type SplashCode } from './prompt.js';
 import { fillGoogleSlots, liveListing } from './slots.js';
 import { warmImages } from './images.js';
@@ -43,6 +44,10 @@ export interface SplashJob {
   /** who the page is for: the iMessage run and the owner's conversation (quote requests go to them) */
   owner?: { from: string; runId: string };
   stage?: string; error?: string; instruction?: string;
+  /** the visual direction the page was designed to (src/splash/directions.ts) */
+  direction?: string;
+  /** copy Roger took out of the designer's text (undated seasonal mentions), reported to staff */
+  copyRepairs?: string[];
   plan?: SplashPlan; input?: FrontendInput; withheld?: PhotoDecision[];
   code?: SplashCode; costUsd: number; attempts: number; review?: SiteReview; model?: string;
   /** website photos Roger could not fetch from the website (the page's check reports them as not loading) */
@@ -64,7 +69,7 @@ const save = (j: SplashJob) => studioDocs.put('splash-jobs', j.id, { ...j, updat
 export const splashPreviewPath = (id: string) => `/api/studio/splash/${id}/preview`;
 
 /** what Claude is given: the plan, the trade's rules, the facts, actions and photos (no URLs, no Google content) */
-export function splashBrief(plan: SplashPlan, input: FrontendInput, instruction = ''): string {
+export function splashBrief(plan: SplashPlan, input: FrontendInput, instruction = '', direction = ''): string {
   const row = tradeRow(plan.trade.row);
   const brief = {
     business: input.business,
@@ -79,7 +84,7 @@ export function splashBrief(plan: SplashPlan, input: FrontendInput, instruction 
     brand: { colours: input.colours, logo: input.logo ? 'given (data-logo="brand")' : 'none: set the name as text' },
     own_lines: input.ownLines,
   };
-  return `Business data:\n${JSON.stringify(brief)}\n${instruction ? `Staff direction: ${instruction}\n` : ''}Write the complete splash page now.`;
+  return `Business data:\n${JSON.stringify(brief)}\n${direction ? `DESIGN DIRECTION for this page (follow it; it overrides the default look): ${direction}\n` : ''}${instruction ? `Staff direction: ${instruction}\n` : ''}Write the complete splash page now.`;
 }
 
 /**
@@ -208,7 +213,16 @@ export async function runSplashJob(job: SplashJob, opts: SplashJobOpts = {}): Pr
       return finishSplashChecks(job, opts);
     }
     job.instruction = [job.instruction, `Keep the visual direction of the page this replaces: ${before.code.idea}`].filter(Boolean).join(' ').slice(0, 1000);
+    if (before.direction) job.direction = before.direction;
   }
+  // a visual direction of its own, so pages differ from each other (an update keeps the page's direction)
+  if (!job.direction) {
+    const others = (await studioDocs.list<SplashJob>('splash-jobs')).filter((j) => j.id !== job.id && j.direction);
+    const recent = others.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 4).map((j) => j.direction!);
+    const earlier = others.filter((j) => j.placeId === job.placeId).map((j) => j.direction!);
+    job.direction = pickDirection(heroLayouts(input), recent, earlier).id;
+  }
+  const dir = DIRECTIONS.find((d) => d.id === job.direction);
   // 5-6: the page
   job.status = 'generating'; job.stage = 'designing the page'; await save(job);
   // the website photos fetched and sized while Claude designs (the page is checked, and served, from Roger's copies)
@@ -218,8 +232,11 @@ export async function runSplashJob(job: SplashJob, opts: SplashJobOpts = {}): Pr
   if (!transport) throw new Error('Claude is not available on this server.');
   job.model = transport.model;
   const ledger = new CostLedger(splashCapUsd(), job.id);
-  const r = await aiJson<SplashCode>({ stage: 'splash:page-v1', system: SPLASH_PROMPT, output: 'json', schema: SPLASH_SCHEMA, maxOutputTokens: 24000, prompt: splashBrief(plan, input, job.instruction) },
-    { transport, ledger, retries: 1, fieldRepair: false, validate: (code) => splashCodeProblems(code, plan, input, { kit: true, motionDirection: true, treatments: true }) });
+  const seasonal: string[] = [];
+  const r = await aiJson<SplashCode>({ stage: 'splash:page-v1', system: SPLASH_PROMPT, output: 'json', schema: SPLASH_SCHEMA, maxOutputTokens: 24000, prompt: splashBrief(plan, input, job.instruction, dir ? directionText(dir, heroLayouts(input)) : '') },
+    // an undated seasonal word in the designer's own text is removed by Roger, not a reason to fail the page
+    { transport, ledger, retries: 1, fieldRepair: false, validate: (code) => { seasonal.push(...stripSeasonal(code, { hoursCaveat: !!input.facts.hours })); return splashCodeProblems(code, plan, input, { kit: true, motionDirection: true, treatments: true }); } });
+  job.copyRepairs = [...new Set(seasonal)].map((t) => `Removed an undated seasonal mention from the page: "${t}"`);
   job.kit = 3;
   job.costUsd = ledger.spentUsd; job.attempts = r.attempts; job.repairs = r.rejected.flatMap((x) => x.errors).slice(0, 12);
   if (!r.data) { job.status = 'failed'; job.error = `The page did not pass its checks after ${r.attempts} attempt(s): ${r.errors.join('; ').slice(0, 900)}`; if (r.last) job.code = r.last; await save(job); return job; }

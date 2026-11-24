@@ -15,6 +15,7 @@ import { imageSet } from './images.js';
 import { fontFaceCss, type SplashFontFace } from './fonts.js';
 import { HERO_VARIANTS, HERO_SEQUENCES, KIT_CSS, KIT_HEAD_JS, kitScripts, kitTokens, TREATMENTS, type Treatment } from './kit.js';
 import { versionLabel } from '../version.js';
+import { undatedSeasonal } from '../util/text.js';
 import { DOCK_JS, dockCss, dockHtml, sheetHtml, type DockAction, type DockKind } from './dock.js';
 
 const factOf = (plan: SplashPlan, field: string) => plan.fact_sheet.find((f) => f.field === field);
@@ -404,6 +405,30 @@ function treatmentMisfit($: CheerioAPI, scope: Cheerio<AnyNode>, k: string, isHe
  * reveal, and each such repair is reported. A calm trade's page stays still. Inside a moving scope the elements'
  * own data-rk-anim give way to the treatment (two motions never fight over one photo).
  */
+/**
+ * Undated seasonal words in the designer's own text ("Holiday baking" as a label) are taken out by Roger instead of
+ * failing the page: the smallest label or sentence holding them goes, or just the words when that element also holds
+ * bindings, photos or actions. Bound facts are never touched. Returns the texts removed (reported to staff).
+ */
+export function stripSeasonal(code: SplashCode, opts: { hoursCaveat?: boolean } = {}): string[] {
+  const $ = load(code.html, {}, false);
+  const removed: string[] = [];
+  const SMALL = /^(p|li|span|small|em|strong|b|i|figcaption|h[2-6]|dt|dd|blockquote|label|div)$/;
+  $('*').contents().each((_, n) => {
+    if (n.type !== 'text') return;
+    const text = (n as unknown as { data: string }).data;
+    if (!undatedSeasonal(text, opts)) return;
+    const el = $(n).parent();
+    if (el.closest('[data-fact],[data-action],[data-google]').length) return; // a bound value is the business's own fact
+    const holds = el.find('[data-fact],[data-action],[data-google],[data-photo],img,a').length > 0;
+    removed.push(text.trim().slice(0, 80));
+    if (!holds && SMALL.test(el.prop('tagName')?.toLowerCase() ?? '') && !el.is('h1') && el.text().trim() === text.trim()) el.remove();
+    else (n as unknown as { data: string }).data = '';
+  });
+  if (removed.length) code.html = $.html();
+  return removed;
+}
+
 export function settleMotion(code: SplashCode, opts: { calm?: boolean } = {}): { code: SplashCode; motion: MotionChoice; repairs: string[] } {
   const $ = load(code.html, {}, false);
   const repairs: string[] = [];
