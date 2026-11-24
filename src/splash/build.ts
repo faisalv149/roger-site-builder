@@ -410,20 +410,33 @@ function treatmentMisfit($: CheerioAPI, scope: Cheerio<AnyNode>, k: string, isHe
  * failing the page: the smallest label or sentence holding them goes, or just the words when that element also holds
  * bindings, photos or actions. Bound facts are never touched. Returns the texts removed (reported to staff).
  */
+/** the text with each undated seasonal phrase taken out, the spacing and punctuation tidied */
+function withoutSeasonal(text: string, opts: { hoursCaveat?: boolean }): string {
+  let t = text;
+  for (let i = 0; i < 6; i++) { const hit = undatedSeasonal(t, opts); if (!hit) break; t = t.replace(hit, ''); }
+  return t.replace(/\s+([,.!?;:])/g, '$1').replace(/^[\s,;:–—-]+|[\s,;:–—-]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 export function stripSeasonal(code: SplashCode, opts: { hoursCaveat?: boolean } = {}): string[] {
   const $ = load(code.html, {}, false);
   const removed: string[] = [];
   const SMALL = /^(p|li|span|small|em|strong|b|i|figcaption|h[2-6]|dt|dd|blockquote|label|div)$/;
   $('*').contents().each((_, n) => {
     if (n.type !== 'text') return;
-    const text = (n as unknown as { data: string }).data;
+    const node = n as unknown as { data: string };
+    const text = node.data;
     if (!undatedSeasonal(text, opts)) return;
     const el = $(n).parent();
     if (el.closest('[data-fact],[data-action],[data-google]').length) return; // a bound value is the business's own fact
-    const holds = el.find('[data-fact],[data-action],[data-google],[data-photo],img,a').length > 0;
     removed.push(text.trim().slice(0, 80));
-    if (!holds && SMALL.test(el.prop('tagName')?.toLowerCase() ?? '') && !el.is('h1') && el.text().trim() === text.trim()) el.remove();
-    else (n as unknown as { data: string }).data = '';
+    // the sentences without the seasonal mention stay
+    const kept = text.split(/(?<=[.!?])\s+/).filter((s) => !undatedSeasonal(s, opts)).join(' ').trim();
+    // the headline, subline and h1 are never removed: at worst only the seasonal words go
+    const kept2 = kept || (el.closest('[data-copy],h1').length ? withoutSeasonal(text, opts) : '');
+    if (kept2) { node.data = text.match(/^\s*/)![0] + kept2 + text.match(/\s*$/)![0]; return; }
+    const holds = el.find('[data-fact],[data-action],[data-google],[data-photo],img,a').length > 0;
+    if (!holds && SMALL.test(el.prop('tagName')?.toLowerCase() ?? '') && el.text().trim() === text.trim()) el.remove();
+    else node.data = '';
   });
   if (removed.length) code.html = $.html();
   return removed;

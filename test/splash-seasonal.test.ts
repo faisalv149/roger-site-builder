@@ -15,3 +15,10 @@ test('an undated seasonal label in the designer\'s text is removed by Roger; bou
   assert.ok(c.html.includes('<p data-fact="service-1">Holiday baking</p>'), 'a bound fact is the business\'s own and is not touched');
   assert.ok(c.html.includes('Holiday menu 2026'), 'a dated mention stays');
 });
+
+test('the hero subline and headline are never removed: only the seasonal sentence or words go', () => {
+  const c = code('<section id="hero"><h1 data-copy="headline">Sourdough in San Francisco</h1><p data-copy="subline">Naturally leavened loaves. Pre-order for pickup.</p></section><p data-copy="subline">Pre-order sourdough loaves for pickup</p>');
+  stripSeasonal(c);
+  assert.ok(c.html.includes('<p data-copy="subline">Naturally leavened loaves.</p>'), 'the other sentence stays');
+  assert.ok(c.html.includes('<p data-copy="subline">sourdough loaves for pickup</p>'), 'a one-sentence subline keeps its other words');
+});
