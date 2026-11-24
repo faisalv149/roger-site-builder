@@ -6,7 +6,7 @@
 import { load, type Cheerio, type CheerioAPI } from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import { checkCode, compilePage, PIPELINE_REV, type FrontendInput } from '../studio/frontend/page.js';
-import type { SplashPlan } from './collect.js';
+import { isSiteOnly, type SplashPlan } from './collect.js';
 import type { Fact } from './facts.js';
 import { ACTION_LABELS, isCalm, minimalContact, tradeRow, type Action, type TradeRow } from './playbook.js';
 import type { SplashCode } from './prompt.js';
@@ -115,7 +115,7 @@ export function splashActions(plan: SplashPlan, input: FrontendInput, row: Trade
     out.push({ kind: 'text', label: 'Send a text', short: 'Text', href: `sms:${tel.slice(4)}?&body=${encodeURIComponent('Hi, I found you on your website.')}` });
   }
   const address = textOf(factOf(plan, 'address'));
-  if (address) out.push({ kind: 'directions', label: 'Get directions', short: 'Directions', href: `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&destination_place_id=${encodeURIComponent(plan.placeId)}`, external: true });
+  if (address) out.push({ kind: 'directions', label: 'Get directions', short: 'Directions', href: `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}${isSiteOnly(plan.placeId) ? '' : `&destination_place_id=${encodeURIComponent(plan.placeId)}`}`, external: true });
   const link = (field: string) => textOf(factOf(plan, field));
   const health = minimalContact(row);
   if (link('book_url')) out.push({ kind: 'book', label: health ? 'Book an appointment' : row.family === 'beauty' ? 'Book online' : 'Book now', short: 'Book', href: link('book_url'), external: true });

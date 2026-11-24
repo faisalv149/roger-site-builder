@@ -64,9 +64,17 @@
   }
   $('find-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name = $('f-name').value.trim(), where = $('f-where').value.trim(), maps = $('f-maps').value.trim();
-    if (!name && !where && !maps) return say('find-status', 'Enter a business name (and a city, ZIP or street), or paste a Google Maps link.', 'error');
+    const name = $('f-name').value.trim(), where = $('f-where').value.trim(), maps = $('f-maps').value.trim(), site = $('f-site').value.trim();
+    if (!name && !where && !maps && !site) return say('find-status', 'Enter a business name (and a city, ZIP or street), paste a Google Maps link, or enter the business\'s website.', 'error');
     if (maps && !MAPS.test(maps)) return say('find-status', 'That is not a Google Maps link. Copy it from the listing\'s Share button, or leave the field empty.', 'error');
+    // a website alone: the business is researched from its own site (research also looks for its Google listing)
+    if (site && !name && !where && !maps) {
+      const url = /^https?:\/\//i.test(site) ? site : `https://${site}`;
+      if (!/^https?:\/\/[^\s/]+\.[a-z]{2,}(?:[/:?#]\S*)?$/i.test(url)) return say('find-status', 'That is not a website address. Enter it like https://example.com.', 'error');
+      findCtl?.abort(); S.candidates = []; $('results').replaceChildren();
+      say('find-status', 'Starting from the website. Research in step 2 reads it and looks for its Google listing.', 'ok');
+      return select({ name: host(url), website: url, address: '', placeId: null, fromWebsite: true });
+    }
     findCtl?.abort(); findCtl = new AbortController();
     S.candidates = []; $('results').replaceChildren();
     $('find-btn').disabled = true; $('find-cancel').hidden = false;
@@ -115,7 +123,7 @@
   function renderSelected() {
     const c = S.selected;
     if (!c) { $('selected').hidden = true; return; }
-    $('selected').innerHTML = `<div><span class="tag ok">Selected</span> <b>${esc(c.name)}</b><div class="addr">${esc(c.address || '')}</div><code class="pid">Place ID ${esc(c.placeId)}</code></div><button type="button" class="btn ghost sm" id="change-biz">Change business</button>`;
+    $('selected').innerHTML = `<div><span class="tag ok">Selected</span> <b>${esc(c.name)}</b><div class="addr">${esc(c.address || '')}</div>${c.placeId ? `<code class="pid">Place ID ${esc(c.placeId)}</code>` : `<code class="pid">From the website ${esc(host(c.website))} · no Google listing yet</code>`}</div><button type="button" class="btn ghost sm" id="change-biz">Change business</button>`;
     $('selected').hidden = false;
     $('results').hidden = true;
     $('change-biz').addEventListener('click', () => {
@@ -130,7 +138,8 @@
     const c = S.selected, web = websiteOf(c);
     $('site-url').value = web;
     $('site-none').checked = !web;
-    $('site-origin').textContent = web ? `From the Google listing: ${host(web)}. Correct it here if it is wrong.` : 'The Google listing has no website. Add one if the business has a site, or leave "No website" ticked.';
+    $('site-none').disabled = !c.placeId; // a business started from its website always keeps it
+    $('site-origin').textContent = !c.placeId ? 'Entered in step 1. Research reads this website and looks for the business\'s Google listing.' : web ? `From the Google listing: ${host(web)}. Correct it here if it is wrong.` : 'The Google listing has no website. Add one if the business has a site, or leave "No website" ticked.';
     siteControls();
     loadSaved(c).catch(() => undefined);
   }
@@ -147,6 +156,7 @@
 
   /** the saved brief of exactly this listing (place-<Place ID>), offered as a compact staff option */
   async function loadSaved(c) {
+    if (!c.placeId) return;
     const { businesses } = await api('/api/studio/businesses');
     const hit = (businesses || []).find((b) => b.businessKey === `place-${c.placeId}`);
     if (!hit || S.selected?.placeId !== c.placeId) return;
@@ -206,12 +216,20 @@
   async function watchResearch(id) {
     stopResearch = false;
     $('research-btn').disabled = true; $('research-stop').hidden = false;
-    const placeId = S.selected?.placeId;
+    const placeId = S.selected?.placeId, who = S.selected?.placeId || S.selected?.website;
     try {
       for (;;) {
         if (stopResearch) { say('research-status', 'Stopped watching. The research keeps running on the server; press "Resume watching" to follow it again.', 'cancelled'); $('research-btn').textContent = 'Resume watching'; return; }
         const job = await api(`/api/studio/jobs/${encodeURIComponent(id)}`);
-        if (S.selected?.placeId !== placeId) return; // the business was changed meanwhile
+        if ((S.selected?.placeId || S.selected?.website) !== who) return; // the business was changed meanwhile
+        // a business started from its website: research may find its Google listing, which then becomes the selection
+        if (job.status === 'done' && !placeId) {
+          const found = /^place-(.+)$/.exec(job.businessKey || '')?.[1];
+          if (found) { S.selected = { ...S.selected, placeId: found, fromWebsite: false }; renderSelected(); }
+          say('research-status', found ? 'Research found the business\'s Google listing from its website.' : 'No Google listing was found for this website: the brief comes from the website alone.', 'ok');
+          S.brief = { businessKey: job.businessKey, revision: job.revision }; persist();
+          return showBrief();
+        }
         const stages = job.stages || [];
         $('research-stages').hidden = false;
         $('research-stages').innerHTML = stages.map((s) => `<li data-s="${esc(s.status)}">${esc(s.name.replace(/_/g, ' '))}${s.progress ? ` ${s.progress.done}/${s.progress.total}` : ''}</li>`).join('');
@@ -265,7 +283,7 @@
             ${factRow('Phone', shown(b.contact?.phone), b.contact?.phone?.status)}
             ${factRow('Rating', rating, b.reviews?.status ?? (rating ? 'verified' : null))}
             ${factRow('Website', shown(b.identity?.website), b.identity?.website?.status)}
-            ${factRow('Story', shown(b.story) ? String(shown(b.story)).slice(0, 220) : null, b.story?.status)}
+            ${factRow('Story', (() => { const v = shown(b.story); const t = v && typeof v === 'object' ? v.text : v; return t ? String(t).slice(0, 220) : null; })(), b.story?.status)}
           </table></div>
           <div><h4>Photos</h4><ul class="list"><li>Google listing: ${esc(google.count ?? 0)} photo(s), shown live from Google with each photographer credited (never stored)</li><li>Website: ${esc(site.usable ?? 0)} usable of ${esc(site.total ?? 0)}</li></ul>
             <h4 style="margin-top:12px">Missing information</h4>${(b.unknowns || []).length ? `<ul class="list">${b.unknowns.map((u) => `<li><b>${esc(u.field)}</b>: ${esc(u.why)}</li>`).join('')}</ul>` : '<p class="hint">Nothing missing.</p>'}
@@ -344,7 +362,9 @@
     say('generate-status', 'Starting the splash page…', 'loading');
     try {
       const direction = [$('instruction').value.trim(), again ? 'A fresh design, clearly different in composition and visual idea from the version already made.' : ''].filter(Boolean).join(' ');
-      const job = await post('/api/studio/splash', { placeId: S.selected.placeId, instruction: direction });
+      // a business with no Google listing is made from its website's research record
+      const who = S.selected.placeId ? { placeId: S.selected.placeId } : { businessKey: S.brief.businessKey };
+      const job = await post('/api/studio/splash', { ...who, instruction: direction });
       S.designJobId = job.id; persist();
       await watchSplash(job.id);
     } catch (err) { say('generate-status', `The splash page could not start: ${err.message}`, 'error'); }

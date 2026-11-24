@@ -15,7 +15,7 @@ import { gatePhotos, type PhotoDecision } from '../studio/frontend/media-gate.js
 import { reviewPages, type SiteReview } from '../studio/frontend/review.js';
 import { fillListingPhotos } from '../studio/concepts/listing-photos.js';
 import type { FrontendInput } from '../studio/frontend/page.js';
-import { collectSplash, type SplashPlan } from './collect.js';
+import { collectSplash, isSiteOnly, type SplashPlan } from './collect.js';
 import { compileSplash, settleMotion, splashCodeProblems, splashInput } from './build.js';
 import { SPLASH_PROMPT, SPLASH_SCHEMA, type SplashCode } from './prompt.js';
 import { fillGoogleSlots, liveListing } from './slots.js';
@@ -280,7 +280,7 @@ export async function splashPage(job: SplashJob, opts: { mode?: 'preview' | 'liv
   const html = compileSplash(job.code, job.plan, job.input, { id: job.id, mode: opts.mode ?? 'preview', canonical: opts.canonical, quoteAction: `/api/splash/${job.id}/quote`, imageBase: opts.imageBase ?? config.publicBaseUrl, fontFaces: job.fonts?.faces, deadLinks: job.qa?.deadLinks, kit: !!job.kit });
   const withPhotos = await fillListingPhotos(html, { page: splashPreviewPath(job.id) });
   const team = (job.plan.fact_sheet.find((f) => f.field === 'team')?.value as string[] | undefined)?.map((t) => t.split(' | ')[0]) ?? [];
-  const live = await liveListing(job.placeId).catch(() => null);
+  const live = isSiteOnly(job.placeId) ? null : await liveListing(job.placeId).catch(() => null);
   return fillGoogleSlots(withPhotos, live, { names: team, hideReviews: job.plan.trade.row === 'counseling' });
 }
 

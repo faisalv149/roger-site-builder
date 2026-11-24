@@ -15,13 +15,14 @@
 <main class="work">
   <!-- ── 1. Find business ── -->
   <section class="card stage" id="s-find" aria-labelledby="h-find">
-    <div class="stage-h"><span class="num">1</span><div><h2 id="h-find">Find business</h2><p class="hint">Search Google by name (add a city, ZIP or street to narrow it), or paste the listing's Google Maps link. Nothing is chosen for you: select the right listing yourself.</p></div></div>
+    <div class="stage-h"><span class="num">1</span><div><h2 id="h-find">Find business</h2><p class="hint">Search Google by name (add a city, ZIP or street to narrow it), or paste the listing's Google Maps link. A business with no Google listing can start from its website alone. Nothing is chosen for you: select the right listing yourself.</p></div></div>
     <form id="find-form" novalidate>
       <div class="row">
         <div class="field"><label for="f-name">Business name</label><input id="f-name" type="text" maxlength="200" placeholder="e.g. Corner Taqueria" autocomplete="off"></div>
         <div class="field"><label for="f-where">City, ZIP or street <small>optional</small></label><input id="f-where" type="text" maxlength="200" placeholder="e.g. Austin, TX or 78702" autocomplete="off"></div>
       </div>
       <div class="field"><label for="f-maps">or a Google Maps link</label><input id="f-maps" type="url" maxlength="600" placeholder="https://maps.app.goo.gl/… or https://www.google.com/maps/place/…" autocomplete="off"></div>
+      <div class="field"><label for="f-site">or the business's website <small>for a business without a Google listing</small></label><input id="f-site" type="url" maxlength="400" placeholder="https://example.com" autocomplete="off"></div>
       <div class="acts"><button class="btn" id="find-btn" type="submit">Find</button><button class="btn ghost" id="find-cancel" type="button" hidden>Cancel search</button></div>
     </form>
     <div id="find-status" class="status-line" role="status" aria-live="polite"></div>

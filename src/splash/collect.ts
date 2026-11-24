@@ -162,7 +162,11 @@ export function materialOf(sheet: FactSheet, reviews: ReviewChoice, websitePhoto
   };
 }
 
+/** a business known from its website alone: its research record ("site-<host>") is used where a Place ID would be */
+export const isSiteOnly = (id: string) => /^site-[A-Za-z0-9_.-]+$/.test(id);
+
 export interface SplashPlan {
+  /** the Google Place ID, or for a business with no listing its research record ("site-<host>") */
   placeId: string; businessKey?: string; revision?: number;
   stop?: string;
   trade: { row: string; confidence: number; via: TradeChoice['via']; secondary?: string };
@@ -181,16 +185,20 @@ export interface CollectDeps { places?: typeof placesDetails; reviews?: typeof l
  */
 export async function collectSplash(placeId: string, opts: { research?: boolean } = {}, deps: CollectDeps = {}): Promise<SplashPlan> {
   const at = (deps.now ?? (() => new Date().toISOString()))();
-  const places = await (deps.places ?? placesDetails)(placeId);
+  // a business with no Google listing, known from its website alone: its research record ("site-<host>") stands in for
+  // the Place ID, and nothing is asked of Google (no listing, reviews or live hours)
+  const siteOnly = isSiteOnly(placeId);
+  const places: PlaceDetails = siteOnly ? { id: '' } : await (deps.places ?? placesDetails)(placeId);
   const empty = { trade: { row: 'generic', confidence: 0, via: 'fallback' as const }, fact_sheet: [], conflicts: [], open_questions: [], reviews: { selected: [], skipped: [], howChosen: '' }, material: { reviews: 0, credentials: 0, offerings: 0, photos: 0, processStated: false, aboutName: false, aboutStory: false, faqs: 0 }, screen_plan: { screens: [], merged: [], dropped: [] }, injection: [] };
   if (places.businessStatus && places.businessStatus !== 'OPERATIONAL') return { placeId, stop: `the listing's status is ${places.businessStatus}: a human must check before any page is made`, ...empty };
 
-  const businessKey = `place-${placeId}`;
+  const businessKey = siteOnly ? placeId : `place-${placeId}`;
   let { brief, inventory } = await getBrief(businessKey);
+  if (siteOnly && !brief) return { placeId, businessKey, stop: 'this website has not been researched yet: research it first, then make the page', ...empty };
   // a saved brief made from the listing alone is researched again once the listing has a website
-  const stale = brief && places.websiteUri && brief.route !== 'website';
+  const stale = !siteOnly && brief && places.websiteUri && brief.route !== 'website';
   let siteDown = '';
-  if ((!brief || stale) && opts.research !== false) {
+  if (!siteOnly && (!brief || stale) && opts.research !== false) {
     const job = await startStudioJob(places.websiteUri ? { website: places.websiteUri } : { google: placeId }, {}, { maxPages: 25 });
     const done = await runStudioJob(job.id);
     if (done.status === 'done' && done.businessKey === businessKey) ({ brief, inventory } = await getBrief(businessKey, done.revision));
@@ -204,7 +212,7 @@ export async function collectSplash(placeId: string, opts: { research?: boolean 
 
   const choice = classifyTrade({ ownerTrade: owner.find((o) => o.field === 'trade')?.value as string | undefined, primaryType: places.primaryType, types: places.types, category: places.primaryTypeDisplayName?.text, name: places.displayName?.text, websiteText: pages.slice(0, 5).map((p) => p.html.replace(/<[^>]+>/g, ' ')).join(' ').slice(0, 20000) });
   const row = choice.row;
-  const live: { reviews: LiveReview[] } = await (deps.reviews ?? liveReviews)(placeId).catch(() => ({ reviews: [] }));
+  const live: { reviews: LiveReview[] } = siteOnly ? { reviews: [] } : await (deps.reviews ?? liveReviews)(placeId).catch(() => ({ reviews: [] }));
   const team = (sheet.facts.find((f) => f.field === 'team')?.value as string[] | undefined)?.map((t) => t.split(' | ')[0]) ?? [];
   const reviews = selectReviews(live.reviews, { names: team, hide: row.id === 'counseling' });
   const material = materialOf(sheet, reviews, brief?.assets.website.usable ?? 0);

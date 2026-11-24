@@ -17,6 +17,7 @@ import { createShare, shareUrl } from './concepts/share.js';
 import { getSiteJob, resumeSiteIfStale, startSiteJob } from './concepts/site.js';
 import { IdentityError } from '../sources/website-business.js';
 import { resolveBusiness } from './resolve-business.js';
+import { isSiteOnly } from '../splash/collect.js';
 import { getSplashJob, leadPhotoPath, recheckSplashJob, splashBlocking, splashOutput, splashPage, startSplashJob, type SplashLead } from '../splash/jobs.js';
 import { getReferenceJob, ReferenceInputError, resumeReferenceIfStale, resumeReferenceJob, startReferenceJob } from './concepts/references.js';
 
@@ -37,8 +38,11 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 
 // ── splash pages (one-page homepages): start for a Google place, poll, preview ──
 studioRoutes.post('/splash', wrap(async (req, res) => {
-  const placeId = typeof req.body?.placeId === 'string' ? req.body.placeId.trim() : '';
-  if (!/^[A-Za-z0-9_-]{10,200}$/.test(placeId)) return res.status(400).json({ error: 'Give the Google place ID of the business.' });
+  // a Google listing (its Place ID), or a business known from its website alone (its research record, "site-<host>")
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const site = str(req.body?.businessKey);
+  const placeId = site && isSiteOnly(site) && site.length <= 200 ? site : str(req.body?.placeId);
+  if (!isSiteOnly(placeId) && !/^[A-Za-z0-9_-]{10,200}$/.test(placeId)) return res.status(400).json({ error: 'Give the Google place ID of the business, or research its website first.' });
   const job = await startSplashJob(placeId, { instruction: typeof req.body?.instruction === 'string' ? req.body.instruction : undefined });
   res.status(202).json({ id: job.id, status: job.status, url: `/api/studio/splash/${job.id}` });
 }));
