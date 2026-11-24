@@ -730,6 +730,18 @@ export async function staffDecision(from: string, n: number, decision: 'send' | 
   });
 }
 
+/**
+ * A message to an owner that answers nothing they sent (a quote request from their page): saved in their conversation,
+ * then sent through their channel (one at a time with everything else in the conversation).
+ */
+export async function notifyOwner(from: string, replies: Reply[]): Promise<{ delivered: boolean; note?: string }> {
+  return inConversation(from, async () => {
+    const s = await loadSession(from);
+    await record(from, outgoing(replies), s);
+    return channelFor(from).deliver(from, replies);
+  });
+}
+
 /** every conversation on the custom intake, newest first, for the staff review screen */
 export async function customConversations(): Promise<{ from: string; updatedAt: string; business?: string; run: CustomRun; messages: Conversation['messages'] }[]> {
   return (await listConversationRecords())

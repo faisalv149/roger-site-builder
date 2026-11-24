@@ -127,10 +127,21 @@ export type StudioCollection = 'studio-frontend-jobs' | 'studio-photo-omissions'
   /** claims: one record per run of a job, created once, so two workers never run the same thing */
   | 'job-claims'
   /** short-lived locks shared by every process (a conversation changed by one process at a time) */
-  | 'locks';
+  | 'locks'
+  /** what owners told Roger about their business (splash pages: the highest-ranked source), by business key */
+  | 'splash-owner-inputs'
+  /** splash page jobs, and the quote requests their pages send */
+  | 'splash-jobs'
+  | 'splash-leads'
+  /** website and owner photos for splash pages: a master per photo and its sized copies (never Google photos) */
+  | 'splash-images'
+  /** the fonts splash pages use (Google Fonts, open licences), as WOFF2 files */
+  | 'splash-fonts'
+  /** photos visitors attach to a splash page's quote request (re-encoded, no camera metadata) */
+  | 'splash-lead-photos';
 type Collection = 'builds' | 'conversations' | 'publishes' | 'leads' | 'drafts' | 'orders' | StudioCollection;
 /** every collection (the compiler checks none is missing): what an audit of stored documents reads */
-const COLLECTION_SET = { 'locks': 1, 'job-claims': 1, 'beta-invites': 1, 'customer-links': 1, 'studio-frontend-jobs': 1, builds: 1, conversations: 1, publishes: 1, leads: 1, drafts: 1, orders: 1, 'studio-photo-omissions': 1, 'studio-jobs': 1, 'studio-work': 1, 'studio-snapshots': 1, 'studio-bodies': 1, 'studio-briefs': 1, 'studio-inventories': 1, 'studio-index': 1, 'studio-ai': 1, 'studio-reviews': 1, 'studio-concept-jobs': 1, 'studio-concept-sets': 1, 'studio-ai-usage': 1, 'studio-shares': 1, 'studio-site-jobs': 1, 'studio-reference-jobs': 1, 'studio-design-specs': 1, 'site-pins': 1, 'studio-manifests': 1 } satisfies Record<Collection, 1>;
+const COLLECTION_SET = { 'splash-lead-photos': 1, 'splash-fonts': 1, 'splash-images': 1, 'splash-jobs': 1, 'splash-leads': 1, 'splash-owner-inputs': 1, 'locks': 1, 'job-claims': 1, 'beta-invites': 1, 'customer-links': 1, 'studio-frontend-jobs': 1, builds: 1, conversations: 1, publishes: 1, leads: 1, drafts: 1, orders: 1, 'studio-photo-omissions': 1, 'studio-jobs': 1, 'studio-work': 1, 'studio-snapshots': 1, 'studio-bodies': 1, 'studio-briefs': 1, 'studio-inventories': 1, 'studio-index': 1, 'studio-ai': 1, 'studio-reviews': 1, 'studio-concept-jobs': 1, 'studio-concept-sets': 1, 'studio-ai-usage': 1, 'studio-shares': 1, 'studio-site-jobs': 1, 'studio-reference-jobs': 1, 'studio-design-specs': 1, 'site-pins': 1, 'studio-manifests': 1 } satisfies Record<Collection, 1>;
 export const ALL_COLLECTIONS = Object.keys(COLLECTION_SET) as Collection[];
 
 let tmpSeq = 0;

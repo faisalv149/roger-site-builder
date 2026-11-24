@@ -28,6 +28,7 @@ import { findDraft, putDraft } from './drafts.js';
 import { publishReadiness } from './design/content.js';
 import { deleteOut, readOut } from './files.js';
 import { remote } from './remote.js';
+import { buildInfo, versionLabel } from './version.js';
 import { pinnedPath } from './site-pins.js';
 import { ownerRoutes, studioDraftRoutes } from './owner-api.js';
 import { studioRoutes } from './studio/routes.js';
@@ -51,7 +52,7 @@ app.use(express.urlencoded({ extended: false }));
 // ── the beta (ROGER_BETA=1): only the custom flow is served. The old Studio (theme builder, concepts, owner review,
 // the normal simulator) and every API behind it are off; /app/ is the beta's staff app (reviews and invites). The normal
 // client path is unchanged everywhere the beta switch is off.
-const BETA_PATHS = /^\/$|^\/app\/?$|^\/app\/(index\.html|imessage-reviews\.(html|js|css)|frontend\.(html|js|css))$|^\/imessage\/(index\.html|imessage\.(js|css))?$|^\/v\/|^\/api\/health$|^\/api\/staff\/me$|^\/api\/imessage\/inbound$|^\/api\/conversations\/[^/]+$|^\/api\/studio\/(imessage-reviews|beta-invites)(\/|$)|^\/api\/studio\/(jobs|resolve|businesses|frontend-jobs)$|^\/api\/studio\/jobs\/[A-Za-z0-9_-]+$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}(\/resume|\/review)?$|^\/api\/studio\/briefs\/[A-Za-z0-9_.-]+$|^\/api\/audit$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}\/preview(\/[a-z0-9-]+)?$|^\/gphoto\/|^\/cards\/|^\/robots\.txt$|^\/favicon/;
+const BETA_PATHS = /^\/$|^\/app\/?$|^\/app\/(index\.html|imessage-reviews\.(html|js|css)|frontend\.(html|js|css))$|^\/imessage\/(index\.html|imessage\.(js|css))?$|^\/v\/|^\/api\/health$|^\/api\/version$|^\/app\/version\.js$|^\/api\/staff\/me$|^\/api\/imessage\/inbound$|^\/api\/conversations\/[^/]+$|^\/api\/studio\/(imessage-reviews|beta-invites)(\/|$)|^\/api\/studio\/(jobs|resolve|businesses|frontend-jobs)$|^\/api\/studio\/jobs\/[A-Za-z0-9_-]+$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}(\/resume|\/review)?$|^\/api\/studio\/briefs\/[A-Za-z0-9_.-]+$|^\/api\/audit$|^\/api\/studio\/frontend-jobs\/fe_[a-z0-9]{16}\/preview(\/[a-z0-9-]+)?$|^\/gphoto\/|^\/cards\/|^\/api\/splash\/|^\/api\/studio\/(splash|splash-leads)(\/|$)|^\/app\/leads\.(html|js)$|^\/robots\.txt$|^\/favicon/;
 if (config.beta.enabled) app.use((req, res, next) => {
   if (!BETA_PATHS.test(req.path)) return res.status(404).type('text/plain').send('Not part of the Roger beta.');
   if (req.path === '/' || req.path === '/app' || req.path === '/app/' || req.path === '/app/index.html') return res.redirect(302, '/app/frontend.html');
@@ -69,7 +70,7 @@ const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Re
 // the owner editor (/owner) and its API (/api/owner) use the owner's own key per draft, not the Studio password
 // /p/<token>/: a client's preview link for one chosen concept (src/studio/concepts/share.ts)
 // /drafts/<slug>/: the owner editor's own preview of its draft (the same build as /sites, never a pinned version)
-const OPEN = /^\/(sites|drafts|cards|reports|stock|demo-sites|owner|p|gphoto|v)\/|^\/v\/fe_[a-z0-9]{16}$|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/staff\/me$|^\/api\/owner\/|^\/robots\.txt$|^\/imessage\/(imessage\.(js|css))?$/;
+const OPEN = /^\/(sites|drafts|cards|reports|stock|demo-sites|owner|p|gphoto|v)\/|^\/v\/fe_[a-z0-9]{16}$|^\/api\/splash\/sp_[a-f0-9]{16}\/(quote|img\/[A-Za-z0-9_.-]+\/\d+)$|^\/api\/splash\/fonts\/[a-f0-9]{24}\.woff2$|^\/api\/splash\/lead-photos\/lp_[a-f0-9]{16}$|^\/p\/[a-f0-9]{32}$|^\/api\/health$|^\/api\/version$|^\/app\/version\.js$|^\/api\/staff\/me$|^\/api\/owner\/|^\/robots\.txt$|^\/imessage\/(imessage\.(js|css))?$/;
 // sites post their quote form here from any origin; reading leads (GET) still needs the password
 const isLeadPost = (req: Request) => /^\/api\/leads\/[^/]+$/.test(req.path) && (req.method === 'POST' || req.method === 'OPTIONS');
 const sha = (s: string) => createHash('sha256').update(s).digest();
@@ -161,8 +162,10 @@ app.get(/^\/(sites|drafts|cards|reports)\/.*/, wrap(async (req, res) => {
 
 // ── meta ──
 app.get('/api/health', wrap(async (_req, res) => {
-  res.json({ ok: true, mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), claudeTools: claudeToolMode(), model: config.anthropicModel, screenshots: screenshotsAvailable(), themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', pagespeed: !config.pagespeed ? 'off' : process.env.PAGESPEED_API_KEY ? 'key' : config.pagespeedKey ? 'maps-key' : 'no-key', fonts: await textRendering(), claudeKey: claudeVia() === 'api' ? await claudeKeyStatus() : undefined });
+  res.json({ ok: true, version: versionLabel() || 'dev', mock: config.mock, claude: claudeEnabled(), claudeVia: claudeVia(), claudeTools: claudeToolMode(), model: config.anthropicModel, screenshots: screenshotsAvailable(), themes: loadThemes().size, publicBaseUrl: config.publicBaseUrl, publish: publishEnabled() ? 'vercel' : null, vercel: !!process.env.VERCEL, storage: remote?.name ?? 'disk', pagespeed: !config.pagespeed ? 'off' : process.env.PAGESPEED_API_KEY ? 'key' : config.pagespeedKey ? 'maps-key' : 'no-key', fonts: await textRendering(), claudeKey: claudeVia() === 'api' ? await claudeKeyStatus() : undefined });
 }));
+// this deployment's version (stamped at deploy time; 'dev' locally): the staff pages' corner badge reads it
+app.get('/api/version', (_req, res) => { res.set('cache-control', 'no-store').json(buildInfo()); });
 // how long a build will take: ?website=1 (the business has a site to scan) &audit=1 (audit it during the build)
 app.get('/api/estimate', (req, res, next) => {
   const on = (v: unknown) => v === '1' || v === 'true';
@@ -296,11 +299,25 @@ async function sentVersion(id: string) {
   const sent = /^fe_[a-z0-9]{16}$/.test(id) ? await studioDocs.get('customer-links', id) : undefined;
   return sent ? getFrontendJob(id) : undefined;
 }
+/** a splash page sent to its customer (only those are served at /v/) */
+async function sentSplash(id: string) {
+  if (!/^sp_[a-f0-9]{16}$/.test(id) || !(await studioDocs.get('customer-links', id))) return undefined;
+  const { getSplashJob } = await import('./splash/jobs.js');
+  const job = await getSplashJob(id);
+  return job?.code ? job : undefined;
+}
+/** what a messaging app shows for a customer link: the business's name, and the page's first screen */
+function linkMeta(id: string, name: string, slug = 'home') {
+  const title = `${name} · website preview`;
+  return [`<meta property="og:title" content="${escHtml(title)}">`, `<meta property="og:description" content="${escHtml(`A preview of a new website for ${name}.`)}">`, '<meta property="og:type" content="website">',
+    ...(config.publicOrigin ? [`<meta property="og:url" content="${config.publicOrigin}/v/${id}${slug === 'home' ? '' : `/${slug}`}">`, `<meta property="og:image" content="${config.publicOrigin}/v/${id}/preview.png">`, '<meta property="og:image:width" content="1200">', '<meta property="og:image:height" content="630">', '<meta name="twitter:card" content="summary_large_image">'] : [])].join('');
+}
 // the link preview image: the version's homepage, rendered once (a sent version never changes)
 app.get('/v/:id/preview.png', wrap(async (req, res) => {
   const id = String(req.params.id);
-  const job = await sentVersion(id);
-  if (!job) return res.status(404).type('text/plain').send('Not available.');
+  const splash = await sentSplash(id);
+  const job = splash ? undefined : await sentVersion(id);
+  if (!job && !splash) return res.status(404).type('text/plain').send('Not available.');
   // kept in the datastore where there is one (Vercel: a function's disk does not last), else on the local disk
   const key = `v-previews/${id}.png`;
   const kept = remote ? await remote.getFile(key).catch(() => undefined) : undefined;
@@ -310,7 +327,8 @@ app.get('/v/:id/preview.png', wrap(async (req, res) => {
     const browser = await launchBrowser();
     try {
       const page = await (await browser.newContext({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 })).newPage();
-      await page.setContent(await frontendPreview(job, 'home', {}, (s) => `/v/${id}${s === 'home' ? '' : `/${s}`}`), { waitUntil: 'load', timeout: 45000 }).catch(() => undefined);
+      const html = splash ? await (await import('./splash/jobs.js')).splashPage(splash) : await frontendPreview(job!, 'home', {}, (s) => `/v/${id}${s === 'home' ? '' : `/${s}`}`);
+      await page.setContent(html, { waitUntil: 'load', timeout: 45000 }).catch(() => undefined);
       await page.waitForTimeout(1500);
       fs.mkdirSync(path.dirname(file), { recursive: true });
       await page.screenshot({ path: file });
@@ -322,6 +340,14 @@ app.get('/v/:id/preview.png', wrap(async (req, res) => {
 }));
 app.get(['/v/:id', '/v/:id/:slug'], wrap(async (req, res) => {
   const id = String(req.params.id), slug = typeof req.params.slug === 'string' ? req.params.slug : 'home';
+  // a splash page: one page (no inner pages), its Google content filled live
+  const splash = await sentSplash(id);
+  if (splash) {
+    if (slug !== 'home') return res.status(404).type('text/plain').send('No such page.');
+    const { splashPage } = await import('./splash/jobs.js');
+    const html = (await splashPage(splash)).replace('</title>', `</title>${linkMeta(id, String(splash.plan?.fact_sheet.find((f) => f.field === 'name')?.value ?? splash.input?.business.name ?? 'Your business'))}`);
+    return res.set({ 'x-robots-tag': 'noindex', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' }).type('html').send(html);
+  }
   const job = await sentVersion(id);
   if (!job) return res.status(404).type('text/plain').send('This preview link is not available.');
   try {
@@ -364,6 +390,64 @@ app.post('/api/imessage/reset', wrap(async (req, res) => { await resetSession(St
 
 // ── owner editor API (own key per draft) and the Studio's owner-link controls ──
 app.use('/api/owner', ownerRoutes);
+// a splash page's quote or appointment request (visitors of the page: public, plain form or fetch)
+const quotePhoto = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024, files: 1, fields: 10 } }).single('photo');
+app.post('/api/splash/:id/quote', (req, res, next) => quotePhoto(req, res, (err) => {
+  if (!err) return next();
+  const big = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE';
+  res.status(big ? 413 : 400).json({ error: big ? 'That photo is too big (12 MB at most).' : 'The request could not be read.' });
+}), wrap(async (req, res) => {
+  const { saveSplashLead } = await import('./splash/jobs.js');
+  const lead = await saveSplashLead(String(req.params.id), req.body ?? {}, req.file);
+  // to the owner as well as the Roger dashboard: a message in their conversation (failure is recorded, never shown)
+  if (lead) await (async () => {
+    const { getSplashJob, leadMessage } = await import('./splash/jobs.js');
+    const { minimalContact, tradeRow } = await import('./splash/playbook.js');
+    const job = await getSplashJob(lead.jobId);
+    if (!job?.owner?.from) return;
+    const { notifyOwner } = await import('./imessage/flow.js');
+    const r = await notifyOwner(job.owner.from, [leadMessage(lead, { origin: config.publicOrigin || config.publicBaseUrl, appointment: !!job.plan && minimalContact(tradeRow(job.plan.trade.row)) })]);
+    lead.owner = { from: job.owner.from, at: new Date().toISOString(), delivered: r.delivered, ...(r.note ? { note: r.note } : {}) };
+    await studioDocs.put('splash-leads', lead.id, lead);
+  })().catch((e) => console.warn(`[splash] lead ${lead.id} not sent to the owner: ${(e as Error).message}`));
+  if (/json/.test(String(req.headers.accept ?? ''))) return res.status(lead ? 201 : 400).json(lead ? { ok: true } : { error: 'Name and phone are needed.' });
+  const back = String(req.headers.referer ?? '').split('#')[0];
+  res.redirect(303, `${back || '/'}#rg-closed`);
+}));
+// a quote request's photo, for the owner (its id is random and appears only in the owner's message) and staff
+app.get('/api/splash/lead-photos/:id', wrap(async (req, res) => {
+  const id = String(req.params.id);
+  const d = /^lp_[a-f0-9]{16}$/.test(id) ? await studioDocs.get<{ data: string; type: string }>('splash-lead-photos', id) : undefined;
+  if (!d) return res.status(404).type('text/plain').send('No such photo.');
+  res.set({ 'content-type': d.type, 'cache-control': 'private, max-age=3600', 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer' }).send(Buffer.from(d.data, 'base64'));
+}));
+// a splash page's font (public, any origin: a live page is served from the owner's domain)
+app.get('/api/splash/fonts/:file', wrap(async (req, res) => {
+  const { fontFile } = await import('./splash/fonts.js');
+  const m = String(req.params.file).match(/^([a-f0-9]{24})\.woff2$/);
+  const body = m ? await fontFile(m[1]) : undefined;
+  if (!body) return res.status(404).type('text/plain').send('No such font.');
+  res.set({ 'content-type': 'font/woff2', 'cache-control': 'public, max-age=31536000, immutable', 'access-control-allow-origin': '*' }).send(body);
+}));
+// a splash page's website or owner photo at a served width (public: the page's visitors load it)
+app.get('/api/splash/:id/img/:photo/:w', wrap(async (req, res) => {
+  const { getSplashJob } = await import('./splash/jobs.js');
+  const { sizedImage, formatFor, upstreamUrl, ImageError } = await import('./splash/images.js');
+  const id = String(req.params.id);
+  const job = /^sp_[a-f0-9]{16}$/.test(id) ? await getSplashJob(id) : undefined;
+  const photo = job?.input?.photos.find((p) => p.id === String(req.params.photo) && /^https?:\/\//.test(p.url));
+  if (!photo) return res.status(404).type('text/plain').send('No such photo.');
+  try {
+    const img = await sizedImage(photo.url, Number(req.params.w), formatFor(String(req.headers.accept ?? '')));
+    res.set({ 'content-type': img.type, 'cache-control': 'public, max-age=31536000, immutable', vary: 'Accept' }).send(img.body);
+  } catch (e) {
+    // Roger could not fetch it (a host that refuses servers): the visitor's browser asks the host itself, for the
+    // host's own smaller copy where it makes one; not cached, so Roger tries again next time
+    if (e instanceof ImageError && e.status === 502) return res.set({ 'cache-control': 'no-store' }).redirect(302, upstreamUrl(photo.url));
+    if (e instanceof ImageError) return res.status(e.status).type('text/plain').send(e.message);
+    throw e;
+  }
+}));
 app.use('/api/studio', studioRoutes); // design studio: business briefs (phase 1) and concept sets (phase 2), src/studio
 // concept previews: each set's HTML, photos and screenshots (noindex; previews are never published from here)
 app.use('/studio-previews', (_req, res, next) => { res.set({ 'x-robots-tag': 'noindex' }); next(); },
@@ -504,6 +588,8 @@ if (!process.env.VERCEL && !process.env.ROGER_NO_LISTEN) void (async () => {
   if (r.resumed.length + r.restarted.length + r.failed.length) console.log(`[frontend] recovered: resumed ${r.resumed.join(', ') || '-'}; restarted ${r.restarted.join(', ') || '-'}; failed ${r.failed.join(', ') || '-'}`);
   // custom-intake conversations move forward on their own (not only when the customer's page polls)
   setInterval(() => { void advanceAllCustom().catch((e) => console.warn('[imessage custom] tick failed', e)); }, 15_000).unref();
+  // splash pages stopped mid-run (a restart: a beat silent for 2 minutes) are recovered once (see src/splash/jobs.ts)
+  setInterval(() => { void import('./splash/jobs.js').then((m) => m.recoverInterruptedSplashJobs(owner)).then((r) => { if (r.rechecked.length + r.restarted.length + r.failed.length) console.log('[splash] recovered', JSON.stringify(r)); }).catch((e) => console.warn('[splash] recovery failed', e)); }, 60_000).unref();
   app.listen(config.port, () => {
   console.log(`Roger Site Builder on ${config.publicBaseUrl}  (mock=${config.mock}, claude=${claudeVia() ?? 'off'}, screenshots=${screenshotsAvailable()}, themes=${loadThemes().size}, password=${config.studioPassword ? 'on' : 'off'}, publish=${config.vercelToken ? 'vercel' : 'off'})`);
   // studio jobs that were running when the server stopped continue where they were

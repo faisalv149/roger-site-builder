@@ -91,7 +91,10 @@ export const MEASURE = async () => {
     if (cs.visibility === 'hidden' || cs.display === 'none' || cs.clip !== 'auto' || cs.clipPath !== 'none' || r.right < 0 || r.left > innerWidth) continue;
     let scrolls = false;
     for (let a: Element | null = el; a && a !== document.body; a = a.parentElement) if (/(auto|scroll)/.test(getComputedStyle(a).overflowX)) { scrolls = true; break; }
-    if (!scrolls) cut.push(`"${text.slice(0, 40)}" (${label(el)})`);
+    // an intentional marquee: a kit track whose band clips it sideways runs past the window by design (only then)
+    const band = el.closest('.rk-marquee__track')?.closest('.rk-marquee');
+    const marquee = !!band && /(hidden|clip)/.test(getComputedStyle(band).overflowX);
+    if (!scrolls && !marquee) cut.push(`"${text.slice(0, 40)}" (${label(el)})`);
   }
   return {
     credits: imgs.length, creditProblems: out, cut,
@@ -113,7 +116,7 @@ export const AUDIT = (allowed: string[]) => {
   const short = (t: string | null | undefined) => (t ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
   for (const a of Array.from(document.querySelectorAll<HTMLAnchorElement>('a'))) {
     const href = a.getAttribute('href') ?? '';
-    const ok = /^(https:\/\/|tel:\+?[\d\s()-]+$|mailto:)/i.test(href) || (href.startsWith('#') && (href === '#' ? false : ids.has(decodeURIComponent(href.slice(1))))) || allowed.includes(href);
+    const ok = /^(https:\/\/|tel:\+?[\d\s()-]+$|sms:\+?[\d\s()-]+(\?(&?)body=[^#]*)?$|mailto:)/i.test(href) || (href.startsWith('#') && (href === '#' ? false : ids.has(decodeURIComponent(href.slice(1))))) || allowed.includes(href);
     if (!ok) problems.push(`link "${short(a.textContent) || href}" goes to ${href ? `"${href}", which is not a page of this version or a verified destination` : 'nothing (no address)'}`);
     if (!short(a.textContent) && !a.getAttribute('aria-label') && !a.querySelector('img[alt]:not([alt=""])')) problems.push(`a link to "${href}" has no name a screen reader can read`);
   }
@@ -128,9 +131,20 @@ export const AUDIT = (allowed: string[]) => {
   // contrast: own text on the nearest solid background (text on a photo or gradient is not measured)
   const lum = (rgb: number[]) => { const [r, g, b] = rgb.map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
   const rgba = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
-  const bgOf = (el: Element | null): number[] | null => {
-    for (; el; el = el.parentElement) { const cs = getComputedStyle(el); if (/url\(/.test(cs.backgroundImage)) return null; const c = rgba(cs.backgroundColor); if (c.length >= 3 && (c[3] ?? 1) > 0.9) return c.slice(0, 3); /* (a gradient such as ruled lines over a solid colour reads as that colour) */ }
-    return [255, 255, 255];
+  // the colours text sits on: the nearest solid background, or (a gradient with nothing solid under it) each of its
+  // solid colour stops, so the text is measured against the worst of them
+  const bgOf = (el: Element | null): number[][] | null => {
+    for (; el; el = el.parentElement) {
+      const cs = getComputedStyle(el); if (/url\(/.test(cs.backgroundImage)) return null;
+      const c = rgba(cs.backgroundColor); if (c.length >= 3 && (c[3] ?? 1) > 0.9) return [c.slice(0, 3)]; /* (a gradient such as ruled lines over a solid colour reads as that colour) */
+      // a gradient drawn as a line (a link's underline, a rule) is decoration, not what the text sits on
+      const line = /gradient\(/.test(cs.backgroundImage) && cs.backgroundSize.split(',').every((s) => { const h = s.trim().split(/\s+/)[1]; return !!h && /px$/.test(h) && parseFloat(h) <= 6; });
+      if (/gradient\(/.test(cs.backgroundImage) && !line) {
+        const stops = (cs.backgroundImage.match(/rgba?\([^)]*\)/g) ?? []).map(rgba).filter((x) => x.length >= 3 && (x[3] ?? 1) > 0.9).map((x) => x.slice(0, 3));
+        if (stops.length) return stops;
+      }
+    }
+    return [[255, 255, 255]];
   };
   const low = new Map<string, number>();
   for (const el of Array.from(document.querySelectorAll('body *'))) {
@@ -138,8 +152,12 @@ export const AUDIT = (allowed: string[]) => {
     const cs = getComputedStyle(el), r = el.getBoundingClientRect();
     if (!r.width || !r.height || cs.visibility === 'hidden' || Number(cs.opacity) < 0.6) continue;
     const bg = bgOf(el), fg = rgba(cs.color); if (!bg || fg.length < 3 || (fg[3] ?? 1) < 0.9) continue;
-    const [a, b] = [lum(fg.slice(0, 3)), lum(bg)], ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-    const size = parseFloat(cs.fontSize), large = size >= 24 || (size >= 18.66 && Number(cs.fontWeight) >= 700);
+    // text laid over a photo (an img behind it, not a CSS background) is on the photo, not on the colour below it
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    if (cy >= 0 && cy <= innerHeight && document.elementsFromPoint(cx, cy).some((e) => e !== el && !el.contains(e) && /^(IMG|PICTURE|VIDEO)$/.test(e.tagName))) continue;
+    const a = lum(fg.slice(0, 3)), ratio = Math.min(...bg.map((c) => { const b = lum(c); return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); }));
+    // (a graphic drawn with characters, such as rating stars marked role="img", needs 3:1 like any graphic)
+    const size = parseFloat(cs.fontSize), large = size >= 24 || (size >= 18.66 && Number(cs.fontWeight) >= 700) || !!el.closest('[role="img"]');
     if (ratio < (large ? 3 : 4.5)) { const k = `"${short(el.textContent)}" ${ratio.toFixed(2)}:1`; low.set(k, (low.get(k) ?? 0) + 1); }
   }
   if (low.size) notes.push(`text below WCAG AA contrast: ${[...low.keys()].slice(0, 4).join('; ')}${low.size > 4 ? ` and ${low.size - 4} more` : ''}`);

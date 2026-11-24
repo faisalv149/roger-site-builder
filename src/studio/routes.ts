@@ -17,6 +17,7 @@ import { createShare, shareUrl } from './concepts/share.js';
 import { getSiteJob, resumeSiteIfStale, startSiteJob } from './concepts/site.js';
 import { IdentityError } from '../sources/website-business.js';
 import { resolveBusiness } from './resolve-business.js';
+import { getSplashJob, leadPhotoPath, recheckSplashJob, splashBlocking, splashOutput, splashPage, startSplashJob, type SplashLead } from '../splash/jobs.js';
 import { getReferenceJob, ReferenceInputError, resumeReferenceIfStale, resumeReferenceJob, startReferenceJob } from './concepts/references.js';
 
 /**
@@ -33,6 +34,50 @@ import { getReferenceJob, ReferenceInputError, resumeReferenceIfStale, resumeRef
  */
 export const studioRoutes = express.Router();
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
+
+// ── splash pages (one-page homepages): start for a Google place, poll, preview ──
+studioRoutes.post('/splash', wrap(async (req, res) => {
+  const placeId = typeof req.body?.placeId === 'string' ? req.body.placeId.trim() : '';
+  if (!/^[A-Za-z0-9_-]{10,200}$/.test(placeId)) return res.status(400).json({ error: 'Give the Google place ID of the business.' });
+  const job = await startSplashJob(placeId, { instruction: typeof req.body?.instruction === 'string' ? req.body.instruction : undefined });
+  res.status(202).json({ id: job.id, status: job.status, url: `/api/studio/splash/${job.id}` });
+}));
+studioRoutes.get('/splash/:id', wrap(async (req, res) => {
+  const job = await getSplashJob(String(req.params.id));
+  if (!job) return res.status(404).json({ error: 'No such splash job.' });
+  const { input, code, ...summary } = job;
+  res.json({ ...summary, idea: code?.idea, design_tokens: code?.design_tokens, previewUrl: code ? `/api/studio/splash/${job.id}/preview` : undefined, blocking: job.status === 'ready' ? splashBlocking(job) : [] });
+}));
+studioRoutes.get('/splash/:id/preview', wrap(async (req, res) => {
+  const job = await getSplashJob(String(req.params.id));
+  if (!job?.code) return res.status(404).type('text/plain').send('No splash page for this id yet.');
+  res.set({ 'cache-control': 'no-store', 'x-robots-tag': 'noindex' }).type('html').send(await splashPage(job));
+}));
+
+// the checks again on a splash page as it is (no AI): the page keeps its id, its checks are replaced
+studioRoutes.post('/splash/:id/recheck', wrap(async (req, res) => {
+  const job = await recheckSplashJob(String(req.params.id));
+  if (!job) return res.status(409).json({ error: 'There is no finished page to check (or its checks are already running).' });
+  res.status(202).json({ id: job.id, status: job.status });
+}));
+
+// the Roger dashboard of quote and appointment requests from splash pages, newest first
+studioRoutes.get('/splash-leads', wrap(async (_req, res) => {
+  const leads = (await studioDocs.list<SplashLead>('splash-leads')).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 500);
+  const jobs = new Map<string, Awaited<ReturnType<typeof getSplashJob>>>();
+  for (const id of new Set(leads.map((l) => l.jobId))) jobs.set(id, await getSplashJob(id));
+  res.set({ 'cache-control': 'no-store' }).json({ leads: leads.map((l) => {
+    const j = jobs.get(l.jobId);
+    return { ...l, business: String(j?.plan?.fact_sheet.find((f) => f.field === 'name')?.value ?? j?.input?.business.name ?? l.placeId), trade: j?.plan?.trade.row ?? null, previewUrl: `/api/studio/splash/${l.jobId}/preview`, photoUrl: l.photoId ? leadPhotoPath(l.photoId) : null };
+  }) });
+}));
+
+// the spec's output: {trade, fact_sheet, open_questions, screen_plan, design_tokens, html, jsonld, qa}
+studioRoutes.get('/splash/:id/output', wrap(async (req, res) => {
+  const job = await getSplashJob(String(req.params.id));
+  if (!job?.code || !job.plan) return res.status(404).json({ error: 'No splash page for this id yet.' });
+  res.set({ 'cache-control': 'no-store' }).json(await splashOutput(job));
+}));
 
 studioRoutes.post('/resolve', wrap(async (req, res) => {
   const b = (req.body || {}) as Record<string, unknown>;
@@ -324,6 +369,19 @@ studioRoutes.get('/imessage-reviews', wrap(async (_req, res) => {
   for (const c of await customConversations()) {
     const versions = [];
     for (const v of c.run.versions) {
+      // a splash page: one page, its checks as the spec reports them (blocking findings hold it back; the rest are notes)
+      if (v.jobId?.startsWith('sp_')) {
+        const sp = await getSplashJob(v.jobId);
+        const blocking = sp ? splashBlocking(sp) : [];
+        versions.push({ ...v, job: sp ? {
+          id: sp.id, kind: 'splash', status: sp.status, stage: sp.stage ?? null, rev: 1, idea: sp.code?.idea ?? null, costUsd: sp.costUsd, attempts: sp.attempts, createdAt: sp.createdAt, updatedAt: sp.updatedAt, error: sp.error ?? null,
+          pages: sp.code ? [{ slug: 'home', staffUrl: `/api/studio/splash/${sp.id}/preview` }] : [],
+          checks: { blocking: sp.status === 'ready' ? blocking : [], staff: (sp.qa?.needs_human ?? []).filter((x) => !(sp.qa?.blocking ?? []).includes(x)) },
+          review: sp.review ? { ran: sp.review.ran, pass: sp.review.pass, pages: sp.review.pages.map((p) => ({ page: p.page, width: p.width, pass: p.pass, credits: p.credits })) } : null,
+          withheld: sp.withheld ?? [], delivery: null, qa: sp.qa ? { passed: sp.qa.passed, fixed: sp.qa.fixed, needs_human: sp.qa.needs_human } : null,
+        } : null });
+        continue;
+      }
       const job = v.jobId ? await getFrontendJob(v.jobId) : undefined;
       versions.push({ ...v, job: job ? {
         id: job.id, status: job.status, stage: job.stage ?? null, rev: job.rev ?? 1, idea: job.code?.idea ?? null, costUsd: job.costUsd, attempts: job.attempts, createdAt: job.createdAt, updatedAt: job.updatedAt, error: job.error ?? null,

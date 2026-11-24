@@ -13,8 +13,8 @@
   const mins = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; };
 
   /** what staff chose and started (kept across a reload) */
-  const S = { candidates: [], selected: null, researchJobId: null, saved: null, brief: null, designJobId: null };
-  const persist = () => { try { localStorage.setItem(KEY, JSON.stringify({ selected: S.selected, researchJobId: S.researchJobId, brief: S.brief, designJobId: S.designJobId })); } catch { /* private mode */ } };
+  const S = { candidates: [], selected: null, researchJobId: null, saved: null, brief: null, designJobId: null, kind: 'splash' };
+  const persist = () => { try { localStorage.setItem(KEY, JSON.stringify({ selected: S.selected, researchJobId: S.researchJobId, brief: S.brief, designJobId: S.designJobId, kind: S.kind })); } catch { /* private mode */ } };
   const restore = () => { try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { return null; } };
 
   async function api(url, opts = {}) {
@@ -276,10 +276,25 @@
 
   /* ───────────── 3. Generate and preview ───────────── */
   let stopDesign = false, current = null, width = 1440;
-  $('generate-btn').addEventListener('click', () => (S.designJobId && $('generate-btn').textContent === 'Resume watching' ? watchDesign(S.designJobId) : startDesign(false)));
+  const KIND_HINT = {
+    splash: 'Plans the screens from the brief, writes and designs the page, then runs the spec\'s checks (first screen at 390 x 844, JavaScript off, reduced motion, links, facts, Google attribution). Usually about $0.20–0.50.',
+    site: 'Writes a custom homepage and its inner pages, then checks every page at desktop and phone width. The AI generation cap is $2 per site.',
+  };
+  const kindLabel = () => (S.kind === 'splash' ? 'Generate splash page' : 'Generate new website');
+  function setKind(k) {
+    S.kind = k === 'site' ? 'site' : 'splash';
+    document.querySelectorAll('input[name=kind]').forEach((r) => { r.checked = r.value === S.kind; });
+    $('kind-hint').textContent = KIND_HINT[S.kind];
+    if ($('generate-btn').textContent !== 'Resume watching') $('generate-btn').textContent = kindLabel();
+    persist();
+  }
+  document.querySelectorAll('input[name=kind]').forEach((r) => r.addEventListener('change', () => setKind(r.value)));
+  const isSplashJob = (id) => typeof id === 'string' && id.startsWith('sp_');
+  $('generate-btn').addEventListener('click', () => (S.designJobId && $('generate-btn').textContent === 'Resume watching' ? (isSplashJob(S.designJobId) ? watchSplash(S.designJobId) : watchDesign(S.designJobId)) : startDesign(false)));
   $('again-btn').addEventListener('click', () => startDesign(true));
   async function startDesign(again) {
     if (!S.brief) return;
+    if (S.kind === 'splash') return startSplash(again);
     $('generate-btn').disabled = true; $('again-btn').disabled = true; $('result').hidden = true; $('generate-error').hidden = true;
     say('generate-status', 'Starting generation…', 'loading');
     try {
@@ -323,9 +338,75 @@
   }
   $('generate-stop').addEventListener('click', () => { stopDesign = true; });
 
+  /* ── a splash page: one page, the spec's checks ── */
+  async function startSplash(again) {
+    $('generate-btn').disabled = true; $('again-btn').disabled = true; $('result').hidden = true; $('generate-error').hidden = true;
+    say('generate-status', 'Starting the splash page…', 'loading');
+    try {
+      const direction = [$('instruction').value.trim(), again ? 'A fresh design, clearly different in composition and visual idea from the version already made.' : ''].filter(Boolean).join(' ');
+      const job = await post('/api/studio/splash', { placeId: S.selected.placeId, instruction: direction });
+      S.designJobId = job.id; persist();
+      await watchSplash(job.id);
+    } catch (err) { say('generate-status', `The splash page could not start: ${err.message}`, 'error'); }
+    finally { $('generate-btn').disabled = false; $('again-btn').disabled = false; }
+  }
+  const SPLASH_STAGE = { queued: 'Queued for the worker', collecting: 'Collecting the business', generating: 'Designing the page', checking: 'Running the checks' };
+  async function watchSplash(id) {
+    stopDesign = false;
+    $('generate-btn').disabled = true; $('generate-stop').hidden = false; $('generate-error').hidden = true; $('fail-idea').hidden = true;
+    try {
+      for (;;) {
+        if (stopDesign) { say('generate-status', 'Stopped watching. The page keeps being made on the server; press "Resume watching" to follow it again.', 'cancelled'); $('generate-btn').textContent = 'Resume watching'; return; }
+        const job = await api(`/api/studio/splash/${encodeURIComponent(id)}`);
+        const finished = ['ready', 'failed', 'stopped'].includes(job.status);
+        const elapsed = mins((finished ? Date.parse(job.updatedAt) : Date.now()) - Date.parse(job.createdAt));
+        $('generate-meter').hidden = false;
+        $('generate-meter').innerHTML = [['Status', job.status], ['Stage', job.stage || SPLASH_STAGE[job.status] || '—'], ['Trade', job.plan?.trade?.row || '—'], ['Time', elapsed], ['AI cost', `$${Number(job.costUsd || 0).toFixed(3)}`], ['Attempts', job.attempts ?? 0], ['Job', job.id]]
+          .map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
+        if (job.status === 'failed' || job.status === 'stopped') {
+          say('generate-status', job.status === 'stopped' ? 'Stopped for a person to check.' : `The page failed after ${elapsed}.`, 'error');
+          $('fail-idea').textContent = job.idea || ''; $('fail-idea').hidden = !job.idea;
+          $('generate-error').hidden = false;
+          $('generate-error').innerHTML = `<b>${job.status === 'stopped' ? 'Why it stopped' : 'Why it failed'}</b><p>${esc(job.error || 'No reason was recorded.')}</p>`;
+          $('generate-btn').textContent = kindLabel();
+          return;
+        }
+        if (finished) { say('generate-status', `Finished in ${elapsed}.`, 'ok'); $('generate-btn').textContent = kindLabel(); return renderSplash(job); }
+        say('generate-status', `${job.stage || SPLASH_STAGE[job.status] || 'Working'}…`, 'loading');
+        await wait(2500);
+      }
+    } catch (err) { say('generate-status', `Could not read the splash job: ${err.message}`, 'error'); $('generate-btn').textContent = 'Resume watching'; }
+    finally { $('generate-btn').disabled = false; $('generate-stop').hidden = true; }
+  }
+  function renderSplash(job) {
+    current = job;
+    $('result').hidden = false;
+    $('result-title').textContent = 'Splash page preview'; $('result-tag').textContent = job.reused ? 'Updated facts, same design' : 'Splash page';
+    $('idea').textContent = job.idea || '';
+    const screens = (job.plan?.screen_plan?.screens || []).map((s) => s.label || s.screen).join(' → ');
+    $('page-tabs').innerHTML = `<button type="button" role="tab" data-url="${esc(job.previewUrl)}" aria-selected="true">Splash page${screens ? ` · ${esc(screens)}` : ''}</button>`;
+    showPage(job.previewUrl);
+    renderSplashQa(job);
+  }
+  function renderSplashQa(job) {
+    const qa = job.qa, badge = $('qa-badge'), blocking = job.blocking || [];
+    if (!qa) { badge.className = 'tag warn'; badge.textContent = 'Checks did not run'; $('qa').innerHTML = '<p class="hint">The checks have not run for this page.</p>'; return; }
+    badge.className = `tag ${blocking.length ? 'bad' : qa.needs_human.length ? 'warn' : 'ok'}`;
+    badge.textContent = blocking.length ? `${blocking.length} blocking` : qa.needs_human.length ? `${qa.passed.length} passed · ${qa.needs_human.length} for staff` : `All ${qa.passed.length} checks passed`;
+    const list = (title, items, cls = '') => items.length ? `<div class="qa-group"><h4>${esc(title)}</h4><ul class="list">${items.map((x) => `<li${cls && blocking.some((b) => b.includes(x)) ? ` class="${cls}"` : ''}>${esc(x)}</li>`).join('')}</ul></div>` : '';
+    const questions = job.plan?.open_questions || [];
+    $('qa').innerHTML = [
+      blocking.length ? `<div class="alert bad"><b>Not sendable until fixed</b><ul class="list">${blocking.map((b) => `<li>${esc(b)}</li>`).join('')}</ul></div>` : '',
+      list('For staff', qa.needs_human, 'block'), list('Fixed by Roger', qa.fixed), list('Passed', qa.passed),
+      questions.length ? `<div class="qa-group"><h4>Questions for the owner</h4><ul class="list">${questions.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></div>` : '',
+      `<p class="hint"><a href="/api/studio/splash/${encodeURIComponent(job.id)}/output" target="_blank" rel="noopener">The spec's output JSON</a></p>`,
+    ].join('');
+  }
+
   function renderResult(job) {
     current = job;
     $('result').hidden = false;
+    $('result-title').textContent = 'New website preview'; $('result-tag').textContent = 'New website preview';
     $('idea').textContent = job.idea || '';
     const pages = job.pages || [];
     $('page-tabs').innerHTML = pages.map((p, i) => `<button type="button" role="tab" data-url="${esc(p.url)}" aria-selected="${i === 0}">${esc(p.title)}</button>`).join('');
@@ -361,6 +442,14 @@
   }
   $('recheck-btn').addEventListener('click', async () => {
     if (!current) return;
+    if (isSplashJob(current.id)) {
+      $('recheck-btn').disabled = true;
+      say('action-status', 'Running the checks again on the page as it is (no new generation)…', 'loading');
+      try { await post(`/api/studio/splash/${encodeURIComponent(current.id)}/recheck`); say('action-status', 'Checks re-run requested.', 'ok'); await watchSplash(current.id); }
+      catch (err) { say('action-status', `The checks could not run: ${err.message}`, 'error'); }
+      finally { $('recheck-btn').disabled = false; }
+      return;
+    }
     $('recheck-btn').disabled = true;
     say('action-status', 'Running the checks again on every page (no new generation)…', 'loading');
     try { const r = await post(`/api/studio/frontend-jobs/${encodeURIComponent(current.id)}/review`); renderQa(r.review, r.delivery, { label: `Re-run at ${new Date().toLocaleTimeString()} (reported here; the version's saved record is unchanged).` }); say('action-status', 'Checks re-run.', 'ok'); }
@@ -371,10 +460,11 @@
   /* ── restore what staff had open ── */
   const saved = restore();
   if (saved?.selected) {
-    S.selected = saved.selected; S.researchJobId = saved.researchJobId; S.brief = saved.brief; S.designJobId = saved.designJobId;
+    S.selected = saved.selected; S.researchJobId = saved.researchJobId; S.brief = saved.brief; S.designJobId = saved.designJobId; S.kind = saved.kind === 'site' ? 'site' : 'splash';
     renderSelected(); initSources(); steps();
     if (S.brief) showBrief();
     else if (S.researchJobId) watchResearch(S.researchJobId);
-    if (S.brief && S.designJobId) watchDesign(S.designJobId);
+    if (S.brief && S.designJobId) (isSplashJob(S.designJobId) ? watchSplash(S.designJobId) : watchDesign(S.designJobId));
   } else steps();
+  setKind(S.kind);
 })();

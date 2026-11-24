@@ -22,12 +22,22 @@ import { identityKnown } from '../studio/concepts/designspec.js';
 import { load } from 'cheerio';
 import { pageReferenceProblems } from '../studio/frontend/page.js';
 import { frontendJobRunning, getFrontendJob, markInterrupted, recheckVersion, resumeFrontendJob, startFrontendJob, type FrontendJob } from '../studio/frontend/jobs.js';
+import { getSplashJob, recheckSplashJob, splashBlocking, startSplashJob } from '../splash/jobs.js';
+import type { OwnerQuestion } from '../splash/facts.js';
+
+/**
+ * What a new run makes: a custom full site (the default), or a one-page splash homepage (ROGER_INTAKE_PAGE=splash). A
+ * run keeps the kind it started with, so switching never changes a conversation already under way.
+ */
+export const intakePage = (): 'site' | 'splash' => process.env.ROGER_INTAKE_PAGE === 'splash' ? 'splash' : 'site';
+const isSplash = (id?: string) => !!id && id.startsWith('sp_');
 
 /** the jobs a run starts and reads (tests replace them to count starts; production uses these) */
-export const intakeDeps = { getBrief, startStudioJob, getStudioJob, resumeIfStale, startFrontendJob, getFrontendJob, frontendJobRunning, markInterrupted, resumeFrontendJob, capProblem, recordCharge };
+export const intakeDeps = { getBrief, startStudioJob, getStudioJob, resumeIfStale, startFrontendJob, getFrontendJob, frontendJobRunning, markInterrupted, resumeFrontendJob, capProblem, recordCharge, startSplashJob, getSplashJob };
 
 /** what a job charged to a beta invite has cost: its actual cost once finished (undefined while it runs: the reserve counts) */
 export async function chargeCost(c: BetaCharge): Promise<number | undefined> {
+  if (c.kind === 'version' && isSplash(c.jobId)) { const j = await intakeDeps.getSplashJob(c.jobId!); return j && ['ready', 'failed', 'stopped'].includes(j.status) ? j.costUsd : undefined; }
   if (c.kind === 'version') { const j = c.jobId ? await intakeDeps.getFrontendJob(c.jobId) : undefined; return j && j.status !== 'generating' && j.status !== 'queued' ? j.costUsd : undefined; }
   const run = (await listConversationRecords()).map((x) => (x.session as { custom?: CustomRun } | undefined)?.custom).find((r) => r?.id === c.runId);
   return run?.research?.finishedAt ? run.research.costUsd ?? 0 : run?.stage === 'failed' ? 0.05 : undefined;
@@ -48,9 +58,15 @@ export interface CustomVersion {
   stage?: 'homepage' | 'pages';
   /** which customer message this version has had: each is sent once */
   told?: ('review' | 'failed' | 'sent' | 'rejected')[];
+  /** a splash page: an update of the version last sent, with the owner's answers (its design kept when it still fits) */
+  update?: boolean;
+  /** a splash page: the questions for the owner its plan raised (asked after the first link, one at a time) */
+  questions?: OwnerQuestion[];
 }
 export interface CustomRun {
   id: string; mode: 'custom';
+  /** what this run makes (no value: a custom full site, as every run made before splash pages) */
+  page?: 'site' | 'splash';
   placeId: string; name: string; website?: string; confirmedAt: string;
   /** the beta invite it is charged to (none: a staff run) */
   inviteId?: string; from?: string;
@@ -61,6 +77,8 @@ export interface CustomRun {
   /** the version last sent to the customer, and the one they approved (recorded only; nothing is published here) */
   shown?: number;
   approved?: { n: number; jobId: string; url: string; at: string };
+  /** a splash page: the owner's questions, one at a time (the one waiting for an answer, and every answer given) */
+  ask?: { pending?: OwnerQuestion; done: string[]; answers: { field: string; value: string; at: string }[] };
   startedAt: string; error?: string;
   told?: ('failed')[];
 }
@@ -72,7 +90,7 @@ const host = (u?: string | null) => { try { return u ? new URL(/^https?:/i.test(
 const STALE_MS = 25 * 60_000;
 
 export function newCustomRun(i: { placeId: string; name: string; website?: string; confirmedAt: string; inviteId?: string; from?: string }): CustomRun {
-  return { id: `ci_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, mode: 'custom', ...i, stage: 'research', versions: [], startedAt: now() };
+  return { id: `ci_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, mode: 'custom', page: intakePage(), ...i, stage: 'research', versions: [], startedAt: now() };
 }
 export const customBusy = (r: CustomRun) => r.stage === 'research' || r.versions.some((v) => v.status === 'generating' || v.status === 'review');
 export const versionInFlight = (r: CustomRun) => r.versions.find((v) => v.status === 'generating' || v.status === 'review');
@@ -145,8 +163,42 @@ function toVersions(run: CustomRun) {
 }
 function failRun(run: CustomRun, error: string) { run.stage = 'failed'; run.error = error; }
 
+/** one version of a splash page: the page, then its checks; it waits for sending only when nothing blocks it */
+async function generateSplash(run: CustomRun, v: CustomVersion) {
+  if (!v.jobId) {
+    if (run.inviteId) {
+      const cap = await intakeDeps.capProblem(run.inviteId, 'version', { runId: run.id, n: v.n }, chargeCost);
+      if (cap) { v.status = 'failed'; v.error = `cap: ${cap}`; v.finishedAt = now(); return; }
+    }
+    try {
+      const shown = run.versions.filter((x) => x.n < v.n && x.jobId).length;
+      const last = [...run.versions].reverse().find((x) => x.status === 'sent' && x.jobId);
+      const job = v.update && last
+        ? await intakeDeps.startSplashJob(run.placeId, { refreshFrom: last.jobId, owner: { from: run.from ?? '', runId: run.id } })
+        : await intakeDeps.startSplashJob(run.placeId, { instruction: v.n === 1 ? '' : `Version ${v.n} for this customer: a fresh design, clearly different in composition and visual idea from the ${shown} version(s) already made.`, owner: { from: run.from ?? '', runId: run.id } });
+      v.jobId = job.id;
+      if (run.inviteId) await intakeDeps.recordCharge(run.inviteId, { kind: 'version', from: run.from ?? '', runId: run.id, n: v.n, jobId: job.id });
+    } catch (e) { v.status = 'failed'; v.error = `generation could not start: ${(e as Error).message}`; v.finishedAt = now(); }
+    return;
+  }
+  const job = await intakeDeps.getSplashJob(v.jobId);
+  if (!job) { v.status = 'failed'; v.error = 'the generation job is missing'; v.finishedAt = now(); return; }
+  if (!['ready', 'failed', 'stopped'].includes(job.status)) {
+    v.stage = 'homepage';
+    // (a stopped process is recovered by the worker or the server within minutes: src/splash/jobs.ts)
+    if (Date.now() - Date.parse(job.heartbeatAt ?? job.updatedAt) > STALE_MS) { v.status = 'failed'; v.error = `the page stopped at ${job.stage ?? job.status} (no progress for ${Math.round(STALE_MS / 60000)} minutes)`; v.finishedAt = now(); }
+    return;
+  }
+  v.finishedAt = now(); v.ms ??= msBetween(job.createdAt, job.updatedAt); v.costUsd = job.costUsd; v.attempts = job.attempts;
+  v.questions = job.plan?.questions ?? [];
+  const blocking = splashBlocking(job);
+  if (blocking.length) { v.status = 'failed'; v.error = blocking.join('; '); return; }
+  v.status = 'review';
+}
+
 /** one version: its custom full site, then the checks; it waits for staff only when every blocking check passed */
 async function generate(run: CustomRun, v: CustomVersion) {
+  if (run.page === 'splash') return generateSplash(run, v);
   if (!v.jobId) {
     const shown = run.versions.filter((x) => x.n < v.n && x.jobId).length;
     if (run.inviteId) {
@@ -263,7 +315,7 @@ export function statusText(run: CustomRun): string {
   const v = versionInFlight(run);
   const other = run.versions.some((x) => x.status === 'sent');
   if (v?.status === 'review') return `${other ? 'Your new version is' : 'Your preview is'} built, and I'm checking it now. I'll send the link here when it's ready.`;
-  const where = v?.stage === 'pages' ? ' I\'m on the inner pages now.' : v ? ' I\'m on the homepage now.' : '';
+  const where = run.page === 'splash' ? '' : v?.stage === 'pages' ? ' I\'m on the inner pages now.' : v ? ' I\'m on the homepage now.' : '';
   return `${other ? 'Still making your other version.' : 'Still building your preview.'}${where} I'll send the link here when it's ready.`;
 }
 
@@ -296,16 +348,60 @@ export function customMessages(run: CustomRun): CustomReply[] {
         ? { text: `I wasn't happy with how the new version came out, so I haven't sent it. Your current preview is still here: ${earlier.url}`, url: earlier.url, title: `${run.name} · website preview`, quickReplies: DONE_CHOICES }
         : { text: 'I wasn\'t happy with how your preview came out, so I haven\'t sent it. Reply "try again" and I\'ll build a new one.', quickReplies: ['Try again'] });
     }
-    if (v.status === 'sent' && v === latestSent && !told('sent')) out.push({ text: v.n === 1 ? `Here's a preview of a new site for ${run.name}.` : `Here's another version of your site.`, url: v.url, title: `${run.name} · website preview`, quickReplies: DONE_CHOICES });
+    if (v.status === 'sent' && v === latestSent && !told('sent')) {
+      out.push({ text: v.n === 1 ? `Here's a preview of a new site for ${run.name}.` : v.update ? 'Here\'s your page with your answers on it.' : `Here's another version of your site.`, url: v.url, title: `${run.name} · website preview`, quickReplies: DONE_CHOICES });
+      // a splash page: the first question for the owner, once (the answers go on the page when they ask for an update)
+      if (run.page === 'splash' && !run.ask) {
+        run.ask = { done: [], answers: [] };
+        const q = nextQuestion(run);
+        if (q) out.push(askMessage(q, true));
+      }
+    }
   }
   return out;
 }
 
+// ───────────────────────── the owner's answers (splash pages) ─────────────────────────
+export const UPDATE_CHOICE = 'Update my page';
+/** the next question the owner has not had (from the latest version's plan), now waiting for its answer */
+export function nextQuestion(run: CustomRun): OwnerQuestion | undefined {
+  if (!run.ask) return undefined;
+  const latest = [...run.versions].reverse().find((v) => v.questions?.length);
+  // (never again about a fact the owner already answered, however the new plan words it)
+  const q = latest?.questions?.find((x) => !run.ask!.done.includes(x.text) && !run.ask!.answers.some((a) => a.field === x.field && x.field !== 'note'));
+  run.ask.pending = q;
+  return q;
+}
+export function askMessage(q: OwnerQuestion, first = false): CustomReply {
+  return { text: `${first ? 'One question to get your page right: ' : ''}${q.text}`, quickReplies: q.yes ? ['Yes', 'Skip'] : ['Skip'] };
+}
+const SKIP = /^(skip|pass|not now|later|no idea|don'?t know|idk)\b/i;
+const YES_ANSWER = /^(y|yes|yep|yeah|yup|correct|right|that'?s right|it is|still is)\b/i;
+/**
+ * The owner's answer to the question waiting for one: kept as an owner fact (the highest-ranked source) unless they
+ * skipped it; then the next question, or how to see the answers on the page.
+ */
+export async function answerQuestion(run: CustomRun, msg: string, store: (field: string, value: string) => Promise<unknown>): Promise<CustomReply[]> {
+  const q = run.ask?.pending;
+  if (!q || !run.ask) return [];
+  run.ask.done.push(q.text);
+  const text = msg.trim().slice(0, 500);
+  if (!SKIP.test(text)) {
+    const value = YES_ANSWER.test(text) && q.yes ? q.yes : text;
+    await store(q.field, value);
+    run.ask.answers.push({ field: q.field, value, at: now() });
+  }
+  const next = nextQuestion(run);
+  if (next) return [{ text: SKIP.test(text) ? 'No problem.' : 'Got it, thanks.' }, askMessage(next)];
+  return [{ text: run.ask.answers.length ? `Got it, thanks. That's all my questions. Reply "${UPDATE_CHOICE}" and I'll put your answers on your page.` : 'No problem, that\'s all my questions.', quickReplies: run.ask.answers.length ? [UPDATE_CHOICE, ...DONE_CHOICES] : DONE_CHOICES }];
+}
+
 /** "Request another version" / "try again": one new version, never a second while one is being made or reviewed */
-export function requestCustomVersion(run: CustomRun): 'started' | 'busy' | 'unavailable' {
+export function requestCustomVersion(run: CustomRun, opts: { update?: boolean } = {}): 'started' | 'busy' | 'unavailable' {
   if (run.stage !== 'versions') return 'unavailable';
   if (versionInFlight(run)) return 'busy';
-  run.versions.push({ n: run.versions.length + 1, requestedAt: now(), status: 'generating' });
+  if (opts.update && (run.page !== 'splash' || !run.versions.some((v) => v.status === 'sent'))) return 'unavailable';
+  run.versions.push({ n: run.versions.length + 1, requestedAt: now(), status: 'generating', ...(opts.update ? { update: true } : {}) });
   return 'started';
 }
 
@@ -324,8 +420,9 @@ export async function staffSend(run: CustomRun, n: number, reviewer: string, not
   if (v.status === 'sent') return { sent: false, reason: 'already sent', url: v.url };
   if (v.status !== 'review') return { sent: false, reason: `version ${n} is ${v.status}, not waiting for review` };
   if (!linkOrigin()) return { sent: false, reason: 'no public HTTPS origin is configured (ROGER_PUBLIC_ORIGIN): a customer link is never sent from localhost or an internal address' };
-  const job = await getFrontendJob(v.jobId!);
-  const blocking = job ? blockingProblems(job) : ['the generation job is missing'];
+  const blocking = isSplash(v.jobId)
+    ? await intakeDeps.getSplashJob(v.jobId!).then((j) => j ? splashBlocking(j) : ['the generation job is missing'])
+    : await getFrontendJob(v.jobId!).then((job) => job ? blockingProblems(job) : ['the generation job is missing']);
   if (blocking.length) return { sent: false, reason: `it cannot be sent: ${blocking.join('; ')}` };
   v.url = customerLink(v.jobId!);
   await studioDocs.put('customer-links', v.jobId!, { jobId: v.jobId, runId: run.id, n, sentAt: now(), reviewer });
@@ -340,6 +437,13 @@ export async function staffSend(run: CustomRun, n: number, reviewer: string, not
 export async function staffRecheck(run: CustomRun, n: number): Promise<{ ok: boolean; reason?: string }> {
   const v = run.versions.find((x) => x.n === n);
   if (!v?.jobId || v.status !== 'failed') return { ok: false, reason: v ? `version ${n} is ${v.status}` : `no version ${n}` };
+  // a splash page: its checks run again on the page as it is (no AI); the run picks up the result like a new version
+  if (isSplash(v.jobId)) {
+    const job = await recheckSplashJob(v.jobId);
+    if (!job) return { ok: false, reason: 'its generation failed, so there is nothing to check again' };
+    v.status = 'generating'; v.error = undefined; v.finishedAt = undefined; v.note = `checks re-run requested ${now()}`;
+    return { ok: true };
+  }
   const before = await getFrontendJob(v.jobId);
   if (before?.status !== 'needs-review') return { ok: false, reason: 'its generation failed, so there is nothing to check again' };
   // a failed version was never sent: it is checked under the current layout guards (no new generation)

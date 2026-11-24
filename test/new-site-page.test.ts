@@ -107,6 +107,10 @@ test('staff select the right card: its Place ID stays visible; research starts o
     assert.equal(await page.getAttribute('#s-generate', 'data-locked'), null, 'step 3 opens with the brief');
     assert.match(await page.textContent('#brief-out') ?? '', /Verified facts[\s\S]*Corner Taqueria[\s\S]*Missing information[\s\S]*story/);
     // generation from its own button, with that brief
+    // (a splash page is the default; this checks the full website's path)
+    assert.equal(await page.inputValue('input[name=kind]:checked'), 'splash');
+    await page.check('input[name=kind][value=site]');
+    assert.equal(await page.textContent('#generate-btn'), 'Generate new website');
     await page.click('#generate-btn');
     await page.waitForSelector('#generate-meter:not([hidden])');
     assert.deepEqual(paidStarts(posts).map((p) => p.path), ['/api/studio/jobs', '/api/studio/frontend-jobs']);

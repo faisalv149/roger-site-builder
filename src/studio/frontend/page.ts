@@ -47,7 +47,7 @@ Return only JSON, without code fences. Explain the specific visual idea briefly 
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const TAGS = new Set('header nav main footer section article aside div span p h1 h2 h3 h4 h5 h6 a ul ol li dl dt dd figure figcaption img picture strong em b i small br hr details summary blockquote cite time address table thead tbody tr th td'.split(' '));
-const ATTRS = /^(id|class|role|title|lang|dir|tabindex|aria-[a-z-]+|data-(fact|photo|action|logo|page)|href|open)$/;
+const ATTRS = /^(id|class|role|title|lang|dir|tabindex|aria-[a-z-]+|data-(fact|photo|action|logo|page|screen|google|copy)|data-rk-[a-z]+|href|open)$/;
 
 /** a page of the site: its slug ("home" for the homepage) and its navigation label */
 export interface PageLink { slug: string; title: string }
@@ -133,8 +133,9 @@ export function checkCode(code: FrontendCode, input: FrontendInput, opts: CheckO
   $('*').each((_, el) => {
     if (!('tagName' in el)) return;
     if (!TAGS.has(el.tagName)) errors.push(`Unsupported active element ${el.tagName}`);
-    // (an alt on an image is harmless: the compiler always replaces it with the photo's verified description or the name)
-    for (const a of Object.keys(el.attribs)) if (!ATTRS.test(a) && !(a === 'alt' && el.tagName === 'img')) errors.push(a === 'style' ? 'Attribute style is not allowed: put all styling in css (use a class).' : `Attribute ${a} is not allowed; use the data bindings and CSS.`);
+    // (an alt on an image is harmless: the compiler always replaces it with the photo's verified description or the name;
+    // so are loading hints, which only change when the browser fetches it)
+    for (const a of Object.keys(el.attribs)) if (!ATTRS.test(a) && !(el.tagName === 'img' && /^(alt|loading|decoding|fetchpriority)$/.test(a))) errors.push(a === 'style' ? 'Attribute style is not allowed: put all styling in css (use a class).' : `Attribute ${a} is not allowed; use the data bindings and CSS.`);
     const node = $(el), fact = node.attr('data-fact'), photo = node.attr('data-photo'), logo = node.attr('data-logo'), action = node.attr('data-action');
     if (fact && !input.facts[fact]) errors.push(`Unknown fact ${fact}`);
     if (fact && (photo || logo || action || node.children().length)) errors.push(`Fact ${fact} must be a leaf element.`);
@@ -250,7 +251,7 @@ export function compilePage(code: FrontendCode, input: FrontendInput, opts: Comp
   $('[data-fact]').each((_, el) => { $(el).text(input.facts[$(el).attr('data-fact')!]); });
   $('a[data-action]').each((_, el) => {
     const action = input.actions.find((a) => a.id === $(el).attr('data-action'))!;
-    if (!/^(https?:|tel:|mailto:)/i.test(action.href)) throw new Error(`Invalid action destination ${action.id}`);
+    if (!/^(https?:|tel:|sms:|mailto:|#[A-Za-z][\w-]*$)/i.test(action.href)) throw new Error(`Invalid action destination ${action.id}`);
     $(el).attr('href', action.href).text(action.label);
     if (/^https?:/.test(action.href)) $(el).attr('target', '_blank').attr('rel', 'noopener noreferrer');
   });

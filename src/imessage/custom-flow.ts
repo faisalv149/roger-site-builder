@@ -24,7 +24,8 @@ import { scanWebsite } from '../sources/website.js';
 import { matchCandidate, nameSimilarity, sourceView } from '../sources/identity.js';
 import { registrableHost } from '../sources/site-content.js';
 import type { BusinessCandidate } from '../types.js';
-import { advanceCustom, chargeCost, customBusy, customMessages, intakeDeps, newCustomRun, recordApproval, requestCustomVersion, versionInFlight, statusText, DONE_CHOICES, type CustomReply, type CustomRun } from './custom-intake.js';
+import { advanceCustom, answerQuestion, chargeCost, customBusy, customMessages, intakeDeps, newCustomRun, recordApproval, requestCustomVersion, versionInFlight, statusText, DONE_CHOICES, UPDATE_CHOICE, type CustomReply, type CustomRun } from './custom-intake.js';
+import { addOwnerInput } from '../splash/owner.js';
 
 /** what Roger found about a listing's website */
 export interface SiteCheck { url?: string; status: 'verified' | 'none' | 'uncertain'; evidence: string; from: 'listing' | 'customer' }
@@ -68,6 +69,7 @@ const ALTERNATIVE = /\b(different|another|other|new) (design|look|style|layout|v
 const RETRY = /\b(try again|retry)\b/i;
 const APPROVE = /\b(approve|publish|go live|i'?ll take it)\b/i;
 const THANKS = /^(thanks|thank you|thx|ty|great|awesome|perfect|cool|nice|love it)[\s!.]*$/i;
+const UPDATE = /\b(update (my |the )?page|use (my|these|those) answers|put (them|it|my answers) on)\b/i;
 const ZIP_RE = /\b\d{5}(?:-\d{4})?\b/;
 const STATES: Record<string, string> = { al: 'alabama', ak: 'alaska', az: 'arizona', ar: 'arkansas', ca: 'california', co: 'colorado', ct: 'connecticut', de: 'delaware', fl: 'florida', ga: 'georgia', hi: 'hawaii', id: 'idaho', il: 'illinois', in: 'indiana', ia: 'iowa', ks: 'kansas', ky: 'kentucky', la: 'louisiana', me: 'maine', md: 'maryland', ma: 'massachusetts', mi: 'michigan', mn: 'minnesota', ms: 'mississippi', mo: 'missouri', mt: 'montana', ne: 'nebraska', nv: 'nevada', nh: 'new hampshire', nj: 'new jersey', nm: 'new mexico', ny: 'new york', nc: 'north carolina', nd: 'north dakota', oh: 'ohio', ok: 'oklahoma', or: 'oregon', pa: 'pennsylvania', ri: 'rhode island', sc: 'south carolina', sd: 'south dakota', tn: 'tennessee', tx: 'texas', ut: 'utah', vt: 'vermont', va: 'virginia', wa: 'washington', wv: 'west virginia', wi: 'wisconsin', wy: 'wyoming', dc: 'district of columbia' };
 const host = (u: string) => { try { return registrableHost(u); } catch { return u; } };
@@ -341,6 +343,19 @@ export async function respondCustom(msg: string, s: CustomSession): Promise<Cust
   if (s.state === 'done' && s.custom) {
     const run = s.custom;
     if (run.stage === 'failed' && RETRY.test(msg) && s.chosen) return start(s); // research failed: a fresh run for the same confirmed listing
+    // a splash page: "Update my page" puts the owner's answers on it (the design kept when it still fits)
+    if (run.page === 'splash' && UPDATE.test(msg)) {
+      const r = requestCustomVersion(run, { update: true });
+      if (r === 'busy') return [{ text: statusText(run) }];
+      if (r === 'unavailable') return [{ text: 'There\'s no page to update yet. I\'ll send the link here as soon as it\'s ready.' }];
+      s.custom = await advanceCustom(run);
+      settle(s);
+      return [{ text: 'On it! I\'m updating your page with your answers. I\'ll check it and send the link here when it\'s ready.' }, ...customMessages(s.custom)];
+    }
+    // a splash page: the answer to the question waiting for one (anything that is not one of the commands)
+    if (run.page === 'splash' && run.ask?.pending && !ALTERNATIVE.test(msg) && !RETRY.test(msg) && !APPROVE.test(msg) && !THANKS.test(msg)) {
+      return answerQuestion(run, msg, (field, value) => addOwnerInput(`place-${run.placeId}`, { field, value, at: new Date().toISOString(), from: s.from ?? 'owner' }));
+    }
     if (ALTERNATIVE.test(msg) || RETRY.test(msg)) {
       const r = requestCustomVersion(run);
       if (r === 'busy') return [{ text: statusText(run) }];

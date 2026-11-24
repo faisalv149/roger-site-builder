@@ -35,6 +35,13 @@ code{background:#F1F5F9;padding:1px 5px;border-radius:5px;color:var(--ink-2);ove
 .steps li[data-state="current"] .num,.stage:not([data-locked]) .stage-h .num{background:var(--accent);border-color:var(--accent);color:#fff}
 .steps li[data-state="done"] .num{background:var(--ok);border-color:var(--ok);color:#fff}
 
+/* what to make */
+.kind{border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 14px 12px;margin:0 0 14px;display:grid;gap:8px}
+.kind legend{font-weight:600;padding:0 6px;color:var(--ink-2)}
+.kind .check{display:flex;gap:10px;align-items:flex-start;cursor:pointer}
+.kind input{margin-top:3px}
+.qa-group h4{margin:12px 0 4px}.qa-group .list li.block{color:var(--bad);font-weight:600}
+
 /* stages */
 .work{max-width:1240px;margin:0 auto;padding:16px 20px 60px;display:grid;gap:16px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:20px}

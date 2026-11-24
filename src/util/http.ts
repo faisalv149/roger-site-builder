@@ -20,7 +20,7 @@ const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 /** fetch with timeout, size cap, and a recorded redirect chain. A connection that is reset is retried once as a browser. */
 export async function fetchRaw(
   url: string,
-  opts: { timeoutMs?: number; maxBytes?: number; method?: string; headers?: Record<string, string>; body?: string; asBrowser?: boolean } = {},
+  opts: FetchOpts = {},
 ): Promise<FetchResult> {
   const first = await fetchOnce(url, opts);
   if (first.status === 0 && !opts.asBrowser && !opts.headers?.['user-agent'] && /fetch failed|ECONNRESET|socket|terminated/i.test(first.error || '')) {
@@ -30,10 +30,13 @@ export async function fetchRaw(
   return first;
 }
 
-async function fetchOnce(
-  url: string,
-  opts: { timeoutMs?: number; maxBytes?: number; method?: string; headers?: Record<string, string>; body?: string; asBrowser?: boolean },
-): Promise<FetchResult> {
+export interface FetchOpts {
+  timeoutMs?: number; maxBytes?: number; method?: string; headers?: Record<string, string>; body?: string; asBrowser?: boolean;
+  /** asked before every request, the first and each redirect: false stops there (an address that must not be reached) */
+  allow?: (url: string) => Promise<boolean>;
+}
+
+async function fetchOnce(url: string, opts: FetchOpts): Promise<FetchResult> {
   const timeoutMs = opts.timeoutMs ?? 12000;
   const maxBytes = opts.maxBytes ?? 6_000_000;
   const started = Date.now();
@@ -43,6 +46,7 @@ async function fetchOnce(
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     for (let hop = 0; hop < 8; hop++) {
+      if (opts.allow && !(await opts.allow(current))) return { ok: false, status: 0, url: current, redirects, headers: {}, body: Buffer.alloc(0), ttfbMs: 0, totalMs: Date.now() - started, error: 'address not allowed' };
       const res = await fetch(current, {
         method: opts.method || 'GET',
         redirect: 'manual',

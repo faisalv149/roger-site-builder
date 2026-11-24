@@ -3,7 +3,7 @@
 <body>
 <header class="top">
   <a class="brand" href="/app/"><span class="logo" aria-hidden="true">R</span><span><b>Roger Studio</b><span class="sub">New site · custom full-site generator</span></span></a>
-  <nav aria-label="Staff"><a href="/app/frontend.html" aria-current="page">New site</a><a href="/app/imessage-reviews.html">Reviews</a><a href="/app/imessage-reviews.html#invites">Invites</a><a href="/imessage/?intake=custom" target="_blank" rel="noopener">Custom simulator</a></nav>
+  <nav aria-label="Staff"><a href="/app/frontend.html" aria-current="page">New site</a><a href="/app/imessage-reviews.html">Reviews</a><a href="/app/leads.html">Leads</a><a href="/app/imessage-reviews.html#invites">Invites</a><a href="/imessage/?intake=custom" target="_blank" rel="noopener">Custom simulator</a></nav>
 </header>
 
 <ol class="steps" aria-label="Steps">
@@ -60,15 +60,19 @@
   <section class="card stage" id="s-generate" aria-labelledby="h-generate" data-locked>
     <div class="stage-h"><span class="num">3</span><div><h2 id="h-generate">Generate and preview</h2><p class="hint" id="generate-hint">Finish step 2 (a researched or saved brief for the selected business) first.</p></div></div>
     <div class="stage-body" id="generate-body" hidden>
+      <fieldset class="kind"><legend>What to make</legend>
+        <label class="check"><input type="radio" name="kind" value="splash" checked> <span><b>Splash page</b> · one homepage: a scroll of the screens this business needs, with the action dock and quote form</span></label>
+        <label class="check"><input type="radio" name="kind" value="site"> <span><b>Full website</b> · a custom homepage and its inner pages</span></label>
+      </fieldset>
       <div class="field"><label for="instruction">Creative direction <small>optional</small></label><textarea id="instruction" maxlength="2000" rows="3" placeholder="A short mood or audience note. Roger chooses layout, typography and page structure."></textarea></div>
-      <p class="hint">Writes a custom homepage and its inner pages, then checks every page at desktop and phone width. The AI generation cap is $2 per site.</p>
+      <p class="hint" id="kind-hint">Plans the screens from the brief, writes and designs the page, then runs the spec's checks (first screen at 390 x 844, JavaScript off, reduced motion, links, facts, Google attribution). Usually about $0.20–0.50.</p>
       <div class="acts"><button class="btn" id="generate-btn" type="button">Generate new website</button><button class="btn ghost" id="generate-stop" type="button" hidden>Stop watching</button></div>
       <div id="generate-status" class="status-line" role="status" aria-live="polite"></div>
       <dl id="generate-meter" class="meter" hidden></dl>
       <div id="generate-error" class="alert bad" role="alert" hidden></div>
       <p class="idea" id="fail-idea" hidden></p>
       <div id="result" hidden>
-        <div class="block-h"><h3>New website preview</h3><span class="tag new">New website preview</span></div>
+        <div class="block-h"><h3 id="result-title">New website preview</h3><span class="tag new" id="result-tag">New website preview</span></div>
         <p class="idea" id="idea"></p>
         <div class="toolbar">
           <div class="tabs" id="page-tabs" role="tablist" aria-label="Pages"></div>
@@ -91,4 +95,4 @@
   </section>
 </main>
 <script src="/app/frontend.js" defer></script>
-</body></html>
+<script src="/app/version.js" defer></script></body></html>
